@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HeightField } from '../model/types';
-import { colorizeMap, normalMapPixels, sampleSlope } from './maps';
+import { alpineMaterialVariation, colorizeMap, normalMapPixels, sampleSlope } from './maps';
 
 function field(height: number[]): HeightField {
   const resolution = Math.sqrt(height.length);
@@ -14,6 +14,30 @@ function field(height: number[]): HeightField {
 }
 
 describe('heightfield display and normal encoding', () => {
+  it('uses continuous two-dimensional material detail, not repeating one-dimensional bands', () => {
+    // The previous snowline detail was sin(px * 0.83 + py * 0.47), so its
+    // apparent period depended on the grid resolution and repeated exactly.
+    const oldPeriod = (2 * Math.PI) / (0.83 * 511);
+    let alongX = 0;
+    let alongY = 0;
+    let oldPeriodMismatch = 0;
+    for (let i = 0; i < 24; i++) {
+      const u = 0.12 + i * 0.027;
+      const v = 0.18 + i * 0.019;
+      const value = alpineMaterialVariation(u, v);
+      expect(Number.isFinite(value)).toBe(true);
+      expect(Math.abs(value)).toBeLessThanOrEqual(1);
+      expect(Math.abs(alpineMaterialVariation(u + 0.0001, v) - value)).toBeLessThan(0.02);
+      expect(Math.abs(alpineMaterialVariation(u, v + 0.0001) - value)).toBeLessThan(0.02);
+      alongX += Math.abs(alpineMaterialVariation(u + 0.012, v) - value);
+      alongY += Math.abs(alpineMaterialVariation(u, v + 0.012) - value);
+      oldPeriodMismatch += Math.abs(alpineMaterialVariation(u + oldPeriod, v) - value);
+    }
+    expect(alongX).toBeGreaterThan(0.15);
+    expect(alongY).toBeGreaterThan(0.15);
+    expect(oldPeriodMismatch).toBeGreaterThan(0.15);
+  });
+
   it('encodes a flat surface as a flat OpenGL tangent normal, including borders', () => {
     const pixels = normalMapPixels(field(new Array(9).fill(0.5)), 1000, 250);
     for (let i = 0; i < pixels.length; i += 4)
