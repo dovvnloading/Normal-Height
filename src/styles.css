@@ -2283,3 +2283,71 @@ input[type='range']::-moz-range-thumb {
 .toggle-row input:checked + .switch:after {
   background: #fff;
 }
+
+
+/* Spline authoring: exact point coordinates with the same field styling as other nodes. */
+.spline-editor {
+  padding: 16px 18px 19px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+.spline-editor-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 11px;
+  color: var(--text);
+}
+.spline-editor-heading strong { flex: 1; font-size: 11px; font-weight: 600; }
+.spline-editor-heading > svg { color: #8e775e; }
+.spline-editor-heading > span { font-family: var(--mono); font-size: 9px; color: var(--muted); }
+.spline-edit-button { width: 100%; padding: 9px 6px; }
+.spline-help { font-size: 10px; line-height: 1.65; color: var(--muted); margin: 10px 0 12px; }
+.spline-edit-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 13px; }
+.spline-edit-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 7px;
+  font-size: 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--text);
+  background: var(--raised);
+}
+.spline-edit-actions button:hover:not(:disabled) { border-color: #849b86; }
+.spline-edit-actions button:disabled { opacity: .4; }
+.spline-point-list { display: flex; flex-direction: column; gap: 5px; }
+.spline-point-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.spline-point-number { width: 20px; font: 9px var(--mono); color: var(--muted); }
+.spline-point-row label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+.spline-point-row label input {
+  width: 100%;
+  min-width: 0;
+  font: 10px var(--mono);
+  padding: 5px 3px;
+  text-align: center;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+.spline-point-row > button {
+  display: grid;
+  place-items: center;
+  height: 24px;
+  width: 23px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  border-radius: 4px;
+}
+.spline-point-row > button:hover:not(:disabled) { background: var(--raised); color: var(--text); }
