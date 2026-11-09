@@ -407,6 +407,73 @@ test('authors noise nodes, uses undo and redo, groups nodes, and edits a note', 
   await expect(graph(page).locator('.react-flow__node-annotation')).toHaveCount(1);
 });
 
+test('draws a real editable river and ridge, connects it before erosion, and saves the path', async ({
+  page,
+}, testInfo) => {
+  await page.getByRole('combobox', { name: 'Working resolution' }).selectOption('128');
+  await ready(page);
+  const prior = (await heightAudits(page)).at(-1)!;
+
+  const library = page.getByRole('complementary', { name: 'Node library', exact: true });
+  await library.getByRole('button', { name: /River \/ ridge spline/ }).click();
+  await expect(terrainNodes(page)).toHaveCount(6);
+  await expect(page.getByRole('button', { name: '2D map', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Edit path on 2D map' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Finish editing' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.nh-spline-handle')).toHaveCount(5);
+  await ready(page);
+  const afterInsert = (await heightAudits(page)).at(-1)!;
+  expect(afterInsert.sha256).not.toBe(prior.sha256);
+
+  const point3 = page.getByRole('button', { name: 'Move spline point 3' });
+  const pointX = page.getByRole('spinbutton', { name: 'Point 3 X percent' });
+  const originalX = await pointX.inputValue();
+  const bounds = await point3.boundingBox();
+  expect(bounds).not.toBeNull();
+  await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds!.x + bounds!.width / 2 + 45, bounds!.y + bounds!.height / 2 - 24, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => pointX.inputValue()).not.toBe(originalX);
+
+  const layer = page.locator('.nh-spline-layer');
+  const rect = await layer.boundingBox();
+  expect(rect).not.toBeNull();
+  await layer.click({ position: { x: rect!.width * 0.54, y: rect!.height * 0.26 } });
+  await expect(page.locator('.nh-spline-handle')).toHaveCount(6);
+  await expect(page.locator('.spline-editor-heading')).toContainText('6 points');
+  await capture(page, testInfo, 'river-path-editor.png');
+
+  const operation = page.getByRole('combobox', { name: 'Path operation' });
+  await operation.selectOption('ridge');
+  await ready(page);
+  await expect(page.locator('.nh-spline-layer')).toHaveClass(/is-ridge/);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(operation).toHaveValue('river');
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(operation).toHaveValue('ridge');
+
+  const saved = await downloadProject(page, testInfo, 'river-ridge-path.nhterrain.json');
+  const splines = saved.project.graph.nodes.filter((n) => n.kind === 'spline');
+  expect(splines).toHaveLength(1);
+  expect(splines[0].path).toHaveLength(6);
+  expect(splines[0].params.mode).toBe('ridge');
+  const edgeIntoErosion = saved.project.graph.edges.find((e) => e.target === 'erosion');
+  expect(edgeIntoErosion?.source).toBe(splines[0].id);
+
+  await page.getByRole('button', { name: 'Finish editing' }).click();
+  await page.getByRole('button', { name: '3D terrain', exact: true }).click();
+  await expect(page.getByRole('img', { name: /^Interactive 3D terrain\./ })).toBeVisible();
+
+  // Round trip the portable project through the actual browser import control.
+  await page.locator('input[type="file"]').setInputFiles(saved.path);
+  await ready(page);
+  await expect(terrainNodes(page)).toHaveCount(6);
+  const restored = await downloadProject(page, testInfo, 'spline-reopened.nhterrain.json');
+  expect(restored.project.graph.nodes.find((n) => n.kind === 'spline')?.path)
+    .toEqual(splines[0].path);
+});
+
 test('downloads a project and restores its name, seed, graph, parameters, and notes', async ({
   page,
 }, testInfo) => {
