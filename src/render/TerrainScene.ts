@@ -69,7 +69,7 @@ export class TerrainScene {
       preserveDrawingBuffer: true,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.renderer.setClearColor('#20292a');
+    this.renderer.setClearColor('#cbd2cf');
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.08;
@@ -84,8 +84,8 @@ export class TerrainScene {
     this.renderer.domElement.setAttribute('role', 'img');
     this.renderer.domElement.tabIndex = 0;
     host.appendChild(this.renderer.domElement);
-    this.scene.background = new THREE.Color('#20292a');
-    this.scene.fog = new THREE.Fog('#20292a', 7, 15);
+    this.scene.background = new THREE.Color('#cbd2cf');
+    this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
 
     const hemisphere = new THREE.HemisphereLight('#dbe7ee', '#777b6f', 2.35);
     this.scene.add(hemisphere);
@@ -109,13 +109,13 @@ export class TerrainScene {
 
     this.floor = new THREE.Mesh(
       new THREE.PlaneGeometry(30, 30),
-      new THREE.MeshStandardMaterial({ color: '#293332', roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: '#b3bdb7', roughness: 1 }),
     );
     this.floor.rotation.x = -Math.PI / 2;
     this.floor.position.y = -0.048;
     this.floor.receiveShadow = true;
     this.scene.add(this.floor);
-    this.grid = new THREE.GridHelper(10.4, 40, '#46514b', '#35423e');
+    this.grid = new THREE.GridHelper(10.4, 40, '#909f96', '#a7b2aa');
     this.grid.position.y = -0.045;
     const gridMaterial = this.grid.material as THREE.LineBasicMaterial;
     gridMaterial.transparent = true;
@@ -124,7 +124,7 @@ export class TerrainScene {
 
     this.plinth = new THREE.Mesh(
       new THREE.BoxGeometry(TERRAIN_SIZE + 0.012, 0.035, TERRAIN_SIZE + 0.012),
-      new THREE.MeshStandardMaterial({ color: '#333d34', roughness: 0.98 }),
+      new THREE.MeshStandardMaterial({ color: '#8f9b92', roughness: 0.98 }),
     );
     this.plinth.position.y = -0.019;
     this.plinth.receiveShadow = true;

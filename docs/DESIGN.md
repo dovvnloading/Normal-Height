@@ -19,7 +19,9 @@ Panels collapse independently. On smaller displays they become overlays rather t
 
 ## Visual language
 
-Dark graphite and restrained green-gray surfaces separate the graph, panels, and editable fields. A pale warm lime identifies active controls and primary actions. Generator, shaping, simulation, combination, and utility colors encode stage category, accompanied by text and icons. Inter handles interface text; IBM Plex Mono distinguishes seeds, dimensions, and numerical values. Fonts are bundled locally.
+**Stone-gray is the dominant interface color**, not forest green: the project bar and inspector use warm white-gray surfaces, the graph canvas uses a deeper drafting gray, and node cards read as pale paper against it. Charcoal type and subdued borders keep dense numeric controls legible. Muted sage identifies focus, selected objects, and terrain-related actions; clay, dusty ochre, slate-teal, and soft plum distinguish other node categories without coloring entire panels. The scene background is neutral gray so the terrain remains the hero. Text and icons always accompany color coding. The palette uses light browser chrome and preserves contrast for small labels, inputs, and selected states. Inter handles interface text; IBM Plex Mono distinguishes seeds, dimensions, and numerical values. Fonts are bundled locally.
+
+Palette reference: stone canvas `#e4e7e3`, paper panels `#f5f5f2`, charcoal text `#303935`, sage action `#667e5f`, and warm clay `#986f56`. Color choices affect only the interface and renderer's backdrop, never actual height samples or export data.
 
 Numbers remain directly editable alongside sliders. The interface avoids fake controls, decorative data, and stock landscape imagery. Thumbnails and all previews are calculated from the graph.
 

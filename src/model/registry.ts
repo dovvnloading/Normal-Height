@@ -54,7 +54,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'mountain',
     label: 'Mountain range',
     category: 'Source',
-    color: '#a4bd96',
+    color: '#617b63',
     description:
       'Shape a connected mountain system with a directional spine, secondary ridges, and a natural foothill falloff.',
     inputs: [],
@@ -169,7 +169,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'noise',
     label: 'Procedural noise',
     category: 'Source',
-    color: '#a4bd96',
+    color: '#617b63',
     description:
       'A seeded scalar field. Choose a noise family, then shape its frequency, fractal structure, and coordinate transform.',
     inputs: [],
@@ -271,7 +271,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'warp',
     label: 'Domain warp',
     category: 'Shape',
-    color: '#b8a4c9',
+    color: '#7d748a',
     description:
       'Displace the sampling coordinates with a smooth vector field to bend ridgelines and break regular patterns.',
     inputs: input,
@@ -303,7 +303,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'hydraulic',
     label: 'Hydraulic erosion',
     category: 'Simulate',
-    color: '#83b9ca',
+    color: '#597e88',
     description:
       'Rain droplets flow downhill, carrying sediment, cutting drainage channels, and depositing material as they slow.',
     inputs: [...input, { id: 'mask', label: 'Mask · optional' }],
@@ -423,7 +423,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'thermal',
     label: 'Thermal weathering',
     category: 'Simulate',
-    color: '#83b9ca',
+    color: '#597e88',
     description:
       'Loose material slips down over-steep slopes, softening sharp erosion artifacts and forming talus deposits.',
     inputs: input,
@@ -465,7 +465,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'terrace',
     label: 'Terrace',
     category: 'Shape',
-    color: '#b8a4c9',
+    color: '#7d748a',
     description:
       'Remap elevations into sedimentary steps, with adjustable rounding between layers.',
     inputs: input,
@@ -487,7 +487,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'remap',
     label: 'Height remap',
     category: 'Shape',
-    color: '#b8a4c9',
+    color: '#7d748a',
     description:
       'Adjust the elevation distribution without changing the horizontal arrangement of landforms.',
     inputs: input,
@@ -526,7 +526,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'blend',
     label: 'Blend fields',
     category: 'Combine',
-    color: '#d0ba86',
+    color: '#977f5a',
     description:
       'Combine two heightfields. An optional mask controls where the second field contributes.',
     inputs: [
@@ -565,7 +565,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'mask',
     label: 'Height / slope mask',
     category: 'Combine',
-    color: '#d0ba86',
+    color: '#977f5a',
     description:
       'Isolate an elevation band or steep surfaces. Connect its output to a mask input to limit an operation.',
     inputs: input,
@@ -625,7 +625,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'output',
     label: 'Terrain output',
     category: 'Utility',
-    color: '#d5e5ac',
+    color: '#788561',
     description:
       'The final heightfield. Export this connected result as a 16-bit heightmap, floating-point data, or diagnostic map.',
     inputs: input,
@@ -636,7 +636,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'note',
     label: 'Annotation',
     category: 'Utility',
-    color: '#bda676',
+    color: '#9a7c58',
     description: 'Keep creative intent, settings, and reminders next to the relevant nodes.',
     inputs: [],
     outputs: [],
@@ -654,7 +654,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     kind: 'group',
     label: 'Node group',
     category: 'Utility',
-    color: '#788d81',
+    color: '#60796b',
     description: 'Organize related nodes into a named, movable group.',
     inputs: [],
     outputs: [],
@@ -678,9 +678,9 @@ export function createNode(
   };
 }
 export const CATEGORY_COLORS = {
-  Source: '#a4bd96',
-  Shape: '#b8a4c9',
-  Simulate: '#83b9ca',
-  Combine: '#d0ba86',
-  Utility: '#d5e5ac',
+  Source: '#617b63',
+  Shape: '#7d748a',
+  Simulate: '#597e88',
+  Combine: '#977f5a',
+  Utility: '#788561',
 };
