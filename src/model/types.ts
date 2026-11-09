@@ -1,7 +1,10 @@
+import type { SplinePoint } from './splines';
+
 export type NodeKind =
   | 'mountain'
   | 'noise'
   | 'warp'
+  | 'spline'
   | 'hydraulic'
   | 'thermal'
   | 'terrace'
@@ -17,6 +20,8 @@ export interface TerrainNode {
   kind: NodeKind;
   label: string;
   params: Record<string, ParamValue>;
+  /** Geometry lives in the project, not a render-only overlay. */
+  path?: SplinePoint[];
   position: { x: number; y: number };
   bypassed?: boolean;
   parentId?: string;
