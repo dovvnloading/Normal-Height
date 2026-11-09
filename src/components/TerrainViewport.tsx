@@ -27,9 +27,15 @@ import type {
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
 import { colorizeMap, sampleSlope } from '../render/maps';
+import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/splines';
+import type { SplinePoint } from '../model/splines';
+import type { TerrainNode } from '../model/types';
 import './TerrainViewport.css';
 
 interface TerrainViewportProps {
+  spline: TerrainNode | null;
+  splineEditing: boolean;
+  onSplinePath: (path: SplinePoint[]) => void;
   theme: 'light' | 'dark';
   field: HeightField | null;
   project: TerrainProject;
@@ -61,10 +67,16 @@ function MapCanvas({
   field,
   channel,
   project,
+  spline,
+  splineEditing,
+  onSplinePath,
 }: {
   field: HeightField | null;
   channel: MapChannel;
   project: TerrainProject;
+  spline: TerrainNode | null;
+  splineEditing: boolean;
+  onSplinePath: (path: SplinePoint[]) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -79,6 +91,26 @@ function MapCanvas({
   } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
+  const [draftSpline, setDraftSpline] = useState<SplinePoint[] | null>(null);
+  const draftRef = useRef<SplinePoint[] | null>(null);
+  const handleDrag = useRef<{ index: number; pointer: number } | null>(null);
+  const splinePoints = draftSpline ?? spline?.path ?? DEFAULT_SPLINE_PATH;
+  const splineCurve = useMemo(
+    () => spline ? sampleSpline(splinePoints, 22) : [],
+    [spline, splinePoints],
+  );
+  const layerSize = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
+  const layerLeft = (dimensions.width - layerSize) / 2 + offset.x;
+  const layerTop = (dimensions.height - layerSize) / 2 + offset.y;
+  const layerRef = useRef<HTMLDivElement>(null);
+  const pointFromEvent = (event: React.PointerEvent): SplinePoint => {
+    const bounds = layerRef.current!.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))),
+      y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / Math.max(1, bounds.height))),
+    };
+  };
+
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
 
@@ -146,7 +178,7 @@ function MapCanvas({
   }, [dimensions, zoom, offset, field, channel, project.worldSize, project.heightScale]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
+    const canvas = hostRef.current;
     if (!canvas) return;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
@@ -225,6 +257,119 @@ function MapCanvas({
           if (event.key === '-') setZoom((v) => Math.max(0.35, v / 1.2));
         }}
       />
+      {spline && (
+        <div
+          ref={layerRef}
+          className={`nh-spline-layer ${splineEditing ? 'is-editing' : ''} ${spline.params.mode === 'ridge' ? 'is-ridge' : 'is-river'}`}
+          style={{ left: layerLeft, top: layerTop, width: layerSize, height: layerSize }}
+          aria-label="Spline path overlay"
+          onPointerDown={(event) => {
+            if (!splineEditing) return;
+            if (event.button === 1 || event.button === 2) {
+              event.preventDefault();
+              drag.current = {
+                x: event.clientX, y: event.clientY,
+                startX: offset.x, startY: offset.y,
+              };
+              event.currentTarget.setPointerCapture(event.pointerId);
+              return;
+            }
+            if (event.button !== 0 || event.target !== event.currentTarget) return;
+            event.preventDefault();
+            onSplinePath(insertSplinePoint(splinePoints, pointFromEvent(event)));
+          }}
+          onPointerMove={(event) => {
+            if (drag.current) {
+              setOffset({
+                x: drag.current.startX + event.clientX - drag.current.x,
+                y: drag.current.startY + event.clientY - drag.current.y,
+              });
+            }
+          }}
+          onPointerUp={(event) => {
+            drag.current = null;
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <svg
+            className="nh-spline-drawing"
+            viewBox="0 0 1000 1000"
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <polyline
+              className="nh-spline-outline"
+              points={splineCurve.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')}
+              fill="none"
+              vectorEffect="non-scaling-stroke"
+              strokeWidth={5}
+            />
+            <polyline
+              className="nh-spline-centerline"
+              points={splineCurve.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')}
+              fill="none"
+              vectorEffect="non-scaling-stroke"
+              strokeWidth={2.5}
+            />
+          </svg>
+          {splineEditing && splinePoints.map((point, index) => (
+            <button
+              key={index}
+              type="button"
+              className={`nh-spline-handle ${handleDrag.current?.index === index ? 'is-dragging' : ''}`}
+              aria-label={`Move spline point ${index + 1}`}
+              title={`${index === 0 ? 'Headwater' : index === splinePoints.length - 1 ? 'Outlet' : 'Control point'} ${index + 1} · ${Math.round(point.x * 100)}% E, ${Math.round(point.y * 100)}% S. Double-click to remove.`}
+              style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.stopPropagation();
+                event.preventDefault();
+                handleDrag.current = { index, pointer: event.pointerId };
+                draftRef.current = splinePoints.map((p) => ({ ...p }));
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={(event) => {
+                if (handleDrag.current?.pointer !== event.pointerId ||
+                  handleDrag.current.index !== index) return;
+                const next = (draftRef.current ?? splinePoints).map((p) => ({ ...p }));
+                next[index] = pointFromEvent(event);
+                draftRef.current = next;
+                setDraftSpline(next);
+              }}
+              onPointerUp={(event) => {
+                if (handleDrag.current?.pointer !== event.pointerId) return;
+                event.stopPropagation();
+                const next = draftRef.current;
+                handleDrag.current = null;
+                draftRef.current = null;
+                if (event.currentTarget.hasPointerCapture(event.pointerId))
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                if (next) onSplinePath(next);
+                setDraftSpline(null);
+              }}
+              onPointerCancel={() => {
+                handleDrag.current = null;
+                draftRef.current = null;
+                setDraftSpline(null);
+              }}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                if (splinePoints.length > 2)
+                  onSplinePath(splinePoints.filter((_, i) => i !== index).map((p) => ({ ...p })));
+              }}
+            >
+              <span>{index + 1}</span>
+            </button>
+          ))}
+          {splineEditing && (
+            <span className="nh-spline-edit-hint">
+              {spline.params.mode === 'ridge' ? 'RIDGE' : 'RIVER'} · Move points · Click to add · Middle/right drag to pan
+            </span>
+          )}
+        </div>
+      )}
       <div className="nh-map-scale">
         {(project.worldSize / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ×{' '}
         {(project.worldSize / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} km
@@ -341,6 +486,9 @@ function MapLegend({
 }
 
 export function TerrainViewport({
+  spline,
+  splineEditing,
+  onSplinePath,
   theme,
   field,
   project,
@@ -535,7 +683,7 @@ export function TerrainViewport({
         </div>
         {effectiveMode !== '3d' && (
           <div className="nh-map-pane">
-            <MapCanvas field={field} channel={channel} project={project} />
+            <MapCanvas field={field} channel={channel} project={project} spline={spline} splineEditing={splineEditing} onSplinePath={onSplinePath} />
             <MapLegend field={field} channel={channel} project={project} />
           </div>
         )}
