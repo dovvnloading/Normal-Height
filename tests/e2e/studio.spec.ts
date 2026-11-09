@@ -228,6 +228,72 @@ test('uses a legible light stone workspace with muted earth controls', async ({ 
   await page.getByRole('button', { name: 'Close display settings' }).click();
 });
 
+test('supports charcoal mode, respects the OS, and retains a manual theme choice', async ({ page }, testInfo) => {
+  const root = page.locator('html');
+  const toggle = page.getByRole('button', { name: 'Dark mode' });
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  const initialBuild = (await heightAudits(page)).at(-1)!;
+
+  await toggle.click();
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  await expect(root).toHaveCSS('color-scheme', 'dark');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.app-header')).toHaveCSS('background-color', 'rgb(48, 53, 53)');
+  await expect(page.locator('.node-graph')).toHaveCSS('background-color', 'rgb(34, 39, 41)');
+  await expect(page.locator('.ng-node').first()).toHaveCSS('background-color', 'rgb(48, 55, 54)');
+  await expect(page.locator('.nh-viewport-toolbar')).toHaveCSS(
+    'background-color',
+    'rgb(41, 47, 48)',
+  );
+  await expect(page.locator('.nh-render-error')).toHaveCount(0);
+
+  // Dark mode should not recompute the heightfield or restart erosion.
+  await expect(page.locator('.nh-render-progress')).toHaveCount(0);
+  expect((await heightAudits(page)).at(-1)?.sha256).toBe(initialBuild.sha256);
+  const contrast = await page.evaluate(() => {
+    const brightness = (css: string) => {
+      const [r, g, b] = css.match(/[0-9.]+/g)!.slice(0, 3).map(Number).map((n) => {
+        const c = n / 255;
+        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return r * 0.2126 + g * 0.7152 + b * 0.0722;
+    };
+    return [
+      ['.brand > span:last-child', '.app-header'],
+      ['.ng-node', '.ng-node'],
+      ['.library-node strong', '.library-scroll'],
+    ].map(([textSelector, backgroundSelector]) => {
+      const fg = brightness(getComputedStyle(document.querySelector(textSelector)!).color);
+      const bg = brightness(getComputedStyle(document.querySelector(backgroundSelector)!).backgroundColor);
+      return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+    });
+  });
+  contrast.forEach((ratio) => expect(ratio).toBeGreaterThan(4.5));
+  await capture(page, testInfo, 'charcoal-dark-mode.png');
+
+  await page.reload();
+  await ready(page);
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await toggle.click();
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  await page.reload();
+  await ready(page);
+  await expect(root).toHaveAttribute('data-theme', 'light');
+
+  // Without a saved choice, the workspace follows OS color-scheme changes.
+  await page.evaluate(() => localStorage.removeItem('normal-height.theme.v1'));
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.reload();
+  await ready(page);
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await expect(root).toHaveAttribute('data-theme', 'light');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(root).toHaveAttribute('data-theme', 'dark');
+});
+
 test('renders real 3D terrain and switches between split, flow, and normal maps', async ({
   page,
 }, testInfo) => {
