@@ -40,6 +40,14 @@ The base CSS defines layout and light colors. The separate `theme-dark.css` file
 - Groups preserve child positions when moved or dissolved. Drag operations enter history as a single edit.
 - Disconnected experimental nodes may remain in the graph. Only the selected output's ancestors are evaluated.
 
+## River / ridge authoring
+
+Spline nodes store normalized map coordinates as project data; the same data drives editor handles, the Catmull–Rom path, the 3D guide, and worker-side height modification. The editor inserts a spline before the first connected hydraulic stage when possible; the graph and editable points remain non-destructive. Selecting the path does not imply a new project version.
+
+2D point dragging is a temporary local interaction until release, committed as one undo step. Click inserts near the closest control span; reverse changes the river's headwater/outlet interpretation, and exact coordinates remain available in the inspector. The active curve is drawn above terrain color but is never baked into exported imagery.
+
+The shape operation evaluates a nearest-segment distance field in a limited-radius raster window. River incision uses smooth banks and optional strictly descending bed elevations; ridge mode adds a single smooth crest without overlapping brush artifacts. The numerical data flows into downstream erosion and normal/height exports. Terrain sample counts and project storage are independent of screen scale.
+
 ## Preview and export truthfulness
 
 Working simulation resolution, rendered mesh resolution, and export resolution are different values. The UI reports them separately. The 3D mesh is capped at 512 samples per side; higher-resolution output remains available in 2D and export.
