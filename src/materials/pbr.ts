@@ -33,7 +33,6 @@ export function resolveSurface(settings?: Partial<SurfaceSettings>): SurfaceSett
 }
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
-const mix = (a: number, b: number, t: number) => a + (b - a) * t;
 const smooth = (a: number, b: number, v: number) => {
   const t = clamp((v - a) / Math.max(1e-8, b - a));
   return t * t * (3 - 2 * t);
