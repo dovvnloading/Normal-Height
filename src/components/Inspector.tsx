@@ -14,6 +14,7 @@ import {
   ArrowDownUp,
 } from 'lucide-react';
 import { NODE_DEFINITIONS } from '../model/registry';
+import { resolveSurface } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { NumberField, ParamControl } from './Controls';
@@ -56,6 +57,7 @@ export function Inspector({
 }: Props) {
   const [tab, setTab] = useState<'node' | 'scene'>('node');
   const definition = node ? NODE_DEFINITIONS[node.kind] : null;
+  const surface = resolveSurface(project.surface);
   const sections = definition
     ? [...new Set(definition.params.map((p) => p.section ?? 'Parameters'))]
     : [];
@@ -226,7 +228,47 @@ export function Inspector({
                 );
               })()}
               {node.kind === 'hydraulic' && (
-                <div className="inspector-tip">
+                <section className="parameter-section open">
+              <h3>PBR material studio</h3>
+              <p className="parameter-hint">These settings control exported PBR textures and the live PBR preview. Changing them does not rerun terrain erosion.</p>
+              <ParamControl
+                definition={{
+                  key: 'biome', label: 'Material biome', type: 'select',
+                  default: 'alpine',
+                  options: [
+                    { value: 'alpine', label: 'Alpine / temperate' },
+                    { value: 'arid', label: 'Arid / desert' },
+                    { value: 'volcanic', label: 'Volcanic rock' },
+                  ],
+                }}
+                value={surface.biome}
+                onChange={v => onProjectChange({ surface: { ...surface, biome: v as typeof surface.biome } })}
+              />
+              {([
+                { key: 'snowLine', label: 'Snow-line elevation', min: 0.35, max: 1, step: 0.01,
+                  description: 'Relative to the generated terrain elevation range.' },
+                { key: 'rockSlope', label: 'Exposed rock slope', min: 12, max: 75, step: 1, unit: '°',
+                  description: 'Surface angle where vegetation gives way to exposed rock.' },
+                { key: 'moisture', label: 'Environmental moisture', min: 0, max: 1, step: 0.01,
+                  description: 'Controls vegetation coverage and wet surface response.' },
+                { key: 'detailMeters', label: 'Surface detail scale', min: 4, max: 200, step: 1, unit: 'm',
+                  description: 'Approximate spatial wavelength of generated microstructure.' },
+                { key: 'detailStrength', label: 'Microdetail depth', min: 0, max: 2, step: 0.05,
+                  description: 'Scales micro-normal relief without changing macro terrain elevation.' },
+                { key: 'aoStrength', label: 'Terrain occlusion', min: 0, max: 1, step: 0.05,
+                  description: 'Strength of multi-scale terrain cavity AO.' },
+              ] as const).map(control => (
+                <ParamControl
+                  key={control.key}
+                  definition={{ ...control, type: 'range', default: surface[control.key] }}
+                  value={surface[control.key]}
+                  onChange={v => onProjectChange({
+                    surface: { ...surface, [control.key]: Number(v) },
+                  })}
+                />
+              ))}
+            </section>
+            <div className="inspector-tip">
                   <span className="tip-dot" />
                   <div>
                     <strong>Follow the water</strong>
@@ -322,8 +364,9 @@ export function Inspector({
                   key: 'material',
                   label: 'Surface material',
                   type: 'select',
-                  default: 'alpine',
+                  default: 'pbr',
                   options: [
+                    { value: 'pbr', label: 'PBR · layered physical material' },
                     { value: 'alpine', label: 'Alpine · rock & snow' },
                     { value: 'clay', label: 'Clay · neutral relief' },
                     { value: 'height', label: 'Elevation · hypsometric' },
