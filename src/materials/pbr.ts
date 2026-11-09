@@ -86,8 +86,38 @@ const PALETTES: Record<SurfaceBiome, readonly (readonly number[])[]> = {
   ],
 };
 
+// Palette entries are encoded sRGB, but albedo must be interpolated in linear light.
+export function srgbByteToLinear(value: number): number {
+  const c = clamp(value, 0, 255) / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+export function linearToSrgbByte(value: number): number {
+  const c = clamp(value);
+  return Math.round(255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055));
+}
+const LINEAR_PALETTES: Record<SurfaceBiome, number[][]> = {
+  alpine: PALETTES.alpine.map((layer) => layer.map(srgbByteToLinear)),
+  arid: PALETTES.arid.map((layer) => layer.map(srgbByteToLinear)),
+  volcanic: PALETTES.volcanic.map((layer) => layer.map(srgbByteToLinear)),
+};
+
+/** Fixed, physical AO horizon distances. Never measured in grid pixels. */
+export const AO_RADII_METERS = [50, 150, 425] as const;
+
 function neighbor(values: Float32Array, n: number, x: number, y: number): number {
   return values[clamp(y, 0, n - 1) * n + clamp(x, 0, n - 1)];
+}
+
+// Interpolate at fractional samples so AO reaches the same world coordinates
+// regardless of working/export resolution.
+function elevationAt(values: Float32Array, n: number, x: number, y: number): number {
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const tx = x - x0, ty = y - y0;
+  const top = neighbor(values, n, x0, y0) * (1 - tx) +
+    neighbor(values, n, x0 + 1, y0) * tx;
+  const bottom = neighbor(values, n, x0, y0 + 1) * (1 - tx) +
+    neighbor(values, n, x0 + 1, y0 + 1) * tx;
+  return top * (1 - ty) + bottom * ty;
 }
 
 /**
@@ -111,10 +141,14 @@ export function generatePBR(field: HeightField, project: TerrainProject): PBRMap
   const curvature = new Uint8Array(count);
   const detail = new Float32Array(count);
   const noise = new Noise((project.seed + 0x3b9aca07) >>> 0);
-  const palette = PALETTES[params.biome];
+  const palette = LINEAR_PALETTES[params.biome];
   const cell = project.worldSize / (n - 1);
   const physicalSlope = project.heightScale / cell;
-  const cycles = Math.min(project.worldSize / params.detailMeters, n / 3);
+  const cycles = project.worldSize / params.detailMeters;
+  // Below the grid Nyquist limit, fade out unresolved wavelengths rather than
+  // silently enlarging authored microstructure at lower resolutions.
+  const grainVisibility = smooth(2, 3.5, params.detailMeters / cell);
+  const fineVisibility = smooth(2, 3.5, params.detailMeters / (2.1 * cell));
   let min = Infinity, max = -Infinity;
   for (const h of field.height) {
     if (!Number.isFinite(h)) throw new Error('Invalid terrain elevation for PBR synthesis.');
@@ -137,10 +171,10 @@ export function generatePBR(field: HeightField, project: TerrainProject): PBRMap
       const slope = Math.atan(Math.hypot(gx, gy) * physicalSlope) * 180 / Math.PI;
       const height01 = (h - min) / span;
       const macro = noise.simplex(u * 17.1 + 3.9, v * 17.1 - 7.2);
-      const grain = noise.simplex(u * cycles + 11.3, v * cycles - 5.7);
-      const fine = noise.simplex(u * Math.min(cycles * 2.1, n / 2.5) - 21.1,
-        v * Math.min(cycles * 2.1, n / 2.5) + 8.2);
-      const grit = grain * 0.76 + fine * 0.24;
+      const grain = grainVisibility ? noise.simplex(u * cycles + 11.3, v * cycles - 5.7) : 0;
+      const fine = fineVisibility ? noise.simplex(u * cycles * 2.1 - 21.1,
+        v * cycles * 2.1 + 8.2) : 0;
+      const grit = grain * 0.76 * grainVisibility + fine * 0.24 * fineVisibility;
       detail[i] = grit * params.detailStrength * 1.4;
       const flow = clamp(field.flow[i]);
       // These are erosion diagnostics, not calibrated moisture/sediment measurements.
@@ -175,24 +209,24 @@ export function generatePBR(field: HeightField, project: TerrainProject): PBRMap
         let c = 0;
         for (let layer = 0; layer < 4; layer++) c += palette[layer][channel] * weights[layer];
         const tint = 1 + macro * 0.075 + grit * (channel === 1 ? 0.095 : 0.07);
-        // Water darkens base color, but indirect lighting must not be baked into albedo.
-        basecolor[p + channel] = clamp(c * tint * (1 - wet * 0.22), 0, 255);
+        // Apply tint/moisture to linear reflectance and encode sRGB exactly once.
+        basecolor[p + channel] = linearToSrgbByte(c * tint * (1 - wet * 0.22));
       }
       basecolor[p + 3] = 255;
       const layerRoughness = [0.88, 0.94, 0.86, 0.76];
       let rough = 0;
       for (let layer = 0; layer < 4; layer++) rough += layerRoughness[layer] * weights[layer];
-      roughness[i] = Math.round(clamp(rough + grain * 0.045 - wet * 0.32, 0.25, 1) * 255);
+      roughness[i] = Math.round(clamp(rough + grain * grainVisibility * 0.045 - wet * 0.32, 0.25, 1) * 255);
 
       // Plane-corrected, multi-radius local horizon approximation: a uniformly
       // sloping plane should have no self-occlusion, but a concavity should.
       let horizon = 0;
-      const radii = [2, 6, 17];
-      for (const radius of radii) {
+      for (const meters of AO_RADII_METERS) {
+        const radius = meters / cell;
         for (const [ox, oy] of [[radius, 0], [-radius, 0], [0, radius], [0, -radius]]) {
           if (x + ox < 0 || y + oy < 0 || x + ox >= n || y + oy >= n) continue;
-          const elevation = neighbor(field.height, n, x + ox, y + oy);
-          const rise = (elevation - h - gx * ox - gy * oy) * physicalSlope / radius;
+          const elevation = elevationAt(field.height, n, x + ox, y + oy);
+          const rise = (elevation - h - gx * ox - gy * oy) * project.heightScale / meters;
           horizon += clamp(rise * 1.8, 0, 1);
         }
       }
