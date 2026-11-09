@@ -6,6 +6,8 @@ import type { ExportFormat } from '../export/heightmap';
 import { downloadBlob } from '../model/project';
 import type { TerrainProject, WorkerResponse } from '../model/types';
 
+const EXPORT_RESOLUTIONS = [256, 512, 768, 1024, 2048] as const;
+
 export function ExportDialog({
   project,
   onClose,
@@ -13,7 +15,7 @@ export function ExportDialog({
   project: TerrainProject;
   onClose: () => void;
 }) {
-  const [resolution, setResolution] = useState(Math.max(512, project.resolution));
+  const [resolution, setResolution] = useState(() => EXPORT_RESOLUTIONS.find((n) => n >= Math.max(512, project.resolution)) ?? 2048);
   const [format, setFormat] = useState<ExportFormat>('png16');
   const [bundle, setBundle] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -166,7 +168,7 @@ export function ExportDialog({
               disabled={busy}
               onChange={(e) => setResolution(Number(e.target.value))}
             >
-              {[256, 512, 1024, 2048].map((n) => (
+              {EXPORT_RESOLUTIONS.map((n) => (
                 <option value={n} key={n}>
                   {n} × {n}
                   {n === 1024 ? ' · 1K' : n === 2048 ? ' · 2K' : ''}
@@ -193,7 +195,7 @@ export function ExportDialog({
           </span>
           <input
             type="checkbox"
-            checked={bundle}
+            checked={format === 'pbr' || bundle}
             disabled={busy || format === 'pbr'}
             onChange={(e) => setBundle(e.target.checked)}
           />
