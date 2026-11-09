@@ -1,3 +1,4 @@
+import { DEFAULT_SPLINE_PATH } from './splines';
 import type { NodeDefinition, NodeKind, ParamDefinition, TerrainNode } from './types';
 
 const range = (
@@ -297,6 +298,67 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         'Add finer irregularities to the coordinate displacement.',
       ),
       seed,
+    ],
+  },
+  spline: {
+    kind: 'spline',
+    label: 'River / ridge spline',
+    category: 'Shape',
+    color: '#927d65',
+    description:
+      'Draw a smooth, non-destructive river valley or mountain ridge directly on the 2D map. Insert this stage before erosion for weathered channels.',
+    inputs: input,
+    outputs: output,
+    params: [
+      {
+        key: 'mode',
+        label: 'Path operation',
+        type: 'select',
+        default: 'river',
+        options: [
+          { value: 'river', label: 'Carve river and valley' },
+          { value: 'ridge', label: 'Raise mountain ridge' },
+        ],
+        section: 'Path',
+      },
+      range(
+        'width',
+        'Core width',
+        0.016,
+        0.002,
+        0.12,
+        0.001,
+        'Normalized radius relative to the tile width. River valleys blend up to three radii away.',
+        'Path',
+      ),
+      range(
+        'strength',
+        'Relief',
+        0.09,
+        0,
+        0.55,
+        0.005,
+        'River cut depth or ridge height, measured in units of the project elevation scale.',
+        'Path',
+      ),
+      range(
+        'falloff',
+        'Bank / flank spread',
+        3,
+        1.5,
+        6,
+        0.1,
+        'How far the valley banks or mountain shoulders blend into existing terrain.',
+        'Shape',
+      ),
+      {
+        key: 'downhill',
+        label: 'Keep river bed downhill',
+        type: 'toggle',
+        default: true,
+        description: 'Enforce a continuous downstream grade from point one to the last point. Draw from headwaters to outlet.',
+        section: 'River',
+      },
     ],
   },
   hydraulic: {
@@ -673,6 +735,7 @@ export function createNode(
     label: d.label,
     position,
     params: Object.fromEntries(d.params.map((p) => [p.key, p.default])),
+    ...(kind === 'spline' ? { path: DEFAULT_SPLINE_PATH.map((p) => ({ ...p })) } : {}),
     ...(kind === 'note' ? { width: 240, height: 150 } : {}),
     ...(kind === 'group' ? { width: 600, height: 280 } : {}),
   };

@@ -10,7 +10,7 @@ export function evaluationSignature(project: TerrainProject, previewNodeId?: str
     previewNodeId,
     nodes: project.graph.nodes
       .filter((n) => n.kind !== 'note' && n.kind !== 'group')
-      .map((n) => ({ id: n.id, kind: n.kind, params: n.params, bypassed: n.bypassed })),
+      .map((n) => ({ id: n.id, kind: n.kind, params: n.params, bypassed: n.bypassed, path: n.path })),
     edges: project.graph.edges,
   });
 }

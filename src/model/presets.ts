@@ -22,6 +22,36 @@ function node(
 }
 export const PRESETS: Preset[] = [
   {
+    id: 'river-gorge',
+    name: 'River-cut highlands',
+    eyebrow: 'SPLINES / WATERSHED',
+    description: 'A winding, editable headwater route carves across the massif before rainfall and scree settling.',
+    seed: 63192,
+    color: '#9a8875',
+    build: () => [
+      node('highland', 'mountain', 0, { profile: 'massif', scale: 3.5, width: 0.79, relief: 0.85 }, 'Highland source'),
+      node('warped-highland', 'warp', 270, { strength: 0.12, scale: 3 }, 'Break the symmetry'),
+      {
+        ...node(
+          'designed-river', 'spline', 540,
+          { mode: 'river', width: 0.021, strength: 0.115, falloff: 3.5, downhill: true },
+          'Draw the river',
+        ),
+        path: [
+          { x: 0.13, y: 0.21 },
+          { x: 0.30, y: 0.37 },
+          { x: 0.43, y: 0.46 },
+          { x: 0.55, y: 0.59 },
+          { x: 0.71, y: 0.73 },
+          { x: 0.86, y: 0.83 },
+        ],
+      },
+      node('runoff', 'hydraulic', 810, { droplets: 90000, erosion: 0.33 }, 'Weather the channel'),
+      node('scree', 'thermal', 1080, { iterations: 13, strength: 0.4 }, 'Settle the valley'),
+      node('out', 'output', 1350, {}, 'Terrain output'),
+    ],
+  },
+  {
     id: 'alpine',
     name: 'Alpine watershed',
     eyebrow: 'RIDGES / DRAINAGE',

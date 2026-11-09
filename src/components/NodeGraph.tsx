@@ -35,6 +35,7 @@ import {
   Ungroup,
   Waves,
   Wind,
+  Route,
   Workflow,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -62,6 +63,7 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   mountain: Mountain,
   noise: Waves,
   warp: Wind,
+  spline: Route,
   hydraulic: Droplets,
   thermal: Mountain,
   terrace: Layers3,
@@ -96,6 +98,8 @@ function nodeSummary(node: TerrainNode) {
           .find((param) => param.key === 'mode')
           ?.options?.find((option) => option.value === p.mode)?.label ?? 'Fractal noise'
       );
+    case 'spline':
+      return `${node.params.mode === 'ridge' ? 'Mountain ridge' : 'River valley'} · ${node.path?.length ?? 0} points`;
     case 'hydraulic':
       return `${Math.round(Number(p.droplets ?? 70000) / 1000)}k drops / 512²`;
     case 'thermal':

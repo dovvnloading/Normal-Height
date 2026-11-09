@@ -37,7 +37,17 @@ For the browser tests, run `npx playwright install chromium` once. CI installs i
 - **Shaping nodes:** domain warp, terrace, and height remap.
 - **Combination nodes:** blend fields with mix/add/multiply/min/max operations and optional masks; height and slope masks can also limit hydraulic erosion.
 - **Reproducible seeds:** a project seed plus per-node offsets. Changing node positions or selection does not change the generated terrain.
-- **Five editable landscape graphs:** Alpine watershed, Granite massif, Desert badlands, Volcanic caldera, and Folded highlands.
+- **Six editable landscape graphs:** Alpine watershed, Granite massif, Desert badlands, Volcanic caldera, Folded highlands, and the spline-enabled River-cut highlands.
+
+### River and ridge designer (Normal Height 1.1)
+
+- Add **River / ridge spline** from **Shape & transform**. The app inserts it before the first hydraulic-erosion stage (or terrain output) when a height connection is available, then opens the 2D editor.
+- In the **2D map**, drag numbered control points to reshape the Catmull–Rom curve. Click empty map space to insert near the closest segment; double-click a control point to remove it (at least two points remain). Use the inspector to edit exact X/Y percentages, reverse flow direction, add points, or reset the route.
+- Switch **Path operation** between **Carve river and valley** and **Raise mountain ridge**. Change core width, relief and bank/flank spread to adjust the actual geometry. River mode never deposits material, and **Keep river bed downhill** creates a continuous descending bed from point 1 (headwater) to the last point (outlet).
+- Switch to **3D terrain** to inspect the sculpted relief and selected spline guide. The terrain is generated as real Float32 samples and continues through subsequent erosion/weathering nodes. The curve is saved non-destructively in portable project files and reevaluated for 16-bit/RAW exports.
+- For easier editing, zoom and pan the map; in edit mode, middle/right-drag pans and the wheel zooms. Use **Finish editing** to return to map inspection.
+
+Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automated basin routing, groundwater and GPU fluid solvers remain future work.
 
 ### Actual erosion
 

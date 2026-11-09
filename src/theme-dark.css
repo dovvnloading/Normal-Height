@@ -1509,3 +1509,14 @@
   border-color: #6c6952;
 }
 :root[data-theme="dark"] .theme-toggle:focus-visible { outline-color: #b8cbb4; }
+
+
+:root[data-theme="dark"] .spline-editor { background: #2e3434; border-color: #4a5551; }
+:root[data-theme="dark"] .spline-edit-actions button,
+:root[data-theme="dark"] .spline-point-row label input {
+  background: #3a4240;
+  border-color: #59675f;
+  color: #e3e8e3;
+}
+:root[data-theme="dark"] .spline-edit-actions button:hover:not(:disabled) { border-color: #99b29d; }
+:root[data-theme="dark"] .nh-spline-edit-hint { color: #e9f0ed; background: #364345eb; }

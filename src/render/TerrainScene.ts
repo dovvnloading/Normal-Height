@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, sampleSlope, terrainColor } from './maps';
+import { sampleSpline } from '../model/splines';
+import type { SplinePoint } from '../model/splines';
 
 const TERRAIN_SIZE = 2.6;
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
@@ -54,6 +56,9 @@ export class TerrainScene {
   private needsRender = true;
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
+  private splinePath: readonly SplinePoint[] | null = null;
+  private splineMode: 'river' | 'ridge' = 'river';
+  private splineGuide: THREE.Group | null = null;
   private readonly onContextLost: (event: Event) => void;
 
   constructor(
@@ -231,6 +236,7 @@ export class TerrainScene {
     if (settings !== this.settings) this.applySettings(settings);
     if (geometryChanged) {
       this.buildGeometry();
+      this.rebuildSplineGuide();
       this.renderer.shadowMap.needsUpdate = true;
       this.needsRender = true;
       if (!this.cameraAdjusted && previousBase !== this.minimumElevation * settings.exaggeration)
@@ -240,6 +246,56 @@ export class TerrainScene {
       this.firstField = false;
       this.resetCamera();
     }
+  }
+
+  /** Guide the authored path along the current rendered terrain in 3D. */
+  setSplineGuide(path: readonly SplinePoint[] | null, mode: 'river' | 'ridge' = 'river') {
+    this.splinePath = path;
+    this.splineMode = mode;
+    this.rebuildSplineGuide();
+  }
+
+  private rebuildSplineGuide() {
+    if (this.splineGuide) {
+      this.scene.remove(this.splineGuide);
+      this.splineGuide.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        mesh.geometry?.dispose();
+        if (Array.isArray(mesh.material)) mesh.material.forEach((material) => material.dispose());
+        else mesh.material?.dispose();
+      });
+      this.splineGuide = null;
+    }
+    if (!this.field || !this.project || !this.splinePath || this.splinePath.length < 2) return;
+    const group = new THREE.Group();
+    group.name = 'Editable spline guide';
+    const n = this.field.resolution;
+    const scale = (TERRAIN_SIZE * this.project.heightScale) / this.project.worldSize;
+    const pointAt = (p: SplinePoint) => new THREE.Vector3(
+      (p.x - 0.5) * TERRAIN_SIZE,
+      bilinear(this.field!.height, n, p.x, p.y) * scale * this.settings.exaggeration + 0.024,
+      (p.y - 0.5) * TERRAIN_SIZE,
+    );
+    const color = this.splineMode === 'ridge' ? '#e9bc7f' : '#76c8d7';
+    const curve = sampleSpline(this.splinePath, 30).map(pointAt);
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(curve),
+      new THREE.LineBasicMaterial({ color, linewidth: 2, depthTest: true, transparent: true, opacity: 0.96 }),
+    );
+    line.name = 'Spline centerline';
+    group.add(line);
+    for (const [index, point] of this.splinePath.entries()) {
+      const marker = new THREE.Mesh(
+        new THREE.SphereGeometry(index === 0 ? 0.022 : 0.015, 9, 7),
+        new THREE.MeshBasicMaterial({ color: index === 0 ? '#faf9ed' : color, depthTest: true }),
+      );
+      marker.name = `Spline control point ${index + 1}`;
+      marker.position.copy(pointAt(point));
+      group.add(marker);
+    }
+    this.splineGuide = group;
+    this.scene.add(group);
+    this.needsRender = true;
   }
 
   /** The scene's chrome adapts instantly; terrain geometry and data are untouched. */
@@ -275,6 +331,7 @@ export class TerrainScene {
     if (this.skirt) this.skirt.scale.y = settings.exaggeration;
     this.updateSupport();
     if (paletteChanged && this.terrain) this.updateColors();
+    if (scaleChanged && this.terrain) this.rebuildSplineGuide();
     if (scaleChanged && this.terrain && !this.cameraAdjusted) this.fitCamera();
     this.renderer.shadowMap.needsUpdate = true;
     this.needsRender = true;

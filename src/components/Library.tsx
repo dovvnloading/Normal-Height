@@ -4,6 +4,7 @@ import {
   MountainSnow,
   Waves,
   Wind,
+  Route,
   Droplets,
   Layers3,
   Combine,
@@ -26,6 +27,7 @@ const icons = {
   mountain: MountainSnow,
   noise: Waves,
   warp: Wind,
+  spline: Route,
   hydraulic: Droplets,
   thermal: Layers3,
   terrace: Layers3,
@@ -133,6 +135,8 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
                                   ? 'Talus & loose material'
                                   : d.kind === 'warp'
                                     ? 'Distort coordinates'
+                                    : d.kind === 'spline'
+                                      ? 'Draw rivers & ridges'
                                     : d.kind === 'terrace'
                                       ? 'Layered strata'
                                       : d.kind === 'remap'
