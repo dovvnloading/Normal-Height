@@ -44,6 +44,7 @@ import '@xyflow/react/dist/style.css';
 import './NodeGraph.css';
 
 export interface NodeGraphProps {
+  theme: 'light' | 'dark';
   graph: TerrainGraph;
   onChange: (graph: TerrainGraph, history?: boolean) => void;
   selectedId: string | null;
@@ -464,7 +465,7 @@ function arrangeGraph(graph: TerrainGraph): TerrainGraph {
 }
 
 function GraphCanvas(props: NodeGraphProps) {
-  const { graph, selectedId, previewNodeId, thumbnails, nodeTimings } = props;
+  const { graph, selectedId, previewNodeId, thumbnails, nodeTimings, theme } = props;
   const latest = useRef(props);
   latest.current = props;
   const wrapper = useRef<HTMLDivElement>(null);
@@ -1066,15 +1067,15 @@ function GraphCanvas(props: NodeGraphProps) {
           snapToGrid
           snapGrid={[8, 8]}
           connectionRadius={24}
-          colorMode="light"
+          colorMode={theme}
           attributionPosition="bottom-left"
           defaultEdgeOptions={{ type: 'default', interactionWidth: 18 }}
-          connectionLineStyle={{ stroke: '#6d846d', strokeWidth: 2 }}
+          connectionLineStyle={{ stroke: theme === 'dark' ? '#a3b5a3' : '#6d846d', strokeWidth: 2 }}
         >
           <Background
             variant={BackgroundVariant.Dots}
-            color="#b5beb7"
-            bgColor="#e4e7e3"
+            color={theme === 'dark' ? '#3b4546' : '#b5beb7'}
+            bgColor={theme === 'dark' ? '#222729' : '#e4e7e3'}
             gap={20}
             size={1}
           />
@@ -1082,7 +1083,7 @@ function GraphCanvas(props: NodeGraphProps) {
             <MiniMap
               className="ng-minimap"
               nodeColor={(node) => NODE_DEFINITIONS[(node as EditorNode).data.model.kind].color}
-              maskColor="#d4ddd6bb"
+              maskColor={theme === 'dark' ? '#202626b8' : '#d4ddd6bb'}
               pannable
               zoomable
               position="bottom-right"

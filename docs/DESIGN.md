@@ -25,6 +25,12 @@ Palette reference: stone canvas `#e4e7e3`, paper panels `#f5f5f2`, charcoal text
 
 Numbers remain directly editable alongside sliders. The interface avoids fake controls, decorative data, and stock landscape imagery. Thumbnails and all previews are calculated from the graph.
 
+### Light and dark appearance
+
+The default visual language has **two coordinated modes**: the pale stone drafting room and a neutral charcoal workspace. The dark mode keeps muted botanical, ochre and slate accent cues but uses graphite-gray surfaces instead of a dark-green wash. A keyboard-accessible sun/moon header control switches modes, and the choice is stored locally. With no explicit choice, the application follows the system's color-scheme preference (including changes while it is open). Mode changes adjust the graph grid, dialogs, native controls and 3D preview background without regenerating terrain or changing height exports.
+
+The base CSS defines layout and light colors. The separate `theme-dark.css` file contains dark-only color declarations scoped to `[data-theme="dark"]`, so graph tools and inspector elements share geometry across both appearances.
+
 ## Graph principles
 
 - Selection controls the inspector; preview selection is separate. An eye action previews any stage without rewiring the final output.

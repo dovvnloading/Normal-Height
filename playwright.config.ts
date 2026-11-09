@@ -18,7 +18,7 @@ export default defineConfig({
     headless: true,
     acceptDownloads: true,
     locale: 'en-US',
-    colorScheme: 'dark',
+    colorScheme: 'light',
     reducedMotion: 'reduce',
     actionTimeout: 15_000,
     navigationTimeout: 30_000,

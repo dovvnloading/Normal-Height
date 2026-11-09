@@ -60,6 +60,7 @@ export class TerrainScene {
     private readonly host: HTMLDivElement,
     settings: ViewSettings,
     onError: (message: string) => void,
+    theme: 'light' | 'dark' = 'light',
   ) {
     this.settings = settings;
     this.renderer = new THREE.WebGLRenderer({
@@ -188,6 +189,7 @@ export class TerrainScene {
     };
     this.renderer.domElement.addEventListener('webglcontextlost', this.onContextLost);
     this.applySettings(settings);
+    this.applyTheme(theme);
     this.resize();
     this.animate();
   }
@@ -238,6 +240,21 @@ export class TerrainScene {
       this.firstField = false;
       this.resetCamera();
     }
+  }
+
+  /** The scene's chrome adapts instantly; terrain geometry and data are untouched. */
+  applyTheme(theme: 'light' | 'dark') {
+    const background = theme === 'dark' ? '#292e30' : '#cbd2cf';
+    this.renderer.setClearColor(background);
+    (this.scene.background as THREE.Color).set(background);
+    if (this.scene.fog instanceof THREE.Fog) this.scene.fog.color.set(background);
+    this.floor.material.color.set(theme === 'dark' ? '#303839' : '#b3bdb7');
+    this.plinth.material.color.set(theme === 'dark' ? '#414944' : '#8f9b92');
+    this.skirtMaterial.color.set(theme === 'dark' ? '#515b52' : '#5b6054');
+    // GridHelper uses vertex colors in this Three.js version. Dim the grid's
+    // shared material instead of trying to call a non-existent setColors API.
+    (this.grid.material as THREE.LineBasicMaterial).opacity = theme === 'dark' ? 0.24 : 0.42;
+    this.needsRender = true;
   }
 
   applySettings(settings: ViewSettings) {

@@ -30,6 +30,7 @@ import { colorizeMap, sampleSlope } from '../render/maps';
 import './TerrainViewport.css';
 
 interface TerrainViewportProps {
+  theme: 'light' | 'dark';
   field: HeightField | null;
   project: TerrainProject;
   viewMode: ViewMode;
@@ -340,6 +341,7 @@ function MapLegend({
 }
 
 export function TerrainViewport({
+  theme,
   field,
   project,
   viewMode,
@@ -367,7 +369,7 @@ export function TerrainViewport({
   useEffect(() => {
     if (!hostRef.current) return;
     try {
-      sceneRef.current = new TerrainScene(hostRef.current, settingsRef.current, setSceneError);
+      sceneRef.current = new TerrainScene(hostRef.current, settingsRef.current, setSceneError, theme);
       setSceneError(null);
     } catch (error) {
       setSceneError(
@@ -384,6 +386,10 @@ export function TerrainViewport({
     if (field) sceneRef.current?.update(field, project, settings);
     else sceneRef.current?.applySettings(settings);
   }, [field, project, settings, attempt]);
+
+  useEffect(() => {
+    sceneRef.current?.applyTheme(theme);
+  }, [theme, attempt]);
 
   useEffect(() => {
     if (!showSettings) return;
