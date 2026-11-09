@@ -108,10 +108,3 @@ The graph evaluator follows dependencies from the previewed node or final output
 
 The production build is a client-side webapp in `dist/`. Serve it over HTTP(S) with a modern static host; Web Workers cannot be reliably loaded from `file://`. Vite's relative asset base supports subdirectory hosting. Project state stays in the visitor's browser unless they explicitly download it. This repository does not require or automatically create a hosting account.
 
-## Design and research
-
-- [Workspace design](docs/DESIGN.md): layout hierarchy, graph UX, preview/export semantics.
-- [Terrain research](docs/RESEARCH.md): official Terragen and Maxon references, primary erosion sources, algorithm choices and limitations.
-- [Verification record](docs/VERIFICATION.md): production browser checks, actual screenshots, and a decoded full 2K export. Detailed 2K erosion can take several minutes; the record includes a measured run and its memory use.
-
-The app is inspired by procedural terrain authoring workflows. It does not reproduce the proprietary implementation of Terragen or Cinema 4D; the Naki-inspired mode is explicitly an independent pattern.
