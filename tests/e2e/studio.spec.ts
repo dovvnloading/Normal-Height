@@ -180,6 +180,54 @@ test.afterEach(async ({ page }) => {
   ).toEqual([]);
 });
 
+test('uses a legible light stone workspace with muted earth controls', async ({ page }, testInfo) => {
+  await expect(page.locator('html')).toHaveCSS('color-scheme', 'light');
+  await expect(page.locator('.app-header')).toHaveCSS('background-color', 'rgb(248, 248, 245)');
+  await expect(page.locator('.library.panel')).toHaveCSS('background-color', 'rgb(244, 244, 241)');
+  await expect(page.locator('.node-graph')).toHaveCSS('background-color', 'rgb(228, 231, 227)');
+  await expect(page.locator('.ng-node').first()).toHaveCSS('background-color', 'rgb(252, 251, 248)');
+  await expect(page.locator('.nh-viewport-toolbar')).toHaveCSS(
+    'background-color',
+    'rgb(238, 239, 236)',
+  );
+  await expect(page.locator('.ng-node-selected').first()).toBeVisible();
+
+  // Check actual computed foreground/background contrast rather than matching only hex tokens.
+  const contrast = await page.evaluate(() => {
+    const luminance = (css: string) => {
+      const components = css.match(/[\\d.]+/g)!.slice(0, 3).map(Number);
+      const [r, g, b] = components.map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return r * 0.2126 + g * 0.7152 + b * 0.0722;
+    };
+    return ['.brand > span:last-child', '.ng-node', '.library-node strong'].map((selector) => {
+      const el = document.querySelector(selector)!;
+      const style = getComputedStyle(el);
+      const background = getComputedStyle(
+        selector === '.brand > span:last-child'
+          ? document.querySelector('.app-header')!
+          : selector === '.library-node strong'
+            ? document.querySelector('.library-scroll')!
+            : el,
+      ).backgroundColor;
+      const a = luminance(style.color);
+      const b = luminance(background);
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    });
+  });
+  for (const ratio of contrast) expect(ratio).toBeGreaterThan(4.5);
+
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Display settings' })).toHaveCSS(
+    'background-color',
+    'rgba(250, 250, 246, 0.98)',
+  );
+  await capture(page, testInfo, 'stone-earth-ui.png');
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+});
+
 test('renders real 3D terrain and switches between split, flow, and normal maps', async ({
   page,
 }, testInfo) => {
