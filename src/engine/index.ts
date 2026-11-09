@@ -9,6 +9,8 @@ import type {
 } from '../model/types';
 import { clamp, mix, Noise, smoothstep } from './noise';
 import { hydraulicErosion, sampleHeight, thermalErosion } from './erosion';
+import { sculptSpline } from './spline';
+import { validSplinePoint, MAX_SPLINE_POINTS } from '../model/splines';
 
 export { hydraulicErosion, thermalErosion } from './erosion';
 export { Noise, randomGenerator } from './noise';
@@ -22,6 +24,7 @@ const kinds = new Set([
   'mountain',
   'noise',
   'warp',
+  'spline',
   'hydraulic',
   'thermal',
   'terrace',
@@ -60,6 +63,10 @@ export function validateGraph(graph: TerrainGraph): string | null {
     if (!kinds.has(node.kind)) return `Unknown node type: ${String(node.kind)}.`;
     if (!node.params || typeof node.params !== 'object')
       return `“${node.label || node.id}” has invalid parameters.`;
+    if (node.kind === 'spline' &&
+      (!Array.isArray(node.path) || node.path.length < 2 ||
+       node.path.length > MAX_SPLINE_POINTS || !node.path.every(validSplinePoint)))
+      return `“${node.label || node.id}” needs at least two valid spline points.`;
     nodes.set(node.id, node);
   }
   const ports = new Set<string>(),
@@ -351,6 +358,15 @@ export function evaluateGraph(
       field = { ...input };
       switch (node.kind) {
         case 'output':
+          break;
+        case 'spline':
+          field.height = sculptSpline(input.height, n, node.path, {
+            mode: text(node, 'mode', 'river') === 'ridge' ? 'ridge' : 'river',
+            width: number(node, 'width', 0.016, 0.002, 0.12),
+            strength: number(node, 'strength', 0.09, 0, 0.55),
+            falloff: number(node, 'falloff', 3, 1.5, 6),
+            downhill: node.params.downhill !== false,
+          });
           break;
         case 'warp': {
           const strength = number(node, 'strength', 0.35, 0, 2),
