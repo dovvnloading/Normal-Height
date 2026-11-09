@@ -3,8 +3,8 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #1e2828;
-  color: #dce4dc;
+  background: #f4f5f1;
+  color: #343e39;
   overflow: hidden;
   position: relative;
 }
@@ -15,8 +15,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 13px;
-  background: #191e1e;
-  border-bottom: 1px solid #303737;
+  background: #f4f5f1;
+  border-bottom: 1px solid #ccd1cb;
   gap: 10px;
   z-index: 4;
 }
@@ -34,7 +34,7 @@
   gap: 7px;
   border: 1px solid transparent;
   background: transparent;
-  color: #93a19a;
+  color: #57645d;
   font: inherit;
   font-size: 11px;
   padding: 0 11px;
@@ -47,13 +47,13 @@
 }
 .nh-view-tabs button:hover,
 .nh-viewport-tool:hover {
-  background: #252e2b;
-  color: #e6ede4;
+  background: #e1e9df;
+  color: #343e39;
 }
 .nh-view-tabs button.active {
-  background: #303b32;
-  color: #d9e8c2;
-  border-color: #48523f;
+  background: #e1e9df;
+  color: #343e39;
+  border-color: #ccd1cb;
 }
 .nh-view-tabs button:disabled {
   opacity: 0.4;
@@ -70,8 +70,8 @@
   padding: 0 7px;
 }
 .nh-viewport-tool.active {
-  background: #303b32;
-  color: #d9e8c2;
+  background: #e1e9df;
+  color: #343e39;
 }
 .nh-channel-select {
   display: flex;
@@ -80,9 +80,9 @@
 }
 .nh-channel-select select {
   appearance: none;
-  background: #202727;
-  color: #c2cec4;
-  border: 1px solid #37413b;
+  background: #f4f5f1;
+  color: #343e39;
+  border: 1px solid #ccd1cb;
   border-radius: 5px;
   padding: 5px 24px 5px 9px;
   font: inherit;
@@ -94,7 +94,7 @@
   position: absolute;
   right: 8px;
   pointer-events: none;
-  color: #87968b;
+  color: #556e56;
 }
 .nh-preview-surface {
   flex: 1;
@@ -102,7 +102,7 @@
   position: relative;
   display: flex;
   overflow: hidden;
-  background: #1c2525;
+  background: #e1e9df;
 }
 .nh-three-pane,
 .nh-map-pane {
@@ -113,7 +113,7 @@
   overflow: hidden;
 }
 .nh-mode-split > .nh-map-pane {
-  border-left: 1px solid #465149;
+  border-left: 1px solid #ccd1cb;
 }
 .nh-three-host {
   position: absolute;
@@ -135,11 +135,11 @@
   gap: 8px;
   max-width: calc(100% - 90px);
   padding: 7px 10px;
-  border: 1px solid #66786742;
-  background: #182120d4;
+  border: 1px solid #aebbab42;
+  background: #e1e9dfd4;
   border-radius: 5px;
   backdrop-filter: blur(10px);
-  color: #d0dacd;
+  color: #343e39;
   box-shadow: 0 2px 9px #0000000a;
   font-size: 11px;
   pointer-events: none;
@@ -153,25 +153,25 @@
 }
 .nh-preview-source em {
   font-size: 9px;
-  color: #d8b47e;
+  color: #8b6b52;
   font-style: normal;
   margin-left: 5px;
-  border-left: 1px solid #5a5d4a;
+  border-left: 1px solid #ccd1cb;
   padding-left: 8px;
 }
 .nh-source-dot {
   width: 5px;
   height: 5px;
-  background: #bdd68f;
+  background: #718a69;
   border-radius: 50%;
   flex: none;
-  box-shadow: 0 0 6px #bdd68f24;
+  box-shadow: 0 0 6px #8ca18a24;
 }
 .nh-source-dot.stale {
-  background: #d5ab71;
+  background: #ab8362;
 }
 .nh-source-dot.busy {
-  background: #b9cda6;
+  background: #718a69;
   animation: nh-pulse 1.4s ease-in-out infinite;
 }
 .nh-three-tools {
@@ -182,9 +182,9 @@
   flex-direction: column;
   gap: 2px;
   padding: 3px;
-  border: 1px solid #58685849;
+  border: 1px solid #ccd1cb49;
   border-radius: 6px;
-  background: #192221c9;
+  background: #f4f5f1c9;
   backdrop-filter: blur(8px);
 }
 .nh-three-tools button,
@@ -194,7 +194,7 @@
   padding: 0;
   display: grid;
   place-items: center;
-  color: #bdc9bb;
+  color: #343e39;
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -202,8 +202,8 @@
 }
 .nh-three-tools button:hover,
 .nh-map-controls button:hover {
-  background: #394739;
-  color: #e0edce;
+  background: #e1e9df;
+  color: #343e39;
 }
 .nh-viewport-coordinate {
   position: absolute;
@@ -222,11 +222,11 @@
 .nh-viewport-coordinate > div > span {
   font-size: 9px;
   letter-spacing: 0.14em;
-  color: #b9c6b8;
+  color: #343e39;
 }
 .nh-viewport-coordinate small {
   font-size: 9px;
-  color: #8c9c8f;
+  color: #556e56;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 .nh-compass {
@@ -236,7 +236,7 @@
   align-items: center;
   flex-direction: column;
   font-size: 9px;
-  color: #c9d6c4;
+  color: #343e39;
   gap: 5px;
 }
 .nh-compass > span {
@@ -245,7 +245,7 @@
   height: 0;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-bottom: 16px solid #c6d3b7;
+  border-bottom: 16px solid #98a8a2;
   transform: rotate(-25deg);
 }
 .nh-view-hint {
@@ -255,26 +255,26 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #9baba0;
+  color: #556e56;
   font-size: 10px;
   pointer-events: none;
 }
 .nh-view-hint > span {
-  color: #64756c;
+  color: #667168;
 }
 .nh-scene-resolution {
   position: absolute;
   right: 19px;
   bottom: 17px;
-  color: #8b9d91;
+  color: #556e56;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 9px;
 }
 .nh-map {
   position: absolute;
   inset: 0;
-  background-color: #131b1b;
-  background-image: radial-gradient(#4b5a4933 0.6px, transparent 0.7px);
+  background-color: #f4f5f1;
+  background-image: radial-gradient(#e4e7e233 0.6px, transparent 0.7px);
   background-size: 16px 16px;
   overflow: hidden;
 }
@@ -296,7 +296,7 @@
   left: 20px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 9px;
-  color: #87958b;
+  color: #556e56;
   pointer-events: none;
 }
 .nh-mode-split .nh-map-scale {
@@ -309,9 +309,9 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  background: #1d2826e6;
+  background: #f4f5f1e6;
   padding: 3px;
-  border: 1px solid #3e4a3f;
+  border: 1px solid #ccd1cb;
   border-radius: 5px;
   backdrop-filter: blur(8px);
 }
@@ -320,10 +320,10 @@
   text-align: center;
   font-size: 9px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  color: #adbfa9;
+  color: #556e56;
 }
 .nh-map-controls > button:last-child {
-  border-left: 1px solid #3d493e;
+  border-left: 1px solid #ccd1cb;
   margin-left: 3px;
   border-radius: 0 4px 4px 0;
 }
@@ -338,13 +338,13 @@
   gap: 13px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 9px;
-  color: #87998d;
+  color: #556e56;
   pointer-events: none;
   white-space: nowrap;
 }
 .nh-map-sample > b {
   font-weight: 500;
-  color: #d0dec7;
+  color: #343e39;
 }
 .nh-map-legend {
   position: absolute;
@@ -353,14 +353,14 @@
   width: 155px;
   pointer-events: none;
   padding: 8px 10px;
-  background: #17211fd9;
-  border: 1px solid #5260443b;
+  background: #f4f5f1d9;
+  border: 1px solid #ccd1cb3b;
   border-radius: 5px;
   backdrop-filter: blur(8px);
 }
 .nh-map-legend > span {
   font-size: 9px;
-  color: #a9b9a4;
+  color: #556e56;
   display: block;
   margin-bottom: 7px;
 }
@@ -391,7 +391,7 @@
   display: flex;
   justify-content: space-between;
   font-size: 8px;
-  color: #a3b49e;
+  color: #556e56;
   margin-top: 5px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
 }
@@ -402,10 +402,10 @@
   transform: translateX(-50%);
   max-width: calc(100% - 40px);
   min-width: 240px;
-  border: 1px solid #61734873;
+  border: 1px solid #aebbab73;
   border-radius: 6px;
-  background: #1b2623ed;
-  color: #ccdcc0;
+  background: #f4f5f1ed;
+  color: #343e39;
   box-shadow: 0 5px 18px #0003;
   padding: 10px 9px 9px 12px;
   display: flex;
@@ -427,7 +427,7 @@
   font-size: 9px;
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-weight: 500;
-  color: #c9dfa5;
+  color: #4c6950;
 }
 .nh-render-progress > button {
   display: grid;
@@ -437,13 +437,13 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #a2b393;
+  color: #556e56;
   cursor: pointer;
   border-radius: 3px;
 }
 .nh-render-progress > button:hover {
   color: #fff;
-  background: #47523d;
+  background: #e1e9df;
 }
 .nh-progress-track {
   position: absolute;
@@ -451,12 +451,12 @@
   right: 0;
   top: 0;
   height: 2px;
-  background: #3b4836;
+  background: #f4f5f1;
 }
 .nh-progress-track > span {
   display: block;
   height: 100%;
-  background: #c2dc98;
+  background: #718a69;
   transition: width 0.2s ease;
 }
 .nh-preview-empty {
@@ -467,7 +467,7 @@
   justify-content: center;
   flex-direction: column;
   gap: 11px;
-  color: #a2b29f;
+  color: #556e56;
   pointer-events: none;
   padding: 50px;
   text-align: center;
@@ -475,29 +475,29 @@
 .nh-empty-mark {
   width: 65px;
   height: 65px;
-  border: 1px solid #54634c;
+  border: 1px solid #ccd1cb;
   border-radius: 14px;
   display: grid;
   place-items: center;
-  color: #b8cba7;
-  background: #27352a66;
+  color: #556e56;
+  background: #f4f5f166;
   margin-bottom: 6px;
 }
 .nh-preview-empty > strong {
   font-size: 15px;
   font-weight: 500;
-  color: #d3dec9;
+  color: #343e39;
   letter-spacing: -0.02em;
 }
 .nh-preview-empty > span {
   font-size: 11px;
   max-width: 320px;
   line-height: 1.6;
-  color: #95a68e;
+  color: #556e56;
 }
 .nh-preview-empty > .nh-spin {
   margin-top: 8px;
-  color: #c8dcae;
+  color: #4c6950;
 }
 .nh-render-error {
   position: absolute;
@@ -508,10 +508,10 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #332c22e8;
-  border: 1px solid #756348;
+  background: #f0e0d2e8;
+  border: 1px solid #cfc3b5;
   border-radius: 5px;
-  color: #decbab;
+  color: #81553f;
   font-size: 10px;
   line-height: 1.5;
   z-index: 3;
@@ -520,11 +520,11 @@
   flex: 1;
 }
 .nh-render-error > button {
-  border: 1px solid #8c7c5b;
-  background: #514731;
+  border: 1px solid #cfc3b5;
+  background: #f0e0d2;
   padding: 5px 8px;
   border-radius: 4px;
-  color: #efe3c7;
+  color: #81553f;
   font-size: 10px;
   white-space: nowrap;
   cursor: pointer;
@@ -536,8 +536,8 @@
   z-index: 7;
   width: 248px;
   padding: 15px;
-  background: #1b2422f7;
-  border: 1px solid #4b594a;
+  background: #f4f5f1f7;
+  border: 1px solid #ccd1cb;
   border-radius: 7px;
   box-shadow: 0 15px 40px #0007;
   backdrop-filter: blur(16px);
@@ -549,20 +549,20 @@
   margin-bottom: 17px;
   font-size: 9px;
   letter-spacing: 0.11em;
-  color: #aebca7;
+  color: #556e56;
 }
 .nh-display-title > button {
   display: grid;
   place-items: center;
   background: transparent;
-  color: #a7b59d;
+  color: #556e56;
   border: 0;
   cursor: pointer;
   padding: 1px;
 }
 .nh-display-label {
   font-size: 11px;
-  color: #aebda4;
+  color: #556e56;
   display: block;
   margin-bottom: 9px;
 }
@@ -574,10 +574,10 @@
   position: relative;
   flex: 1;
   padding: 7px 5px;
-  background: #252e28;
-  border: 1px solid #46503c;
+  background: #f4f5f1;
+  border: 1px solid #ccd1cb;
   border-radius: 4px;
-  color: #a7b49b;
+  color: #57645d;
   font-size: 10px;
   display: flex;
   flex-direction: column;
@@ -586,9 +586,9 @@
   cursor: pointer;
 }
 .nh-material-options > button.active {
-  border-color: #a3b47b;
-  background: #34402d;
-  color: #e0eac9;
+  border-color: #8ca18a;
+  background: #e1e9df;
+  color: #343e39;
 }
 .nh-material-options > button > svg {
   position: absolute;
@@ -613,7 +613,7 @@
 }
 .nh-display-divider {
   height: 1px;
-  background: #364133;
+  background: #f4f5f1;
   margin: 14px 0;
 }
 .nh-display-range {
@@ -625,7 +625,7 @@
   align-items: center;
   gap: 6px;
   font-size: 10px;
-  color: #adba9e;
+  color: #57645d;
   margin-bottom: 9px;
 }
 .nh-display-range b {
@@ -633,20 +633,20 @@
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 10px;
   font-weight: 400;
-  color: #d2debd;
+  color: #343e39;
 }
 .nh-display-range input {
   width: 100%;
   height: 4px;
   display: block;
   margin: 0;
-  accent-color: #c8dfa6;
+  accent-color: #4c6950;
   cursor: pointer;
 }
 .nh-display-help {
   font-size: 9px;
   line-height: 1.6;
-  color: #7f9176;
+  color: #556e56;
   margin: 10px 0 0;
 }
 .nh-display-check {
@@ -655,11 +655,11 @@
   gap: 8px;
   margin-top: 10px;
   font-size: 10px;
-  color: #b4c1a9;
+  color: #343e39;
   cursor: pointer;
 }
 .nh-display-check input {
-  accent-color: #b7d48b;
+  accent-color: #556e56;
   width: 12px;
   height: 12px;
   margin: 0;
@@ -667,7 +667,7 @@
 .nh-display-reset {
   border: 0;
   background: transparent;
-  color: #a6b99a;
+  color: #556e56;
   font: inherit;
   font-size: 10px;
   display: flex;
@@ -678,13 +678,13 @@
   cursor: pointer;
 }
 .nh-display-reset:hover {
-  color: #d7e6bc;
+  color: #343e39;
 }
 .nh-viewport button:focus-visible,
 .nh-viewport select:focus-visible,
 .nh-viewport input:focus-visible,
 .nh-viewport canvas:focus-visible {
-  outline: 2px solid #bdd493;
+  outline: 2px solid #8ca18a;
   outline-offset: 2px;
 }
 .nh-spin {
@@ -778,3 +778,50 @@
     transition: none !important;
   }
 }
+
+
+/* Light stone chrome around the rendered terrain; imagery retains its own palette. */
+.nh-viewport { background: #d8ddda; color: #303b35; }
+.nh-viewport-toolbar { background: #eeefec; border-color: #c9d0c9; }
+.nh-view-tabs button, .nh-viewport-tool { color: #5c6961; }
+.nh-view-tabs button:hover, .nh-viewport-tool:hover { background: #e0e6df; color: #2f4136; }
+.nh-view-tabs button.active, .nh-viewport-tool.active {
+  background: #e1e9de; border-color: #b5c6b1; color: #3a6044;
+}
+.nh-channel-select select { background: #fbfbf8; color: #344138; border-color: #c2cec1; }
+.nh-preview-surface, .nh-map { background-color: #d7dcda; }
+.nh-map { background-image: radial-gradient(#9caaa27a 0.6px, transparent 0.7px); }
+.nh-mode-split > .nh-map-pane { border-color: #aebbb3; }
+.nh-preview-source {
+  background: #f5f6f1eb; border-color: #b8c6bba0; color: #35483a;
+  box-shadow: 0 2px 12px #21342a18;
+}
+.nh-three-tools, .nh-map-controls {
+  background: #f5f6f0e8;
+  border-color: #b1bfb3;
+}
+.nh-three-tools button, .nh-map-controls button { color: #4c6052; }
+.nh-three-tools button:hover, .nh-map-controls button:hover { background: #dfe8de; color: #375440; }
+.nh-map-legend { background: #f5f6f1eb; border-color: #b7c5b9; }
+.nh-map-legend > span, .nh-legend-labels { color: #506057; }
+.nh-map-controls > span, .nh-map-sample { color: #56695e; }
+.nh-map-sample > b { color: #344b3a; }
+.nh-render-progress { background: #f8f8f4ed; border-color: #b7c8b5; color: #334237; }
+.nh-render-progress > b { color: #4e7053; }
+.nh-render-progress > button:hover { background: #dde7dc; color: #344b3b; }
+.nh-display-panel {
+  background: #fafaf6fa;
+  border-color: #bcc7bd;
+  box-shadow: 0 15px 40px #26332930;
+}
+.nh-display-title, .nh-display-label, .nh-display-range > span, .nh-display-check {
+  color: #4f5f52;
+}
+.nh-display-range b { color: #354f3d; }
+.nh-display-divider { background: #d2d9d1; }
+.nh-material-options > button { background: #f0f1ec; border-color: #cbd3c8; color: #566457; }
+.nh-material-options > button.active {
+  background: #e1e9db; border-color: #8ea883; color: #3b5b3f;
+}
+.nh-display-reset { color: #57765b; }
+.nh-display-reset:hover { color: #3f5a43; }
