@@ -8,6 +8,24 @@
       name="description"
       content="A procedural terrain studio. Shape mountain ranges with a visual node workflow, hydraulic erosion, and precise heightmap exports."
     />
+    <script>
+      // Apply appearance before the app styles paint, avoiding a light flash.
+      (() => {
+        let preference = null;
+        try {
+          preference = localStorage.getItem('normal-height.theme.v1');
+        } catch {
+          // Private browsing may reject storage; system preference still works.
+        }
+        const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+        const dark = preference === 'dark' || (preference !== 'light' && systemDark);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        document.querySelector('meta[name="theme-color"]')?.setAttribute(
+          'content',
+          dark ? '#292e30' : '#e9ebe7',
+        );
+      })();
+    </script>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <title>Normal Height — Terrain studio</title>
   </head>
