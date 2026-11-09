@@ -32,6 +32,8 @@ import { Modal } from './components/Modal';
 import { createNode } from './model/registry';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
+import { DEFAULT_SPLINE_PATH } from './model/splines';
+import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
   MapChannel,
@@ -87,6 +89,7 @@ export default function App() {
     initial.project.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ?? null,
   );
   const [previewNodeId, setPreviewNodeId] = useState<string | undefined>();
+  const [editingSplineId, setEditingSplineId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [channel, setChannel] = useState<MapChannel>('height');
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -113,6 +116,7 @@ export default function App() {
   const centerRef = useRef<HTMLElement>(null);
   const engine = useTerrainEngine(project, previewNodeId, automatic);
   const selected = project.graph.nodes.find((n) => n.id === selectedId) ?? null;
+  const selectedSpline = selected?.kind === 'spline' ? selected : null;
   const output = project.graph.nodes.find((n) => n.kind === 'output');
   const previewLabel =
     project.graph.nodes.find((n) => n.id === (previewNodeId ?? output?.id))?.label ??
@@ -207,7 +211,9 @@ export default function App() {
     if (previewNodeId && !project.graph.nodes.some((n) => n.id === previewNodeId))
       setPreviewNodeId(undefined);
     if (selectedId && !project.graph.nodes.some((n) => n.id === selectedId)) setSelectedId(null);
-  }, [project, previewNodeId, selectedId]);
+    if (editingSplineId && (editingSplineId !== selectedId || !project.graph.nodes.some((n) => n.id === editingSplineId)))
+      setEditingSplineId(null);
+  }, [project, previewNodeId, selectedId, editingSplineId]);
   const updateGraph = useCallback(
     (graph: TerrainGraph, history = true) => apply({ ...projectRef.current, graph }, '', history),
     [apply],
@@ -257,14 +263,70 @@ export default function App() {
           String(params.mode)
             .replace(/-/g, ' ')
             .replace(/^./, (s) => s.toUpperCase()) + ' noise';
-      apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
+      if (kind === 'spline') {
+        // Insert the designer immediately before hydraulic erosion (or before
+        // the final output), preserving the existing procedural pipeline.
+        const target = p.graph.nodes.find((n) => n.kind === 'hydraulic') ??
+          p.graph.nodes.find((n) => n.kind === 'output');
+        const inputEdge = target && p.graph.edges.find(
+          (e) => e.target === target.id && (e.targetHandle ?? 'in') === 'in',
+        );
+        if (target && inputEdge && !target.parentId) {
+          node.position = { ...target.position };
+          const affected = p.graph.nodes.map((n) =>
+            !n.parentId && n.position.x >= target.position.x
+              ? { ...n, position: { ...n.position, x: n.position.x + 240 } }
+              : n,
+          );
+          apply({
+            ...p,
+            graph: {
+              nodes: [...affected, node],
+              edges: [
+                ...p.graph.edges.filter((e) => e.id !== inputEdge.id),
+                { ...inputEdge, id: crypto.randomUUID(), target: node.id, targetHandle: 'in' },
+                {
+                  id: crypto.randomUUID(),
+                  source: node.id,
+                  target: target.id,
+                  sourceHandle: 'height',
+                  targetHandle: 'in',
+                },
+              ],
+            },
+          });
+        } else apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
+        setEditingSplineId(node.id);
+        setViewMode('2d');
+        setChannel('terrain');
+        notify('River / ridge designer added. Drag points on the 2D map; click to insert a point.');
+      } else {
+        apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
+        notify(`${node.label} added. Connect its ports in the graph.`);
+      }
       setSelectedId(node.id);
       setRightOpen(true);
       setModal(null);
-      notify(`${node.label} added. Connect its ports in the graph.`);
     },
     [selectedId, apply, notify],
   );
+  const changeSplinePath = useCallback((path: SplinePoint[]) => {
+    const id = editingSplineId ?? (projectRef.current.graph.nodes.find(
+      (node) => node.id === selectedId && node.kind === 'spline',
+    )?.id);
+    if (!id) return;
+    const current = projectRef.current;
+    apply({
+      ...current,
+      graph: {
+        ...current.graph,
+        nodes: current.graph.nodes.map((node) =>
+          node.id === id ? { ...node, path: path.map((point) => ({ ...point })) } : node,
+        ),
+      },
+    });
+  }, [editingSplineId, selectedId, apply]);
+
   const duplicate = useCallback(() => {
     const p = projectRef.current;
     const n = p.graph.nodes.find((n) => n.id === selectedId);
@@ -303,12 +365,14 @@ export default function App() {
       },
     });
     setSelectedId(null);
+    setEditingSplineId(null);
   }, [selectedId, apply]);
   const loadPreset = useCallback(
     (id: string) => {
       apply(createProject(id));
       setSelectedId('erosion');
       setPreviewNodeId(undefined);
+      setEditingSplineId(null);
       setModal(null);
       notify(
         `${PRESETS.find((p) => p.id === id)?.name ?? 'Landscape'} loaded. Undo restores your previous graph.`,
@@ -333,6 +397,7 @@ export default function App() {
         throw new Error('This project is too large. The maximum file size is 3 MB.');
       const loaded = parseProject(JSON.parse(await file.text()));
       apply(loaded);
+      setEditingSplineId(null);
       setPreviewNodeId(undefined);
       setSelectedId(
         loaded.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ??
@@ -588,6 +653,9 @@ export default function App() {
         <main className="work-area" ref={centerRef} aria-label="Terrain workspace">
           <section className="preview-area">
             <TerrainViewport
+              spline={selectedSpline}
+              splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
+              onSplinePath={changeSplinePath}
               theme={theme}
               field={engine.result?.field ?? null}
               project={project}
@@ -667,6 +735,17 @@ export default function App() {
         </main>
         {rightOpen && (
           <Inspector
+            splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
+            onSplinePath={changeSplinePath}
+            onSplineEdit={() => {
+              if (!selectedSpline) return;
+              const editing = editingSplineId === selectedSpline.id;
+              setEditingSplineId(editing ? null : selectedSpline.id);
+              if (!editing) {
+                setViewMode('2d');
+                setChannel('terrain');
+              }
+            }}
             node={selected}
             project={project}
             previewNodeId={previewNodeId ?? output?.id}
