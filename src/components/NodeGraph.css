@@ -1,14 +1,14 @@
 .node-graph {
-  --ng-text: #d9e1da;
-  --ng-muted: #8d9a91;
-  --ng-border: #2b3530;
+  --ng-text: #526a54;
+  --ng-muted: #cbd0ca;
+  --ng-border: #cbd0ca;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 210px;
   min-width: 0;
   overflow: hidden;
-  background: #111715;
+  background: #f4f5f1;
   color: var(--ng-text);
   font-family: inherit;
   font-size: 12px;
@@ -25,7 +25,7 @@
   justify-content: space-between;
   flex-shrink: 0;
   padding: 0 14px;
-  background: #18201b;
+  background: #f4f5f1;
 }
 .ng-toolbar {
   height: 43px;
@@ -41,12 +41,12 @@
   white-space: nowrap;
 }
 .ng-panel-title > svg {
-  color: #96a596;
+  color: #556e56;
 }
 .ng-count {
   font-size: 10px;
-  color: #9eaca0;
-  background: #273127;
+  color: #556e56;
+  background: #f4f5f1;
   border-radius: 4px;
   padding: 2px 5px;
   font-variant-numeric: tabular-nums;
@@ -67,7 +67,7 @@
   border-radius: 5px;
   background: transparent;
   padding: 0 7px;
-  color: #a4b0a5;
+  color: #57645d;
   font: inherit;
   font-size: 11px;
   line-height: 1;
@@ -79,13 +79,13 @@
     border-color 120ms;
 }
 .ng-tool:hover:not(:disabled) {
-  color: #e3ebde;
-  background: #29362b;
-  border-color: #3a493b;
+  color: #343e39;
+  background: #e1e9df;
+  border-color: #ccd1cb;
 }
 .ng-tool:focus-visible,
 .ng-node-action:focus-visible {
-  outline: 2px solid #d2e5a4;
+  outline: 2px solid #8ca18a;
   outline-offset: 2px;
 }
 .ng-tool:disabled {
@@ -93,31 +93,31 @@
   cursor: default;
 }
 .ng-tool.is-active {
-  color: #d1e6ac;
-  background: #2a3629;
+  color: #4c6950;
+  background: #e1e9df;
 }
 .ng-icon-tool {
   width: 27px;
   padding: 0;
 }
 .ng-add {
-  color: #d0e2b4;
-  background: #293527;
-  border-color: #394b32;
+  color: #4c6950;
+  background: #e1e9df;
+  border-color: #ccd1cb;
 }
 .ng-add kbd {
   font: inherit;
   font-size: 9px;
   padding: 2px 3px;
   margin-left: 5px;
-  color: #8d9d82;
-  border: 1px solid #43533b;
+  color: #556e56;
+  border: 1px solid #ccd1cb;
   border-radius: 3px;
 }
 .ng-divider {
   height: 14px;
   width: 1px;
-  background: #344034;
+  background: #f4f5f1;
   margin: 0 3px;
 }
 .ng-canvas {
@@ -132,7 +132,7 @@
   border-top: 1px solid var(--ng-border);
 }
 .ng-navigation-hint {
-  color: #758479;
+  color: #667168;
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
@@ -147,7 +147,7 @@
 .ng-zoom {
   min-width: 33px;
   text-align: center;
-  color: #a0ada0;
+  color: #556e56;
   font:
     10px ui-monospace,
     SFMono-Regular,
@@ -158,10 +158,10 @@
   position: relative;
   width: 188px;
   box-sizing: border-box;
-  background: #1d2621;
-  border: 1px solid #3b4840;
+  background: #f4f5f1;
+  border: 1px solid #ccd1cb;
   border-radius: 7px;
-  color: #dce5dc;
+  color: #343e39;
   box-shadow: 0 3px 14px #00000024;
   font-family: inherit;
   overflow: visible;
@@ -177,13 +177,13 @@
   background: var(--node-color);
 }
 .ng-node-selected {
-  border-color: #d2e5a6;
+  border-color: #8ca18a;
   box-shadow:
-    0 0 0 2px #cee59a19,
+    0 0 0 2px #8ca18a19,
     0 5px 20px #00000030;
 }
 .ng-node-previewed:not(.ng-node-selected) {
-  border-color: #6f8860;
+  border-color: #aebbab;
 }
 .ng-node-bypassed {
   opacity: 0.55;
@@ -194,7 +194,7 @@
   height: 32px;
   gap: 6px;
   padding: 0 8px 0 10px;
-  border-bottom: 1px solid #344038;
+  border-bottom: 1px solid #ccd1cb;
   font-size: 11px;
   font-weight: 600;
 }
@@ -218,17 +218,17 @@
   padding: 0;
   border: 0;
   border-radius: 4px;
-  color: #84968a;
+  color: #556e56;
   background: transparent;
   cursor: pointer;
 }
 .ng-node-action:hover {
-  color: #d2e5ae;
-  background: #344333;
+  color: #4c6950;
+  background: #e1e9df;
 }
 .ng-node-action.is-active {
-  color: #d4e8ae;
-  background: #34402b;
+  color: #4c6950;
+  background: #e1e9df;
 }
 .ng-node-content {
   display: flex;
@@ -243,8 +243,8 @@
   flex: 0 0 48px;
   border-radius: 3px;
   overflow: hidden;
-  background: #121a16;
-  box-shadow: inset 0 0 0 1px #39473b;
+  background: #f4f5f1;
+  box-shadow: inset 0 0 0 1px #ccd1cb;
 }
 .ng-thumbnail canvas {
   display: block;
@@ -261,7 +261,7 @@
   inset: 0;
 }
 .ng-thumbnail-empty svg {
-  color: #4c6051;
+  color: #667168;
 }
 .ng-node-detail {
   min-width: 0;
@@ -285,7 +285,7 @@
   text-transform: capitalize;
   font-size: 10px;
   line-height: 1.4;
-  color: #b7c4ba;
+  color: #343e39;
 }
 .ng-node-meta {
   display: flex;
@@ -293,7 +293,7 @@
   justify-content: space-between;
   height: 13px;
   gap: 4px;
-  color: #788c7e;
+  color: #667168;
   font:
     9px ui-monospace,
     SFMono-Regular,
@@ -308,17 +308,17 @@
   display: inline-block;
   border-radius: 3px;
   padding: 2px 4px;
-  background: #34432d;
-  color: #cfe5a4;
+  background: #f4f5f1;
+  color: #4c6950;
   font-family: inherit;
   font-size: 8px;
   letter-spacing: 0.6px;
 }
 .ng-bypass-label {
-  color: #a7a18a;
+  color: #57645d;
 }
 .ng-node-ports {
-  border-top: 1px solid #303e34;
+  border-top: 1px solid #ccd1cb;
   padding: 2px 11px 5px;
 }
 .ng-port-row {
@@ -327,10 +327,10 @@
   justify-content: space-between;
   height: 18px;
   font-size: 9px;
-  color: #95a79a;
+  color: #556e56;
 }
 .ng-port-row span:last-child {
-  color: #b0c0af;
+  color: #556e56;
 }
 .node-graph .react-flow__handle.ng-handle {
   width: 7px;
@@ -339,26 +339,26 @@
   min-height: 7px;
   border: 1px solid var(--node-color);
   border-radius: 50%;
-  background: #19241b;
+  background: #f4f5f1;
 }
 .node-graph .react-flow__handle.ng-output-handle {
   background: var(--node-color);
 }
 .node-graph .react-flow__handle:hover {
-  box-shadow: 0 0 0 4px #d3e8ac20;
-  background: #e4f2c5;
-  border-color: #e4f2c5;
+  box-shadow: 0 0 0 4px #8ca18a20;
+  background: #778c80;
+  border-color: #98a8a2;
 }
 .node-graph .react-flow__handle.connectionindicator {
   cursor: crosshair;
 }
 .node-graph .react-flow__node:focus-visible {
-  outline: 2px solid #d2e5a4;
+  outline: 2px solid #8ca18a;
   outline-offset: 4px;
   border-radius: 8px;
 }
 .node-graph .react-flow__edge.selected path.react-flow__edge-path {
-  stroke: #d1e5a6 !important;
+  stroke: #4c6950 !important;
   stroke-width: 2.5 !important;
   opacity: 1 !important;
 }
@@ -366,16 +366,16 @@
   stroke-width: 2.5;
 }
 .node-graph .react-flow__selection {
-  background: #cde5b00a;
-  border: 1px solid #95b57d;
+  background: #718a690a;
+  border: 1px solid #8ca18a;
 }
 .node-graph .react-flow__nodesselection-rect {
-  border: 1px dashed #99b681;
-  background: #d7efb203;
+  border: 1px dashed #8ca18a;
+  background: #718a6903;
 }
 .node-graph .react-flow__attribution {
-  background: #121b14aa;
-  color: #5e7161;
+  background: #f4f5f1aa;
+  color: #667168;
   font-size: 8px;
   padding: 1px 4px;
 }
@@ -386,8 +386,8 @@
   width: 142px;
   height: 88px;
   margin: 12px;
-  background: #1a251e;
-  border: 1px solid #3a493b;
+  background: #f4f5f1;
+  border: 1px solid #ccd1cb;
   border-radius: 5px;
   overflow: hidden;
 }
@@ -396,14 +396,14 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #302e24;
-  color: #c7bd96;
-  border: 1px solid #59513a;
+  background: #f4f5f1;
+  color: #343e39;
+  border: 1px solid #cfc3b5;
   border-radius: 5px;
   box-shadow: 0 3px 12px #00000020;
 }
 .ng-note.is-selected {
-  border-color: #c8b879;
+  border-color: #98a8a2;
 }
 .ng-note-title {
   display: flex;
@@ -411,7 +411,7 @@
   gap: 6px;
   padding: 9px 11px 7px;
   font-size: 10px;
-  color: #bdaf81;
+  color: #57645d;
   cursor: grab;
 }
 .ng-note-title span {
@@ -425,7 +425,7 @@
   min-height: 0;
   box-sizing: border-box;
   background: transparent;
-  color: #c3ba9c;
+  color: #343e39;
   border: 0;
   outline: none;
   resize: none;
@@ -435,22 +435,22 @@
   line-height: 1.6;
 }
 .ng-note textarea::placeholder {
-  color: #8c836a;
+  color: #667168;
 }
 .ng-note textarea:focus-visible {
-  box-shadow: inset 0 0 0 1px #b3a471;
+  box-shadow: inset 0 0 0 1px #ccd1cb;
   border-radius: 3px;
 }
 .ng-group {
   width: 100%;
   height: 100%;
-  border: 1px solid #435448;
-  background: #6d96700a;
+  border: 1px solid #ccd1cb;
+  background: #e4e7e20a;
   border-radius: 8px;
 }
 .ng-group.is-selected {
-  border-color: #9bb88d;
-  background: #6d96700e;
+  border-color: #8ca18a;
+  background: #e1e9df0e;
 }
 .ng-group-title {
   display: flex;
@@ -458,8 +458,8 @@
   gap: 7px;
   height: 30px;
   padding: 0 12px;
-  border-bottom: 1px solid #374b3b;
-  color: #b0c2ae;
+  border-bottom: 1px solid #ccd1cb;
+  color: #556e56;
   font-size: 11px;
   cursor: grab;
 }
@@ -470,7 +470,7 @@
   text-overflow: ellipsis;
 }
 .ng-group-caption {
-  color: #657c68;
+  color: #667168;
   letter-spacing: 0.8px;
   font-size: 8px;
 }
@@ -488,13 +488,13 @@
   flex-direction: column;
   gap: 10px;
   text-align: center;
-  background: #111715ed;
-  color: #8c9d8e;
+  background: #f4f5f1ed;
+  color: #556e56;
   padding: 20px;
 }
 .ng-empty strong {
   font-size: 14px;
-  color: #d2ddcf;
+  color: #343e39;
   font-weight: 500;
 }
 .ng-empty > span {
@@ -532,3 +532,55 @@
     transition: none;
   }
 }
+
+
+/* The graph is a pale drafting surface, with paper nodes and muted category ink. */
+.node-graph {
+  --ng-text: #303c35;
+  --ng-muted: #69736c;
+  --ng-border: #cbd1ca;
+  background: #e4e7e3;
+  color: var(--ng-text);
+}
+.ng-toolbar, .ng-footer { background: #f0f1ed; }
+.ng-node {
+  background: #fcfbf8;
+  border-color: #bec9bd;
+  color: #303a33;
+  box-shadow: 0 4px 14px #29392d1a;
+}
+.ng-node-selected {
+  border-color: #68836c;
+  box-shadow: 0 0 0 2px #718c7230, 0 8px 23px #29392d26;
+}
+.ng-node-previewed:not(.ng-node-selected) { border-color: #8b9b82; }
+.ng-node-title, .ng-node-ports { border-color: #d9dfd7; }
+.ng-thumbnail { background: #e6eae3; box-shadow: inset 0 0 0 1px #c4cec5; }
+.ng-node-meta, .ng-node-summary, .ng-port-row { color: #5c6860; }
+.ng-output-pill { background: #e0ead8; color: #476049; }
+.node-graph .react-flow__handle.ng-handle { background: #fcfbf8; }
+.node-graph .react-flow__handle.ng-output-handle { background: var(--node-color); }
+.node-graph .react-flow__edge.selected path.react-flow__edge-path {
+  stroke: #526d57 !important;
+}
+.node-graph .react-flow__selection {
+  background: #8ba68b26;
+  border-color: #668366;
+}
+.node-graph .react-flow__nodesselection-rect { background: #8ba68b13; border-color: #718971; }
+.node-graph .react-flow__attribution { background: #f1f3efdb; color: #65736a; }
+.node-graph .ng-minimap { background: #eff2ee; border-color: #bdc8be; }
+.ng-note {
+  background: #f3e9d7;
+  color: #62543c;
+  border-color: #d5bf9b;
+  box-shadow: 0 4px 12px #4b3d2621;
+}
+.ng-note textarea { color: #60533f; }
+.ng-note-title { color: #7f684a; }
+.ng-note textarea::placeholder { color: #857d6f; }
+.ng-group { background: #849b891c; border-color: #9db39e; }
+.ng-group.is-selected { background: #849b892b; border-color: #688e70; }
+.ng-group-title { border-color: #b6c9b9; color: #486250; }
+.ng-empty { background: #e4e7e3ed; color: #626e65; }
+.ng-empty strong { color: #314238; }
