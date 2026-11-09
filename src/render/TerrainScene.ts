@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, sampleSlope, terrainColor } from './maps';
+import { generatePBR, pbrPixels } from '../materials/pbr';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 
@@ -36,6 +37,9 @@ export class TerrainScene {
   private readonly grid: THREE.GridHelper;
   private readonly plinth: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
   private readonly material: THREE.MeshStandardMaterial;
+  private pbrTextures: THREE.DataTexture[] = [];
+  private lastPBRField: HeightField | null = null;
+  private lastPBRSurface = '';
   private readonly skirtMaterial = new THREE.MeshStandardMaterial({
     color: '#5b6054',
     roughness: 1,
@@ -231,6 +235,8 @@ export class TerrainScene {
       this.project?.worldSize !== project.worldSize ||
       this.project?.heightScale !== project.heightScale;
     const paletteChanged = this.settings.material !== settings.material;
+    const surfaceChanged = JSON.stringify(this.project?.surface ?? null) !==
+      JSON.stringify(project.surface ?? null) || this.project?.seed !== project.seed;
     this.field = field;
     this.project = project;
     if (settings !== this.settings) this.applySettings(settings);
@@ -241,7 +247,10 @@ export class TerrainScene {
       this.needsRender = true;
       if (!this.cameraAdjusted && previousBase !== this.minimumElevation * settings.exaggeration)
         this.fitCamera();
-    } else if (paletteChanged) this.updateColors();
+    } else if (paletteChanged || surfaceChanged) {
+      if (paletteChanged) this.updateColors();
+      this.updatePBRTextures();
+    }
     if (this.firstField) {
       this.firstField = false;
       this.resetCamera();
@@ -330,7 +339,10 @@ export class TerrainScene {
     if (this.terrain) this.terrain.scale.y = settings.exaggeration;
     if (this.skirt) this.skirt.scale.y = settings.exaggeration;
     this.updateSupport();
-    if (paletteChanged && this.terrain) this.updateColors();
+    if (paletteChanged && this.terrain) {
+      this.updateColors();
+      this.updatePBRTextures();
+    }
     if (scaleChanged && this.terrain) this.rebuildSplineGuide();
     if (scaleChanged && this.terrain && !this.cameraAdjusted) this.fitCamera();
     this.renderer.shadowMap.needsUpdate = true;
@@ -384,6 +396,8 @@ export class TerrainScene {
       new THREE.BufferAttribute(new Float32Array(positions.count * 3), 3),
     );
     geometry.computeVertexNormals();
+    // Required by material AO shaders in viewers that sample a second UV set.
+    geometry.setAttribute('uv2', geometry.getAttribute('uv').clone());
     geometry.computeBoundingSphere();
     if (this.terrain) {
       this.scene.remove(this.terrain);
@@ -396,6 +410,7 @@ export class TerrainScene {
     this.scene.add(this.terrain);
     this.spacingUniform.value = Math.max(0.001, (TERRAIN_SIZE * 100) / this.project.worldSize);
     this.updateColors();
+    this.updatePBRTextures();
 
     const boundary: number[] = [];
     for (let x = 0; x <= segments; x++) boundary.push(x);
@@ -450,7 +465,7 @@ export class TerrainScene {
   }
 
   private updateColors() {
-    if (!this.terrain || !this.field || !this.project) return;
+    if (!this.terrain || !this.field || !this.project || this.settings.material === 'pbr') return;
     const geometry = this.terrain.geometry;
     const colors = geometry.getAttribute('color');
     const positions = geometry.getAttribute('position');
@@ -495,6 +510,67 @@ export class TerrainScene {
       colors.setXYZ(i, color.r, color.g, color.b);
     }
     colors.needsUpdate = true;
+  }
+
+  /** Materials are built from the latest terrain without rerunning erosion. */
+  private updatePBRTextures() {
+    if (!this.field || !this.project) return;
+    if (this.settings.material !== 'pbr') {
+      const hadTextures = this.pbrTextures.length > 0;
+      this.pbrTextures.forEach((texture) => texture.dispose());
+      this.pbrTextures = [];
+      this.lastPBRField = null;
+      this.lastPBRSurface = '';
+      if (hadTextures) {
+        this.material.map = null;
+        this.material.normalMap = null;
+        this.material.roughnessMap = null;
+        this.material.aoMap = null;
+        this.material.vertexColors = true;
+        this.material.roughness = 0.94;
+        this.material.needsUpdate = true;
+      }
+      this.needsRender = true;
+      return;
+    }
+    const surfaceKey = JSON.stringify([this.project.seed, this.project.surface ?? null,
+      this.project.worldSize, this.project.heightScale]);
+    if (this.lastPBRField === this.field && this.lastPBRSurface === surfaceKey) return;
+    const maps = generatePBR(this.field, this.project);
+    const n = maps.resolution;
+    const texture = (rgba: Uint8ClampedArray, srgb = false): THREE.DataTexture => {
+      const result = new THREE.DataTexture(new Uint8Array(rgba), n, n, THREE.RGBAFormat);
+      result.flipY = true; // row 0 is north, matching PlaneGeometry north at UV v=1
+      result.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+      result.generateMipmaps = true;
+      result.minFilter = THREE.LinearMipmapLinearFilter;
+      result.magFilter = THREE.LinearFilter;
+      result.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      result.needsUpdate = true;
+      return result;
+    };
+    const albedo = texture(maps.basecolor, true);
+    const roughness = texture(pbrPixels(maps, this.field, this.project, 'roughness'));
+    const occlusion = texture(pbrPixels(maps, this.field, this.project, 'ao'));
+    // The mesh already contains macro geometry normals. Applying the full
+    // exported normal here would count those slopes twice.
+    const microNormal = texture(pbrPixels(maps, this.field, this.project, 'detailNormal'));
+    this.pbrTextures.forEach((old) => old.dispose());
+    this.pbrTextures = [albedo, roughness, occlusion, microNormal];
+    this.material.map = albedo;
+    this.material.normalMap = microNormal;
+    this.material.roughnessMap = roughness;
+    this.material.aoMap = occlusion;
+    this.material.aoMapIntensity = 0.85;
+    this.material.color.set('#ffffff');
+    this.material.normalScale.set(1, 1);
+    this.material.vertexColors = false;
+    this.material.roughness = 1;
+    this.material.metalness = 0;
+    this.material.needsUpdate = true;
+    this.lastPBRField = this.field;
+    this.lastPBRSurface = surfaceKey;
+    this.needsRender = true;
   }
 
   private fitCamera() {
@@ -577,6 +653,8 @@ export class TerrainScene {
 
   dispose() {
     this.disposed = true;
+    this.pbrTextures.forEach(texture => texture.dispose());
+    this.pbrTextures = [];
     cancelAnimationFrame(this.animation);
     this.resizeObserver.disconnect();
     this.controls.dispose();
