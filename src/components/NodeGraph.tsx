@@ -278,7 +278,7 @@ const AnnotationNode = memo(function AnnotationNode({ id, data, selected }: Node
         maxWidth={10000}
         maxHeight={10000}
         isVisible={selected}
-        color="#b3a77d"
+        color="#967d5b"
         onResizeEnd={(_, bounds) => data.onResize(id, bounds)}
       />
       <div className="ng-note-title">
@@ -313,7 +313,7 @@ const TerrainGroupNode = memo(function TerrainGroupNode({
         maxWidth={10000}
         maxHeight={10000}
         isVisible={selected}
-        color="#8eac91"
+        color="#678971"
         onResizeEnd={(_, bounds) => data.onResize(id, bounds)}
       />
       <div className="ng-group-title">
@@ -1069,12 +1069,12 @@ function GraphCanvas(props: NodeGraphProps) {
           colorMode="dark"
           attributionPosition="bottom-left"
           defaultEdgeOptions={{ type: 'default', interactionWidth: 18 }}
-          connectionLineStyle={{ stroke: '#d3e6ad', strokeWidth: 2 }}
+          connectionLineStyle={{ stroke: '#6d846d', strokeWidth: 2 }}
         >
           <Background
             variant={BackgroundVariant.Dots}
-            color="#343d39"
-            bgColor="#111715"
+            color="#b5beb7"
+            bgColor="#e4e7e3"
             gap={20}
             size={1}
           />
@@ -1082,7 +1082,7 @@ function GraphCanvas(props: NodeGraphProps) {
             <MiniMap
               className="ng-minimap"
               nodeColor={(node) => NODE_DEFINITIONS[(node as EditorNode).data.model.kind].color}
-              maskColor="#101613bb"
+              maskColor="#d4ddd6bb"
               pannable
               zoomable
               position="bottom-right"
