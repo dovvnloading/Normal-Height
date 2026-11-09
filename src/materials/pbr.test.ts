@@ -206,11 +206,11 @@ describe('material maps', () => {
   });
 
   it('preserves authored meter frequency instead of enlarging undersampled detail', () => {
-    const project = { ...createProject(), worldSize: 8000, surface: {
+    const project = { ...createProject(), worldSize: 1600, surface: {
       ...resolveSurface(), detailMeters: 24, detailStrength: 1,
     } };
-    const coarse = generatePBR(fixture(128, true), project);
-    const fine = generatePBR(fixture(1024, true), project);
+    const coarse = generatePBR(fixture(64, true), project);
+    const fine = generatePBR(fixture(256, true), project);
     expect(coarse.detail.every((value) => value === 0)).toBe(true);
     expect(fine.detail.some((value) => Math.abs(value) > 0.001)).toBe(true);
   });
