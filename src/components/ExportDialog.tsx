@@ -3,6 +3,7 @@ import { Download, FileImage, Package, Check, LoaderCircle, ArrowUpRight } from 
 import { Modal } from './Modal';
 import { createTerrainWorker } from '../hooks/useTerrainEngine';
 import type { ExportFormat } from '../export/heightmap';
+import { pbrBudgetMiB, checkPBRExportBudget } from '../export/budget';
 import { downloadBlob } from '../model/project';
 import type { TerrainProject, WorkerResponse } from '../model/types';
 
@@ -44,6 +45,17 @@ export function ExportDialog({
     setStage('Export cancelled');
   };
   const run = () => {
+    const memoryGiB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+    const memoryBudgetMiB = pbrBudgetMiB(memoryGiB);
+    if (format === 'pbr') {
+      try {
+        checkPBRExportBudget(resolution, memoryBudgetMiB);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'PBR export exceeds device memory budget.');
+        setSuccess('');
+        return;
+      }
+    }
     const generation = ++generationRef.current;
     setBusy(true);
     setProgress(0);
@@ -102,7 +114,7 @@ export function ExportDialog({
         };
         const field = m.result.field;
         encoder.postMessage(
-          { type: 'encode', id: generation, field, project, format, bundle },
+          { type: 'encode', id: generation, field, project, format, bundle, memoryBudgetMiB },
           [field.height.buffer, field.flow.buffer, field.wear.buffer,
             field.deposition.buffer] as Transferable[],
         );
