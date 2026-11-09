@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Download, FileImage, Package, Check, LoaderCircle, ArrowUpRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { createTerrainWorker } from '../hooks/useTerrainEngine';
-import { makeExport } from '../export/heightmap';
 import type { ExportFormat } from '../export/heightmap';
 import { downloadBlob } from '../model/project';
 import type { TerrainProject, WorkerResponse } from '../model/types';
@@ -24,12 +23,12 @@ export function ExportDialog({
   const [success, setSuccess] = useState('');
   const workerRef = useRef<Worker | null>(null);
   const generationRef = useRef(0);
-  const encodingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const encoderRef = useRef<Worker | null>(null);
   useEffect(
     () => () => {
       ++generationRef.current;
       workerRef.current?.terminate();
-      if (encodingRef.current !== null) clearTimeout(encodingRef.current);
+      encoderRef.current?.terminate();
     },
     [],
   );
@@ -37,8 +36,8 @@ export function ExportDialog({
     ++generationRef.current;
     workerRef.current?.terminate();
     workerRef.current = null;
-    if (encodingRef.current !== null) clearTimeout(encodingRef.current);
-    encodingRef.current = null;
+    encoderRef.current?.terminate();
+    encoderRef.current = null;
     setBusy(false);
     setStage('Export cancelled');
   };
@@ -64,24 +63,47 @@ export function ExportDialog({
         workerRef.current = null;
       } else if (m.type === 'result') {
         setProgress(0.94);
-        setStage('Encoding your maps');
+        setStage('Generating and encoding material maps');
         worker.terminate();
         workerRef.current = null;
-        encodingRef.current = setTimeout(() => {
-          encodingRef.current = null;
-          if (generation !== generationRef.current) return;
-          try {
-            const file = makeExport(m.result.field, project, format, bundle);
-            downloadBlob(new Blob([file.bytes.slice().buffer], { type: file.mime }), file.filename);
-            setSuccess(file.filename);
-            setProgress(1);
-            setStage('Export ready');
-          } catch (err) {
-            setError(err instanceof Error ? err.message : 'Could not encode the export.');
-          } finally {
+        const encoder = new Worker(new URL('../export/export.worker.ts', import.meta.url), {
+          type: 'module',
+        });
+        encoderRef.current = encoder;
+        encoder.onmessage = (event: MessageEvent<
+          | { type: 'progress'; id: number; stage: string }
+          | { type: 'error'; id: number; message: string }
+          | { type: 'result'; id: number; bytes: ArrayBuffer; filename: string; mime: string }
+        >) => {
+          if (generation !== generationRef.current || event.data.id !== generation) return;
+          const message = event.data;
+          if (message.type === 'progress') setStage(message.stage);
+          else {
+            encoder.terminate();
+            encoderRef.current = null;
             setBusy(false);
+            if (message.type === 'error') setError(message.message);
+            else {
+              downloadBlob(new Blob([message.bytes], { type: message.mime }), message.filename);
+              setSuccess(message.filename);
+              setProgress(1);
+              setStage('Export ready');
+            }
           }
-        }, 30);
+        };
+        encoder.onerror = (event) => {
+          if (generation !== generationRef.current) return;
+          setError(event.message || 'Could not encode the export.');
+          setBusy(false);
+          encoder.terminate();
+          encoderRef.current = null;
+        };
+        const field = m.result.field;
+        encoder.postMessage(
+          { type: 'encode', id: generation, field, project, format, bundle },
+          [field.height.buffer, field.flow.buffer, field.wear.buffer,
+            field.deposition.buffer] as Transferable[],
+        );
       }
     };
     worker.onerror = (e) => {
@@ -125,6 +147,15 @@ export function ExportDialog({
               <option value="flow">Flow visualization · 8-bit PNG</option>
               <option value="wear">Erosion wear · 8-bit PNG</option>
               <option value="deposition">Deposition · 8-bit PNG</option>
+              <option value="pbr">Complete PBR material set · ZIP</option>
+              <option value="basecolor">PBR base color · PNG</option>
+              <option value="roughness">PBR roughness · PNG</option>
+              <option value="ao">PBR ambient occlusion · PNG</option>
+              <option value="metallic">PBR metallic · PNG</option>
+              <option value="orm">PBR packed ORM · PNG</option>
+              <option value="splat">Terrain layer weights · RGBA PNG</option>
+              <option value="curvature">Terrain curvature · PNG</option>
+              <option value="normalDX">Normal map · DirectX -Y PNG</option>
             </select>
           </label>
           <label>
@@ -157,13 +188,13 @@ export function ExportDialog({
         <label className="export-bundle">
           <Package size={19} />
           <span>
-            <strong>Include project & elevation metadata</strong>
-            <small>ZIP bundle with the map, reproducible graph, and scale information.</small>
+            <strong>{format === 'pbr' ? 'Complete material bundle' : 'Include project & elevation metadata'}</strong>
+            <small>{format === 'pbr' ? 'Includes all PBR maps, height, metadata, and project.' : 'ZIP bundle with map, reproducible graph and scale information.'}</small>
           </span>
           <input
             type="checkbox"
             checked={bundle}
-            disabled={busy}
+            disabled={busy || format === 'pbr'}
             onChange={(e) => setBundle(e.target.checked)}
           />
         </label>
@@ -181,8 +212,10 @@ export function ExportDialog({
           <div>
             <dt>Precision</dt>
             <dd>
-              {format === 'png16'
-                ? '65,536 elevation levels'
+              {format === 'pbr'
+                ? '16-bit height + 8-bit PBR maps'
+                : format === 'png16'
+                  ? '65,536 elevation levels'
                 : format === 'raw32'
                   ? '32-bit float · meters'
                   : '8-bit per channel'}
@@ -198,6 +231,9 @@ export function ExportDialog({
             PNG uses the terrain’s actual minimum and maximum elevation. The metadata records the
             values needed to restore elevation in meters.
           </p>
+        )}
+        {format === 'pbr' && (
+          <p className="parameter-hint">PBR ZIP includes base color, both normal conventions, micro-normal, roughness, AO, metallic, ORM, Unity HDRP mask, layer weights, curvature, and 16-bit displacement. Albedo is sRGB; other maps are linear data.</p>
         )}
         {format === 'normal' && (
           <p className="parameter-hint">
@@ -236,7 +272,7 @@ export function ExportDialog({
             ? 'Building export…'
             : success
               ? 'Export again'
-              : `Export ${bundle ? 'bundle' : 'map'}`}
+              : `Export ${format === 'pbr' || bundle ? 'bundle' : 'map'}`}
         </button>
       </footer>
     </Modal>
