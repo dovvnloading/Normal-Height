@@ -97,6 +97,7 @@ export class TerrainScene {
     this.renderer.domElement.setAttribute('role', 'img');
     this.renderer.domElement.tabIndex = 0;
     host.appendChild(this.renderer.domElement);
+    this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.scene.background = new THREE.Color('#cbd2cf');
     this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
 
@@ -519,6 +520,7 @@ export class TerrainScene {
   private updatePBRTextures() {
     if (!this.field || !this.project) return;
     if (this.settings.material !== 'pbr') {
+      this.renderer.domElement.dataset.materialStatus = 'inactive';
       ++this.pbrGeneration;
       this.pbrRelease?.();
       this.pbrRelease = null;
@@ -548,6 +550,7 @@ export class TerrainScene {
     const generation = ++this.pbrGeneration;
     this.lastPBRField = field;
     this.lastPBRSurface = surfaceKey;
+    this.renderer.domElement.dataset.materialStatus = 'loading';
     const request = requestPBR(field, project);
     this.pbrRelease = request.release;
     request.promise.then((maps) => {
@@ -587,6 +590,7 @@ export class TerrainScene {
       this.material.roughness = 1;
       this.material.metalness = 0;
       this.material.needsUpdate = true;
+      this.renderer.domElement.dataset.materialStatus = 'ready';
       this.needsRender = true;
     }).catch((error: Error) => {
       if (this.disposed || generation !== this.pbrGeneration) return;
@@ -594,6 +598,7 @@ export class TerrainScene {
       this.pbrRelease = null;
       this.lastPBRField = null;
       this.lastPBRSurface = '';
+      this.renderer.domElement.dataset.materialStatus = 'error';
       this.onError(error.message || 'Could not generate PBR materials.');
     });
   }
