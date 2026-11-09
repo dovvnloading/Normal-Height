@@ -634,8 +634,8 @@ test('edits surface settings and exports aligned PBR textures in a browser', asy
 }, testInfo) => {
   await page.getByRole('button', { name: 'Scene', exact: true }).click();
   await page.getByLabel('Material biome').selectOption('volcanic');
-  await page.getByLabel('Snow-line elevation').fill('0.82');
-  await page.getByLabel('Snow-line elevation').press('Enter');
+  await page.getByRole('spinbutton', { name: 'Snow-line elevation value' }).fill('0.82');
+  await page.getByRole('spinbutton', { name: 'Snow-line elevation value' }).press('Enter');
   await expect(page.getByLabel('Material biome')).toHaveValue('volcanic');
   await page.getByRole('button', { name: 'Export maps', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
