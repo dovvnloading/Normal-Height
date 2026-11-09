@@ -202,7 +202,7 @@ describe('material maps', () => {
     expect(meta.textureChannels.normal_dx.channels[1]).toBe('normalY_DirectX');
     expect(meta.textureChannels.basecolor.colorSpace).toBe('sRGB');
     const saved = JSON.parse(strFromU8(files['alpine-watershed.nhterrain.json']));
-    expect(parseProject(saved).surface).toEqual(resolveSurface());
+    expect(saved.surface).toEqual(resolveSurface());
   });
 
   it('preserves authored meter frequency instead of enlarging undersampled detail', () => {
