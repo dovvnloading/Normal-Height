@@ -251,10 +251,9 @@ export class TerrainScene {
     this.floor.material.color.set(theme === 'dark' ? '#303839' : '#b3bdb7');
     this.plinth.material.color.set(theme === 'dark' ? '#414944' : '#8f9b92');
     this.skirtMaterial.color.set(theme === 'dark' ? '#515b52' : '#5b6054');
-    this.grid.setColors(
-      theme === 'dark' ? '#596862' : '#909f96',
-      theme === 'dark' ? '#3d4c49' : '#a7b2aa',
-    );
+    // GridHelper uses vertex colors in this Three.js version. Dim the grid's
+    // shared material instead of trying to call a non-existent setColors API.
+    (this.grid.material as THREE.LineBasicMaterial).opacity = theme === 'dark' ? 0.24 : 0.42;
     this.needsRender = true;
   }
 
