@@ -203,15 +203,13 @@ export function createProject(presetId = 'alpine'): TerrainProject {
     presetId: preset.id,
     graph: {
       nodes,
-      edges: nodes
-        .slice(1)
-        .map((n, i) => ({
-          id: `${nodes[i].id}-${n.id}`,
-          source: nodes[i].id,
-          target: n.id,
-          sourceHandle: 'height',
-          targetHandle: 'in',
-        })),
+      edges: nodes.slice(1).map((n, i) => ({
+        id: `${nodes[i].id}-${n.id}`,
+        source: nodes[i].id,
+        target: n.id,
+        sourceHandle: 'height',
+        targetHandle: 'in',
+      })),
     },
   };
 }

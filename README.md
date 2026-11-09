@@ -19,7 +19,7 @@ Open the URL printed by Vite. All terrain generation and project storage happen 
 npm run build       # Typecheck and generate dist/
 npm run preview     # Serve the production build
 npm test            # Engine, export, and rendering-math tests
-npm run test:e2e     # Chromium workflow tests; install Playwright first
+npm run test:e2e     # Build and verify the production app in Chromium
 ```
 
 For the browser tests, run `npx playwright install chromium` once. CI installs its browser dependencies automatically and uploads screenshots, traces, and the production app as build artifacts.
@@ -79,7 +79,7 @@ Projects autosave locally in the browser. Use **Save project** to keep a portabl
 
 1. Open **Alpine watershed** and wait for the first terrain to finish.
 2. Select **Carve the watershed**. Change rainfall, erosion rate, or sediment capacity.
-3. Choose **2D → Flow** to inspect the drainage network, or use **Split**.
+3. Choose **2D map → Water flow** to inspect the drainage network, or use **Split**.
 4. Use the eye on **Alpine spine** to compare the uneroded source. Return to Terrain output when finished.
 5. Open **Scene** to set tile width and elevation scale. Viewport exaggeration changes the display only.
 6. Export a **16-bit PNG** at the desired grid size, with the metadata bundle enabled.

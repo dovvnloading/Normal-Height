@@ -45,7 +45,7 @@ const DEFAULT_SETTINGS: ViewSettings = {
   material: 'alpine',
   sunAzimuth: 315,
   sunElevation: 38,
-  exaggeration: 1.4,
+  exaggeration: 1,
   contours: false,
   wireframe: false,
   autoRotate: false,

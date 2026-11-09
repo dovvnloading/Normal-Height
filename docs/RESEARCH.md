@@ -22,6 +22,12 @@ Maxon's documentation lists Naki among its many noise families but does not spec
 
 - [Maxon Noise inputs — official documentation](https://help.maxon.net/c4d/en-us/Content/html/COM_REDSHIFT3D_REDSHIFT4C4D_NODES_CORE_MAXONNOISE-NET_MAXON_NODE_BASE_GROUP_INPUTS.html)
 
+### Mountain structure
+
+The mountain generator separates the elevation of the broad spine or massif from its secondary ridge relief. Low-frequency fields vary the main crest and mountain shoulders; a rounded ridge kernel contributes smaller-scale relief on those forms. Applying the entire mountain elevation to every sharp ridged-noise intersection produces implausible needles, so the source limits that contribution before erosion. The separate Ridged Multifractal noise remains sharp for users who want that field explicitly.
+
+The default 3D view uses physical horizontal and vertical scale. Adjustable vertical exaggeration affects only the display; it never changes simulation heights, normals exported from physical dimensions, or elevation files.
+
 ## Hydraulic erosion
 
 The engine runs a deterministic droplet simulation in a Web Worker. Water parcels follow bilinearly sampled height gradients with inertia. Their carrying capacity depends on downhill travel, speed, and remaining water. A parcel removes material through a weighted circular brush when below capacity and deposits carried material as it slows, becomes oversaturated, or meets rising ground. Water evaporates; parcel lifetime is bounded. The solver records flow, wear, deposition, and material leaving the active simulation. Its `exportedSediment` statistic includes boundary runoff and carried sediment still unsettled when a terminal mask prevents local deposition; it is not strictly a measurement of boundary runoff. It uses actual float-buffer changes for erosion and deposition accounting.

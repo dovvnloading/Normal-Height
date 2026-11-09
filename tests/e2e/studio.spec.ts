@@ -9,6 +9,98 @@ const graph = (page: Page) => page.getByRole('region', { name: 'Terrain node gra
 const terrainNodes = (page: Page) => graph(page).locator('.react-flow__node-terrain');
 const mapCanvas = (page: Page) => page.locator('.nh-map canvas');
 
+interface HeightAudit {
+  jobId: number;
+  resolution: number;
+  outputNodeId: string;
+  samples: number;
+  sha256: string;
+}
+interface BrowserAudit {
+  heights: HeightAudit[];
+  raster?: ImageData;
+}
+type AuditedWindow = Window & typeof globalThis & { __terrainAudit: BrowserAudit };
+
+/** Observe actual delivered worker buffers without adding test hooks to the application. */
+async function observeHeightBuffers(page: Page) {
+  await page.addInitScript(() => {
+    const scope = window as AuditedWindow;
+    scope.__terrainAudit = { heights: [] };
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        this.addEventListener('message', async (event: MessageEvent) => {
+          const response = event.data;
+          const height = response?.result?.field?.height;
+          if (response?.type !== 'result' || !(height instanceof Float32Array)) return;
+          // Copy before the application receives the message; audit every Float32 bit.
+          const digest = await crypto.subtle.digest('SHA-256', height.slice().buffer);
+          scope.__terrainAudit.heights.push({
+            jobId: response.id,
+            resolution: response.result.field.resolution,
+            outputNodeId: response.result.outputNodeId,
+            samples: height.length,
+            sha256: Array.from(new Uint8Array(digest), (byte) =>
+              byte.toString(16).padStart(2, '0'),
+            ).join(''),
+          });
+        });
+      }
+    };
+  });
+}
+
+async function heightAudits(page: Page) {
+  return page.evaluate(() => (window as AuditedWindow).__terrainAudit.heights);
+}
+
+async function rememberRaster(page: Page) {
+  await mapCanvas(page).evaluate((element: HTMLCanvasElement) => {
+    (window as AuditedWindow).__terrainAudit.raster = element
+      .getContext('2d')!
+      .getImageData(0, 0, element.width, element.height);
+  });
+}
+
+async function compareRaster(page: Page) {
+  return mapCanvas(page).evaluate((element: HTMLCanvasElement) => {
+    const before = (window as AuditedWindow).__terrainAudit.raster!;
+    const after = element.getContext('2d')!.getImageData(0, 0, element.width, element.height);
+    const sameDimensions = before.width === after.width && before.height === after.height;
+    let changedPixels = 0,
+      totalDelta = 0,
+      maxChannelDelta = 0,
+      centerMaxChannelDelta = 0;
+    const halfCenter = Math.min(96, Math.floor(after.width / 4), Math.floor(after.height / 4));
+    for (let i = 0; i < Math.min(before.data.length, after.data.length); i += 4) {
+      let changed = false;
+      const x = (i / 4) % after.width,
+        y = Math.floor(i / 4 / after.width);
+      const center =
+        Math.abs(x - after.width / 2) < halfCenter && Math.abs(y - after.height / 2) < halfCenter;
+      for (let channel = 0; channel < 4; channel++) {
+        const delta = Math.abs(before.data[i + channel] - after.data[i + channel]);
+        changed ||= delta > 0;
+        totalDelta += delta;
+        maxChannelDelta = Math.max(maxChannelDelta, delta);
+        if (center) centerMaxChannelDelta = Math.max(centerMaxChannelDelta, delta);
+      }
+      if (changed) changedPixels++;
+    }
+    return {
+      sameDimensions,
+      width: after.width,
+      height: after.height,
+      changedPixels,
+      maxChannelDelta,
+      centerMaxChannelDelta,
+      meanAbsoluteChannelDelta: totalDelta / after.data.length,
+    };
+  });
+}
+
 async function ready(page: Page) {
   await expect(page.locator('.status-bar')).toContainText('Terrain ready', { timeout: 60_000 });
   await expect(page.locator('.nh-render-progress')).toHaveCount(0);
@@ -76,6 +168,7 @@ test.beforeEach(async ({ page }) => {
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
   });
+  await observeHeightBuffers(page);
   await page.goto('/');
   await ready(page);
 });
@@ -255,9 +348,14 @@ test('downloads a project and restores its name, seed, graph, parameters, and no
 
 test('a broken output connection reports an error, preserves terrain, and recovers with undo', async ({
   page,
-}) => {
+}, testInfo) => {
   await heightView(page);
   const lastSuccessfulMap = await mapFingerprint(page);
+  await expect.poll(async () => (await heightAudits(page)).length).toBeGreaterThan(0);
+  const originalAudits = await heightAudits(page);
+  const originalHeight = originalAudits.at(-1)!;
+  await rememberRaster(page);
+  await capture(page, testInfo, 'undo-original-heightmap.png');
   const connection = graph(page).getByRole('group', {
     name: 'Edge from thermal to output',
     exact: true,
@@ -273,11 +371,37 @@ test('a broken output connection reports an error, preserves terrain, and recove
   );
   await expect(page.locator('.status-bar')).toContainText('Graph needs attention');
   expect(await mapFingerprint(page)).toBe(lastSuccessfulMap);
+  expect((await heightAudits(page)).length).toBe(originalAudits.length);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(graph(page).locator('.react-flow__edge')).toHaveCount(4);
   await ready(page);
-  expect(await mapFingerprint(page)).toBe(lastSuccessfulMap);
+  // A fresh completed worker result is required, not merely the old ready state.
+  await expect
+    .poll(async () => (await heightAudits(page)).length, { timeout: 60_000 })
+    .toBeGreaterThan(originalAudits.length);
+  const restoredHeight = (await heightAudits(page)).at(-1)!;
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const rasterDelta = await compareRaster(page);
+  await testInfo.attach('undo-data-and-raster-audit.json', {
+    body: JSON.stringify({ originalHeight, restoredHeight, rasterDelta }, null, 2),
+    contentType: 'application/json',
+  });
+  await capture(page, testInfo, 'undo-restored-heightmap.png');
+  expect(restoredHeight.resolution).toBe(originalHeight.resolution);
+  expect(restoredHeight.samples).toBe(originalHeight.samples);
+  expect(restoredHeight.outputNodeId).toBe(originalHeight.outputNodeId);
+  expect(restoredHeight.sha256).toBe(originalHeight.sha256);
+  expect(rasterDelta.sameDimensions).toBe(true);
+  // Canvas readback can switch Chromium from GPU to CPU resampling. Require the
+  // displayed terrain to agree within two 8-bit levels, while raw heights above
+  // must be bit-for-bit identical across every sample. Exclude border antialiasing.
+  expect(rasterDelta.centerMaxChannelDelta).toBeLessThanOrEqual(2);
 });
 
 test('protects the graph inside a modal and exports a real 512-square 16-bit PNG bundle', async ({

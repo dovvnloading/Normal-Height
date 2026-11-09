@@ -96,7 +96,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
       range(
         'width',
         'Range width',
-        0.55,
+        0.62,
         0.12,
         1,
         0.01,
@@ -115,7 +115,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
       range(
         'sharpness',
         'Ridge sharpness',
-        1.6,
+        1.25,
         0.5,
         4,
         0.05,
@@ -145,7 +145,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
       range(
         'roughness',
         'Roughness',
-        0.48,
+        0.42,
         0.1,
         0.8,
         0.01,

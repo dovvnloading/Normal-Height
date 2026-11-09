@@ -154,14 +154,14 @@ function createMountains(node: TerrainNode, n: number, noise: Noise): Float32Arr
   const map = new Float32Array(n * n);
   const scale = number(node, 'scale', 3.2, 0.1, 30),
     octaves = Math.round(number(node, 'octaves', 6, 1, 10));
-  const roughness = number(node, 'roughness', 0.48, 0.1, 0.85),
+  const roughness = number(node, 'roughness', 0.42, 0.1, 0.85),
     lacunarity = number(node, 'lacunarity', 2.1, 1.2, 3.5);
   const warp = number(node, 'warp', 0.85, 0, 3),
-    sharpness = number(node, 'sharpness', 1.6, 0.4, 4);
+    sharpness = number(node, 'sharpness', 1.25, 0.4, 4);
   const angle = (number(node, 'direction', -24, -360, 360) * Math.PI) / 180,
     cos = Math.cos(angle),
     sin = Math.sin(angle);
-  const width = number(node, 'width', 0.55, 0.12, 1.5),
+  const width = number(node, 'width', 0.62, 0.12, 1.5),
     relief = number(node, 'relief', 0.78, 0, 2),
     base = number(node, 'base', 0.05, -1, 1);
   const profile = text(node, 'profile', 'range');
@@ -177,9 +177,10 @@ function createMountains(node: TerrainNode, n: number, noise: Noise): Float32Arr
         wu * scale + 12.36,
         wv * scale + 8.17,
         octaves,
-        roughness,
+        roughness * 0.82,
         lacunarity,
         'ridged',
+        0.22 / sharpness,
       );
       const detail = noise.fractal(
         wu * scale * 1.7 + 51.1,
@@ -199,18 +200,31 @@ function createMountains(node: TerrainNode, n: number, noise: Noise): Float32Arr
           Math.exp(-radius * 3) * detail * 0.035;
       } else if (profile === 'massif') {
         const radius = Math.hypot(wu * 0.85, wv * 1.15) / width;
-        shape = Math.exp(-radius * radius * 1.3) * (0.22 + 0.78 * Math.pow(ridge, sharpness * 0.7));
+        const broadMass =
+          0.72 + 0.28 * noise.fractal(wu * scale * 0.42 + 7, wv * scale * 0.42 - 4, 3, 0.42);
+        shape =
+          Math.exp(-radius * radius * 1.15) *
+          broadMass *
+          (0.66 + 0.34 * Math.pow(ridge, sharpness * 0.65));
       } else if (profile === 'badlands') {
         const envelope =
           0.45 + 0.4 * smoothstep(-0.5, 0.7, noise.fractal(wu * 0.8 + 3.1, wv * 0.8 + 4.1, 3));
         shape = envelope * (0.18 + 0.82 * Math.pow(ridge, sharpness * 1.2));
       } else {
-        const envelope = Math.exp(-(((wv - bend) / width) ** 2) * 2.2);
-        const alongRange = 0.7 + 0.3 * smoothstep(-0.65, 0.6, noise.simplex(wu * 2.4 + 4, 13.5));
-        const foothills = Math.exp(-(((wv - bend) / (width * 1.9)) ** 2) * 2) * 0.14;
+        // The broad spine carries the elevation. Small ridges contribute
+        // relief on its flanks instead of turning every zero crossing of
+        // ridged noise into a peak with the full height of the mountain.
+        const envelope = Math.exp(-(((wv - bend) / width) ** 2) * 1.85);
+        const alongRange =
+          0.56 + 0.44 * smoothstep(-0.5, 0.5, noise.fractal(wu * scale * 0.55 + 4, 13.5, 3, 0.42));
+        const broadRock =
+          0.83 + 0.17 * noise.fractal(wu * scale * 0.65 + 3.8, wv * scale * 0.65 - 8.1, 3, 0.4);
+        const ridgeRelief = 0.7 + 0.3 * Math.pow(ridge, sharpness * 0.65);
+        const foothills = Math.exp(-(((wv - bend) / (width * 1.7)) ** 2) * 2) * 0.12;
         shape =
-          envelope * alongRange * (0.2 + 0.8 * Math.pow(ridge, sharpness * 0.8)) +
-          foothills * (0.5 + detail);
+          envelope * alongRange * broadRock * ridgeRelief +
+          foothills * (0.65 + detail * 0.55) +
+          envelope * detail * 0.025;
       }
       const edge = 1 - smoothstep(0.78, 1.38, Math.max(Math.abs(px), Math.abs(py)));
       map[y * n + x] = base + Math.max(0, shape) * relief * edge;

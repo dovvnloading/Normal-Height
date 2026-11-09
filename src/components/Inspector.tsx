@@ -259,7 +259,7 @@ export function Inspector({
                   key: 'exaggeration',
                   label: 'Vertical exaggeration',
                   type: 'range',
-                  default: 1.4,
+                  default: 1,
                   min: 0.25,
                   max: 3,
                   step: 0.05,

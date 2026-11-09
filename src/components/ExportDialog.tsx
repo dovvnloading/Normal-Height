@@ -23,14 +23,27 @@ export function ExportDialog({
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const workerRef = useRef<Worker | null>(null);
-  useEffect(() => () => workerRef.current?.terminate(), []);
+  const generationRef = useRef(0);
+  const encodingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      ++generationRef.current;
+      workerRef.current?.terminate();
+      if (encodingRef.current !== null) clearTimeout(encodingRef.current);
+    },
+    [],
+  );
   const cancel = () => {
+    ++generationRef.current;
     workerRef.current?.terminate();
     workerRef.current = null;
+    if (encodingRef.current !== null) clearTimeout(encodingRef.current);
+    encodingRef.current = null;
     setBusy(false);
     setStage('Export cancelled');
   };
   const run = () => {
+    const generation = ++generationRef.current;
     setBusy(true);
     setProgress(0);
     setError('');
@@ -39,6 +52,7 @@ export function ExportDialog({
     const worker = createTerrainWorker();
     workerRef.current = worker;
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
+      if (generation !== generationRef.current) return;
       const m = event.data;
       if (m.type === 'progress') {
         setProgress(m.progress * 0.92);
@@ -53,7 +67,9 @@ export function ExportDialog({
         setStage('Encoding your maps');
         worker.terminate();
         workerRef.current = null;
-        setTimeout(() => {
+        encodingRef.current = setTimeout(() => {
+          encodingRef.current = null;
+          if (generation !== generationRef.current) return;
           try {
             const file = makeExport(m.result.field, project, format, bundle);
             downloadBlob(new Blob([file.bytes.slice().buffer], { type: file.mime }), file.filename);
@@ -69,6 +85,7 @@ export function ExportDialog({
       }
     };
     worker.onerror = (e) => {
+      if (generation !== generationRef.current) return;
       setError(e.message || 'Export failed. Try a lower resolution.');
       setBusy(false);
       worker.terminate();

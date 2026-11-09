@@ -158,6 +158,7 @@ export class Noise {
     persistence = 0.5,
     lacunarity = 2,
     mode = 'fbm',
+    ridgeSoftness = 0,
   ): number {
     let sum = 0,
       weight = 0,
@@ -167,7 +168,15 @@ export class Noise {
       const n = this.perlin(x + octave * 19.19, y + octave * 7.73);
       let v = n;
       if (mode === 'ridged') {
-        v = Math.max(0, 1 - Math.abs(n));
+        // Mountain sources can round the absolute-value cusp without blurring
+        // the heightfield or removing small drainage detail. The standalone
+        // ridged noise mode keeps its classic sharp kernel by default.
+        const folded =
+          ridgeSoftness > 0
+            ? (Math.sqrt(n * n + ridgeSoftness * ridgeSoftness) - ridgeSoftness) /
+              (Math.sqrt(1 + ridgeSoftness * ridgeSoftness) - ridgeSoftness)
+            : Math.abs(n);
+        v = Math.max(0, 1 - folded);
         v = v * v * feedback;
         feedback = clamp(v * 2.1);
       } else if (mode === 'billow') v = Math.pow(Math.abs(n), 0.65);

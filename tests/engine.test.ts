@@ -19,15 +19,13 @@ const project = (
   presetId: 'test',
   graph: {
     nodes,
-    edges: nodes
-      .slice(1)
-      .map((value, i) => ({
-        id: `e${i}`,
-        source: nodes[i].id,
-        target: value.id,
-        sourceHandle: 'height',
-        targetHandle: 'in',
-      })),
+    edges: nodes.slice(1).map((value, i) => ({
+      id: `e${i}`,
+      source: nodes[i].id,
+      target: value.id,
+      sourceHandle: 'height',
+      targetHandle: 'in',
+    })),
   },
 });
 const sum = (values: Float32Array) => values.reduce((total, value) => total + value, 0);
