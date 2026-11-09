@@ -32,7 +32,6 @@ import { Modal } from './components/Modal';
 import { createNode } from './model/registry';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
-import { DEFAULT_SPLINE_PATH } from './model/splines';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
