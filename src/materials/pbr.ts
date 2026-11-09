@@ -191,6 +191,7 @@ export function generatePBR(field: HeightField, project: TerrainProject): PBRMap
       const radii = [2, 6, 17];
       for (const radius of radii) {
         for (const [ox, oy] of [[radius, 0], [-radius, 0], [0, radius], [0, -radius]]) {
+          if (x + ox < 0 || y + oy < 0 || x + ox >= n || y + oy >= n) continue;
           const elevation = neighbor(field.height, n, x + ox, y + oy);
           const rise = (elevation - h - gx * ox - gy * oy) * physicalSlope / radius;
           horizon += clamp(rise * 1.8, 0, 1);
@@ -238,7 +239,8 @@ export function materialNormalPixels(
       const length = Math.hypot(dx, dy, 1);
       const p = (y * n + x) * 4;
       pixels[p] = Math.round((-dx / length * 0.5 + 0.5) * 255);
-      pixels[p + 1] = Math.round(((directX ? -dy : dy) / length * 0.5 + 0.5) * 255);
+      const green = Math.round((dy / length * 0.5 + 0.5) * 255);
+      pixels[p + 1] = directX ? 255 - green : green;
       pixels[p + 2] = Math.round((1 / length * 0.5 + 0.5) * 255);
       pixels[p + 3] = 255;
     }
