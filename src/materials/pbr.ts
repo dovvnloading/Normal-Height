@@ -45,6 +45,7 @@ export type PBRChannel =
   | 'ao'
   | 'metallic'
   | 'orm'
+  | 'unityMask'
   | 'splat'
   | 'curvature'
   | 'normal'
@@ -164,7 +165,7 @@ export function generatePBR(field: HeightField, project: TerrainProject): PBRMap
       const weightSum = Math.max(1e-9, rock + soil + vegetation + snowWeight);
       const weights = [rock, soil, vegetation, snowWeight].map(w => w / weightSum);
       const r = Math.round(weights[0] * 255);
-      const g = Math.round(weights[1] * 255);
+      const g = Math.min(255 - r, Math.round(weights[1] * 255));
       const b = Math.min(255 - r - g, Math.round(weights[2] * 255));
       splat[p] = r;
       splat[p + 1] = g;
@@ -265,8 +266,12 @@ export function pbrPixels(
     if (channel === 'orm') {
       pixels[p] = maps.ao[i];
       pixels[p + 1] = maps.roughness[i];
-    }
-    pixels[p + 3] = 255;
+      pixels[p + 3] = 255;
+    } else if (channel === 'unityMask') {
+      pixels[p + 1] = maps.ao[i];
+      pixels[p + 2] = 255; // full detail-mask weight; no authored detail mask yet
+      pixels[p + 3] = 255 - maps.roughness[i]; // smoothness
+    } else pixels[p + 3] = 255;
   }
   return pixels; // metallic is black for all supported geological materials
 }
