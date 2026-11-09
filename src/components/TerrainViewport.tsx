@@ -886,7 +886,7 @@ export function TerrainViewport({
               className="nh-display-reset"
               onClick={() => {
                 change({
-                  material: 'alpine',
+                  material: 'pbr',
                   sunAzimuth: 315,
                   sunElevation: 38,
                   exaggeration: 1,
