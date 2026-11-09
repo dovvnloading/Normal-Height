@@ -16,7 +16,7 @@ export function ExportDialog({
   project: TerrainProject;
   onClose: () => void;
 }) {
-  const [resolution, setResolution] = useState(() => EXPORT_RESOLUTIONS.find((n) => n >= Math.max(512, project.resolution)) ?? 2048);
+  const [resolution, setResolution] = useState<number>(() => EXPORT_RESOLUTIONS.find((n) => n >= Math.max(512, project.resolution)) ?? 2048);
   const [format, setFormat] = useState<ExportFormat>('png16');
   const [bundle, setBundle] = useState(true);
   const [busy, setBusy] = useState(false);
