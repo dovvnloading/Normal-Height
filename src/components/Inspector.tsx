@@ -8,12 +8,21 @@ import {
   ChevronDown,
   ArrowUpRight,
   MountainSnow,
+  Route,
+  RotateCcw,
+  Plus,
+  ArrowDownUp,
 } from 'lucide-react';
 import { NODE_DEFINITIONS } from '../model/registry';
+import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
+import type { SplinePoint } from '../model/splines';
 import { NumberField, ParamControl } from './Controls';
 import type { TerrainNode, TerrainProject, ParamValue, ViewSettings } from '../model/types';
 
 interface Props {
+  splineEditing: boolean;
+  onSplinePath: (path: SplinePoint[]) => void;
+  onSplineEdit: () => void;
   node: TerrainNode | null;
   project: TerrainProject;
   previewNodeId?: string;
@@ -29,6 +38,9 @@ interface Props {
   onClose?: () => void;
 }
 export function Inspector({
+  splineEditing,
+  onSplinePath,
+  onSplineEdit,
   node,
   project,
   previewNodeId,
@@ -117,6 +129,102 @@ export function Inspector({
                   </div>
                 </details>
               ))}
+              {node.kind === 'spline' && (() => {
+                const points = node.path ?? DEFAULT_SPLINE_PATH;
+                const changePoint = (index: number, coord: 'x' | 'y', percent: number) => {
+                  if (!Number.isFinite(percent)) return;
+                  onSplinePath(points.map((point, i) =>
+                    i === index ? { ...point, [coord]: Math.max(0, Math.min(1, percent / 100)) } : { ...point },
+                  ));
+                };
+                const addPoint = () => {
+                  if (points.length >= MAX_SPLINE_POINTS) return;
+                  let segment = 0, longest = -1;
+                  for (let i = 0; i < points.length - 1; i++) {
+                    const length = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
+                    if (length > longest) { longest = length; segment = i; }
+                  }
+                  const point = {
+                    x: (points[segment].x + points[segment + 1].x) / 2,
+                    y: (points[segment].y + points[segment + 1].y) / 2,
+                  };
+                  onSplinePath(insertSplinePoint(points, point));
+                };
+                return (
+                  <section className="spline-editor" aria-label="Spline path editor">
+                    <div className="spline-editor-heading">
+                      <Route size={15} />
+                      <strong>Path designer</strong>
+                      <span>{points.length} points</span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`button ${splineEditing ? 'primary' : 'secondary'} spline-edit-button`}
+                      aria-pressed={splineEditing}
+                      onClick={onSplineEdit}
+                    >
+                      <Route size={14} />
+                      {splineEditing ? 'Finish editing' : 'Edit path on 2D map'}
+                    </button>
+                    <p className="spline-help">
+                      {splineEditing
+                        ? 'Drag handles to reshape the path. Click the map to insert a point near the closest segment. First point is upstream.'
+                        : 'Switch to edit mode to draw directly over your terrain. The spline is saved with the project and evaluated before downstream erosion.'}
+                    </p>
+                    <div className="spline-edit-actions">
+                      <button type="button" onClick={addPoint} disabled={points.length >= MAX_SPLINE_POINTS}>
+                        <Plus size={12} /> Add point
+                      </button>
+                      <button type="button" onClick={() => onSplinePath([...points].reverse())}>
+                        <ArrowDownUp size={12} /> Reverse
+                      </button>
+                      <button type="button" onClick={() => onSplinePath(DEFAULT_SPLINE_PATH.map((p) => ({ ...p })))}>
+                        <RotateCcw size={12} /> Reset
+                      </button>
+                    </div>
+                    <div className="spline-point-list" aria-label="Control point coordinates">
+                      {points.map((point, index) => (
+                        <div className="spline-point-row" key={index}>
+                          <span className="spline-point-number">{String(index + 1).padStart(2, '0')}</span>
+                          <label>
+                            X
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={0.1}
+                              aria-label={`Point ${index + 1} X percent`}
+                              value={+(point.x * 100).toFixed(1)}
+                              onChange={(event) => changePoint(index, 'x', Number(event.target.value))}
+                            />
+                          </label>
+                          <label>
+                            Y
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={0.1}
+                              aria-label={`Point ${index + 1} Y percent`}
+                              value={+(point.y * 100).toFixed(1)}
+                              onChange={(event) => changePoint(index, 'y', Number(event.target.value))}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            aria-label={`Remove spline point ${index + 1}`}
+                            title={points.length <= 2 ? 'Keep at least two points' : 'Remove point'}
+                            disabled={points.length <= 2}
+                            onClick={() => onSplinePath(points.filter((_, i) => i !== index).map((p) => ({ ...p })))}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                );
+              })()}
               {node.kind === 'hydraulic' && (
                 <div className="inspector-tip">
                   <span className="tip-dot" />
