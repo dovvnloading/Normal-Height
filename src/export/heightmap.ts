@@ -209,6 +209,12 @@ export function makeExport(
     normalDX: ['normalX', 'normalY_DirectX', 'normalZ', 'alpha'],
     normal: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'],
   };
+  // Single material-map bundles must remain reproducible even when an old
+  // project did not explicitly store a surface configuration. Legacy height
+  // and diagnostic bundle metadata is intentionally unchanged.
+  const resolvedProject = materialChannelNames[format]
+    ? { ...project, surface: resolveSurface(project.surface), resolution: field.resolution }
+    : { ...project, resolution: field.resolution };
   const metadata = {
     application: 'Normal Height',
     version: 1,
@@ -242,7 +248,7 @@ export function makeExport(
     surfaceSchemaVersion: materialChannelNames[format] ? 1 : undefined,
     surface: materialChannelNames[format] ? resolveSurface(project.surface) : undefined,
     seed: project.seed,
-    project,
+    project: materialChannelNames[format] ? resolvedProject : project,
   };
   if (bundle) {
     return {
@@ -251,7 +257,7 @@ export function makeExport(
           [filename]: bytes,
           [`${name}-metadata.json`]: strToU8(JSON.stringify(metadata, null, 2)),
           [`${name}.nhterrain.json`]: strToU8(
-            JSON.stringify({ ...project, resolution: field.resolution }, null, 2),
+            JSON.stringify(resolvedProject, null, 2),
           ),
         },
         { level: 6 },
