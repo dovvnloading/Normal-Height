@@ -425,7 +425,7 @@ test('draws a real editable river and ridge, connects it before erosion, and sav
   const afterInsert = (await heightAudits(page)).at(-1)!;
   expect(afterInsert.sha256).not.toBe(prior.sha256);
 
-  const point3 = page.getByRole('button', { name: 'Move spline point 3' });
+  const point3 = page.getByRole('button', { name: 'Move spline point 3', exact: true });
   const pointX = page.getByRole('spinbutton', { name: 'Point 3 X percent' });
   const originalX = await pointX.inputValue();
   const bounds = await point3.boundingBox();
