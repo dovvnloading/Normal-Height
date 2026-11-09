@@ -163,7 +163,7 @@ export function downloadBlob(blob: Blob, filename: string) {
 }
 export function saveProject(project: TerrainProject) {
   downloadBlob(
-    new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }),
+    new Blob([JSON.stringify({ ...project, surface: resolveSurface(project.surface) }, null, 2)], { type: 'application/json' }),
     `${slug(project.name)}.nhterrain.json`,
   );
 }
