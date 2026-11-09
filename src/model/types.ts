@@ -1,4 +1,5 @@
 import type { SplinePoint } from './splines';
+import type { SurfaceSettings } from '../materials/pbr';
 
 export type NodeKind =
   | 'mountain'
@@ -47,6 +48,8 @@ export interface TerrainProject {
   worldSize: number;
   heightScale: number;
   presetId: string;
+  /** Optional, backward-compatible PBR material configuration. */
+  surface?: SurfaceSettings;
   graph: TerrainGraph;
 }
 export interface HeightField {
@@ -88,10 +91,11 @@ export type WorkerResponse =
   | { type: 'progress'; id: number; progress: number; stage: string }
   | { type: 'result'; id: number; result: EvaluationResult }
   | { type: 'error'; id: number; message: string };
-export type MapChannel = 'height' | 'terrain' | 'normal' | 'slope' | 'flow' | 'wear' | 'deposition';
+export type MapChannel = 'height' | 'terrain' | 'normal' | 'slope' | 'flow' | 'wear' | 'deposition'
+  | 'basecolor' | 'roughness' | 'ao' | 'splat' | 'curvature' | 'orm';
 export type ViewMode = '3d' | '2d' | 'split';
 export interface ViewSettings {
-  material: 'alpine' | 'clay' | 'height';
+  material: 'alpine' | 'clay' | 'height' | 'pbr';
   sunAzimuth: number;
   sunElevation: number;
   exaggeration: number;
