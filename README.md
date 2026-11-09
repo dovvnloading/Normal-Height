@@ -4,6 +4,10 @@
 
 Normal Height is a React and TypeScript web application. Its visual node graph drives a real Float32 terrain pipeline, evaluated in a dedicated Web Worker. Three.js renders the displaced terrain; a separate 2D view inspects height, normals, slope, flow, wear, and deposition.
 
+![Normal Height studio showing the Alpine watershed, node graph, and hydraulic erosion controls](docs/images/studio-3d.png)
+
+_The running production app, captured in Chromium with the editable Alpine watershed graph at 512 × 512._
+
 ## Run the application
 
 Use Node.js 22.12 or newer (Node 24 is used in CI).
@@ -60,6 +64,8 @@ The solver is an artistic particle model, not a calibrated watershed or geologic
 - The 3D display mesh is capped at 512 × 512 vertices. Working simulation grids reach 1024 × 1024 and export grids reach 2048 × 2048. High-resolution exports rerun the entire connected graph.
 - Cancellation terminates the active worker. The previous successful terrain stays visible while the next one builds.
 
+![The Water flow map calculated by the hydraulic erosion simulation](docs/images/studio-flow.png)
+
 ### Files
 
 | Output                       | Encoding and meaning                                                                      |
@@ -106,5 +112,6 @@ The production build is a client-side webapp in `dist/`. Serve it over HTTP(S) w
 
 - [Workspace design](docs/DESIGN.md): layout hierarchy, graph UX, preview/export semantics.
 - [Terrain research](docs/RESEARCH.md): official Terragen and Maxon references, primary erosion sources, algorithm choices and limitations.
+- [Verification record](docs/VERIFICATION.md): production browser checks, actual screenshots, and a decoded full 2K export. Detailed 2K erosion can take several minutes; the record includes a measured run and its memory use.
 
 The app is inspired by procedural terrain authoring workflows. It does not reproduce the proprietary implementation of Terragen or Cinema 4D; the Naki-inspired mode is explicitly an independent pattern.
