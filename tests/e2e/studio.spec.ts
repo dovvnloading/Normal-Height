@@ -195,7 +195,7 @@ test('uses a legible light stone workspace with muted earth controls', async ({ 
   // Check actual computed foreground/background contrast rather than matching only hex tokens.
   const contrast = await page.evaluate(() => {
     const luminance = (css: string) => {
-      const components = css.match(/[\\d.]+/g)!.slice(0, 3).map(Number);
+      const components = css.match(/[0-9.]+/g)!.slice(0, 3).map(Number);
       const [r, g, b] = components.map((value) => {
         const channel = value / 255;
         return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
