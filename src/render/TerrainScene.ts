@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
-import { sampleSlope, terrainColor } from './maps';
+import { alpineMaterialVariation, sampleSlope, terrainColor } from './maps';
 
 const TERRAIN_SIZE = 2.6;
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
@@ -411,7 +411,10 @@ export class TerrainScene {
         const rgb = terrainColor(
           elevation,
           (physicalSlope.up + normals.getY(i)) * 0.5,
-          Math.sin(px * 0.83 + py * 0.47),
+          alpineMaterialVariation(
+            positions.getX(i) / TERRAIN_SIZE + 0.5,
+            positions.getZ(i) / TERRAIN_SIZE + 0.5,
+          ),
         );
         color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
       }
