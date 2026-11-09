@@ -19,6 +19,8 @@ import {
   Plus,
   GitBranch,
   CheckCircle2,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { Library } from './components/Library';
 import { Inspector } from './components/Inspector';
@@ -40,6 +42,17 @@ import type {
   ViewMode,
   ViewSettings,
 } from './model/types';
+
+type ThemeMode = 'light' | 'dark';
+const THEME_STORAGE_KEY = 'normal-height.theme.v1';
+function savedTheme(): ThemeMode | null {
+  try {
+    const choice = localStorage.getItem(THEME_STORAGE_KEY);
+    return choice === 'light' || choice === 'dark' ? choice : null;
+  } catch {
+    return null;
+  }
+}
 
 const DEFAULT_SETTINGS: ViewSettings = {
   material: 'alpine',
@@ -78,6 +91,12 @@ export default function App() {
   const [channel, setChannel] = useState<MapChannel>('height');
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [automatic, setAutomatic] = useState(true);
+  // No saved choice means follow the OS; a manual toggle becomes persistent.
+  const [themeChoice, setThemeChoice] = useState<ThemeMode | null>(savedTheme);
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
+  );
+  const theme: ThemeMode = themeChoice ?? (systemDark ? 'dark' : 'light');
   const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | null>(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
@@ -99,6 +118,29 @@ export default function App() {
     project.graph.nodes.find((n) => n.id === (previewNodeId ?? output?.id))?.label ??
     'Terrain output';
   const notify = useCallback((message: string) => setToast(message), []);
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!query) return;
+    const update = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      theme === 'dark' ? '#292e30' : '#e9ebe7',
+    );
+  }, [theme]);
+  const toggleTheme = () => {
+    const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
+    setThemeChoice(next);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      notify('This browser cannot save appearance preferences; the switch still works.');
+    }
+  };
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(''), 6500);
@@ -457,6 +499,16 @@ export default function App() {
           >
             <HelpCircle size={17} />
           </button>
+          <button
+            type="button"
+            className="icon-button theme-toggle"
+            aria-label="Dark mode"
+            aria-pressed={theme === 'dark'}
+            title={theme === 'dark' ? 'Switch to light stone theme' : 'Switch to dark charcoal theme'}
+            onClick={toggleTheme}
+          >
+            {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
           <span className="toolbar-separator" />
           <button className="button primary export-button" onClick={() => setModal('export')}>
             <Download size={15} />
@@ -536,6 +588,7 @@ export default function App() {
         <main className="work-area" ref={centerRef} aria-label="Terrain workspace">
           <section className="preview-area">
             <TerrainViewport
+              theme={theme}
               field={engine.result?.field ?? null}
               project={project}
               viewMode={viewMode}
@@ -598,6 +651,7 @@ export default function App() {
             aria-label="Procedural node graph"
           >
             <NodeGraph
+              theme={theme}
               graph={project.graph}
               onChange={updateGraph}
               selectedId={selectedId}
