@@ -37,7 +37,7 @@ For the browser tests, run `npx playwright install chromium` once. CI installs i
 - **Shaping nodes:** domain warp, terrace, and height remap.
 - **Combination nodes:** blend fields with mix/add/multiply/min/max operations and optional masks; height and slope masks can also limit hydraulic erosion.
 - **Reproducible seeds:** a project seed plus per-node offsets. Changing node positions or selection does not change the generated terrain.
-- **Five editable landscape graphs:** Alpine watershed, Granite massif, Desert badlands, Volcanic caldera, and Folded highlands.
+- **Six editable landscape graphs:** Alpine watershed, Granite massif, Desert badlands, Volcanic caldera, Folded highlands, and the spline-enabled River-cut highlands.
 
 ### River and ridge designer (Normal Height 1.1)
 
