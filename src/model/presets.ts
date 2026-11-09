@@ -1,4 +1,5 @@
 import { createNode } from './registry';
+import { resolveSurface } from '../materials/pbr';
 import type { TerrainProject, TerrainNode, NodeKind, ParamValue } from './types';
 
 export interface Preset {
@@ -231,6 +232,13 @@ export function createProject(presetId = 'alpine'): TerrainProject {
     worldSize: 8000,
     heightScale: 2400,
     presetId: preset.id,
+    // A new terrain preset carries a deterministic matching procedural surface.
+    // Imported projects retain their separately saved surface configuration.
+    surface: preset.id === 'badlands'
+      ? { ...resolveSurface(), biome: 'arid', moisture: 0.16, snowLine: 1 }
+      : preset.id === 'volcano'
+        ? { ...resolveSurface(), biome: 'volcanic', moisture: 0.24, snowLine: 0.92 }
+        : resolveSurface(),
     graph: {
       nodes,
       edges: nodes.slice(1).map((n, i) => ({
