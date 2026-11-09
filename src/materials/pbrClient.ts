@@ -63,12 +63,12 @@ export function requestPBR(field: HeightField, project: TerrainProject): {
       accept(message.maps);
     };
     worker.onerror = (event) => fail(event.message || 'PBR material worker failed.');
+    variants.set(key, running);
     try {
       worker.postMessage({ field, project });
     } catch (error) {
       fail(error instanceof Error ? error.message : 'Could not send terrain to material worker.');
     }
-    variants.set(key, running);
     // Do not retain an unbounded material history when an artist drags controls.
     if (variants.size > 2) {
       for (const [oldKey, oldJob] of variants) {
