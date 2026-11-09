@@ -176,7 +176,7 @@ export function makeExport(
           format === 'normalDX' ? 'normal' : format as PBRChannel, format === 'normalDX')
       : format === 'normal'
         ? normalMapPixels(field, project.worldSize, project.heightScale)
-        : colorizeMap(field, format, project.worldSize, project.heightScale);
+        : colorizeMap(field, format as 'flow' | 'wear' | 'deposition', project.worldSize, project.heightScale);
     bytes = encodeRGBA(pixels, field.resolution);
     filename = `${name}-${field.resolution}-${format}.png`;
   }
