@@ -1066,7 +1066,7 @@ function GraphCanvas(props: NodeGraphProps) {
           snapToGrid
           snapGrid={[8, 8]}
           connectionRadius={24}
-          colorMode="dark"
+          colorMode="light"
           attributionPosition="bottom-left"
           defaultEdgeOptions={{ type: 'default', interactionWidth: 18 }}
           connectionLineStyle={{ stroke: '#6d846d', strokeWidth: 2 }}
