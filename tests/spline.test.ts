@@ -105,6 +105,18 @@ describe('non-destructive spline terrain authoring', () => {
     expect(() => parseProject(invalid)).toThrow(/Spline paths/);
   });
 
+  it('includes a ready-to-edit watershed preset with a connected spline before erosion', () => {
+    const riverProject = createProject('river-gorge');
+    const node = riverProject.graph.nodes.find((n) => n.kind === 'spline');
+    expect(node?.path).toHaveLength(6);
+    expect(riverProject.graph.edges.find((e) => e.target === 'runoff')?.source).toBe(node!.id);
+    expect(validateGraph(riverProject.graph)).toBeNull();
+    const result = evaluateGraph(riverProject, { resolution: 40, previewNodeId: node!.id });
+    expect(result.field.height.every(Number.isFinite)).toBe(true);
+    expect(Math.min(...result.field.height)).toBeGreaterThan(-1);
+    expect(parseProject(JSON.parse(JSON.stringify(riverProject)))).toEqual(riverProject);
+  });
+
   it('evaluates spline stages through the connected graph, including bypass and final output', () => {
     const project = createProject();
     const stage = createNode('spline', { x: 405, y: 100 }, 'spline');
