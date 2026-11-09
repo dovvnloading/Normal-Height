@@ -1,3 +1,4 @@
+import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
 import { NODE_DEFINITIONS, createNode } from './registry';
 import type { NodeKind, TerrainProject, TerrainNode, TerrainEdge, ParamValue } from './types';
 
@@ -54,6 +55,16 @@ export function parseProject(raw: unknown): TerrainProject {
         if (!def.options?.some((o) => o.value === value)) throw new Error(`Unknown ${def.label}.`);
         clean.params[def.key] = value as ParamValue;
       } else if (typeof value === 'string') clean.params[def.key] = value.slice(0, 4000);
+    }
+    if (kind === 'spline') {
+      if (
+        !Array.isArray(n.path) ||
+        n.path.length < 2 ||
+        n.path.length > MAX_SPLINE_POINTS ||
+        !n.path.every(validSplinePoint)
+      )
+        throw new Error('Spline paths must contain 2–24 points inside the terrain tile.');
+      clean.path = n.path.map((p) => ({ x: p.x, y: p.y }));
     }
     if (typeof n.parentId === 'string') clean.parentId = n.parentId;
     if (typeof n.bypassed === 'boolean') clean.bypassed = n.bypassed;
