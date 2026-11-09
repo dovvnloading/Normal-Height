@@ -57,6 +57,16 @@ Thermal weathering conservatively redistributes material from over-steep slopes 
 
 The solver is an artistic particle model, not a calibrated watershed or geological-time simulation. The research notes distinguish this implementation from Terragen's documented workflow and from more expensive grid-fluid solvers.
 
+### Procedural PBR material studio (feature branch)
+
+- **Physical texture sets:** export coordinated base color, combined GL/DX normal, microdetail-only normal, roughness, ambient occlusion, metallic, packed ORM, curvature, and RGBA material weights alongside 16-bit height.
+- **Ground-aware layering:** seeded rock/soil/vegetation/snow weights respond to elevation, real slope, erosion wear, deposition and flow. Choose alpine, arid, or volcanic biomes.
+- **Artist controls:** set snow line, exposed-rock slope, moisture, microdetail physical scale/depth, and AO in **Scene → PBR material studio**; settings autosave with the project.
+- **3D and 2D:** live PBR shading uses proper sRGB albedo, independent roughness/AO, and **detail-only** normals on the displaced mesh. Inspect all material outputs in the 2D channel selector.
+- **Complete PBR ZIP:** GL/DX normal variants, packed glTF-style ORM and Unity HDRP masks, physical dimensions, channel metadata, and reproducible project in one file. Export encoding runs in a cancellable Web Worker.
+
+The PBR generator is an artist-directed procedural foundation, not scanned photogrammetry. For extreme close-up realism, use its weightmaps with separately authored/photogrammetry-based tileable materials in the target renderer. See [PBR material guide](docs/MATERIALS.md).
+
 ### Graph authoring
 
 - Add, connect, reconnect, rename, bypass, duplicate, and delete nodes.
@@ -83,6 +93,7 @@ The solver is an artistic particle model, not a calibrated watershed or geologic
 | Heightmap PNG                | True 16-bit grayscale; actual height minimum/maximum mapped to 0–65535                    |
 | Elevation RAW                | Headerless, little-endian Float32 elevations in meters                                    |
 | Normal PNG                   | 8-bit RGB OpenGL tangent-space +Y normals, based on physical dimensions                   |
+| Full PBR ZIP                 | Coordinated base color, normals (GL/DX/detail), roughness, AO, metallic, ORM, Unity HDRP mask, splat weights, curvature, height, metadata and project |
 | Flow / wear / deposition PNG | 8-bit display visualizations; not physical flow-rate measurements                         |
 | Project                      | Versioned `.nhterrain.json`, containing graph, parameters, seeds, and physical dimensions |
 | ZIP bundle                   | Map, metadata, and reproducible project file                                              |
@@ -111,12 +122,13 @@ src/model/        Project types, node definitions, editable presets, file valida
 src/engine/       Seeded noise, graph evaluator, hydraulic/thermal solvers, worker
 src/components/   Application panels, React Flow graph, 2D/3D viewport, export dialog
 src/render/       Three.js terrain scene, physical normals, diagnostic color mapping
+src/materials/    Biome-aware procedural PBR material and map synthesis
 src/export/       16-bit PNG encoder, Float32 RAW encoder, ZIP metadata
 src/hooks/        Worker lifecycle, debounced evaluation, cancellation, stale state
 tests/           Numerical, encoding, and browser workflow verification
 ```
 
-The graph evaluator follows dependencies from the previewed node or final output, memoizes each reachable node, and reports node timings and thumbnails. Height arrays are immutable across node boundaries. Worker results use transferable buffers. A conservative memory preflight bounds high-resolution graphs before expensive allocations.
+The graph evaluator follows dependencies from the previewed node or final output, memoizes each reachable node, and reports node timings and thumbnails. Height arrays are immutable across node boundaries. Worker results use transferable buffers. A conservative memory preflight bounds high-resolution graphs before expensive allocations. PBR ZIP encoding uses a separate worker to keep the interface responsive and cancelable.
 
 ## Hosting — GitHub Pages
 
