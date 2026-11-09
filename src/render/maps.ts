@@ -1,3 +1,4 @@
+import { Noise } from '../engine/noise';
 import type { HeightField, MapChannel } from '../model/types';
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v));
@@ -6,6 +7,16 @@ const smooth = (a: number, b: number, value: number) => {
   const t = clamp((value - a) / (b - a));
   return t * t * (3 - 2 * t);
 };
+
+// Coherent, seeded 2D noise rather than a sine of x/y pixel coordinates.
+// A single sine wave created obvious, evenly spaced bands along snow lines.
+const alpineDetailNoise = new Noise(0x4e487421);
+/** Resolution-independent alpine material variation in normalized tile coordinates. */
+export function alpineMaterialVariation(u: number, v: number): number {
+  const broad = alpineDetailNoise.simplex(u * 16.7 + 13.2, v * 16.7 - 9.4);
+  const fine = alpineDetailNoise.simplex(u * 48.1 - 3.7, v * 48.1 + 21.3);
+  return broad * 0.72 + fine * 0.28;
+}
 
 /** OpenGL tangent-space normal map: +X right, +Y up, +Z out of the map. */
 export function normalMapPixels(
@@ -118,7 +129,11 @@ export function colorizeMap(
         const s = sampleSlope(field, x, y, worldSize, heightScale);
         const elevation = (h - minHeight) / Math.max(0.00001, maxHeight - minHeight);
         const light = clamp((-s.dx * -0.45 + 1 * 0.8 + -s.dy * -0.38) / Math.hypot(s.dx, 1, s.dy));
-        color = terrainColor(elevation, s.up).map((v) => v * (0.58 + light * 0.5));
+        color = terrainColor(
+          elevation,
+          s.up,
+          alpineMaterialVariation(x / Math.max(1, n - 1), y / Math.max(1, n - 1)),
+        ).map((v) => v * (0.58 + light * 0.5));
       } else if (channel === 'slope') {
         const s = sampleSlope(field, x, y, worldSize, heightScale);
         color = ramp(s.degrees / 70, [
