@@ -368,10 +368,16 @@ export default function App() {
   }, [selectedId, apply]);
   const loadPreset = useCallback(
     (id: string) => {
-      apply(createProject(id));
-      setSelectedId('erosion');
+      const next = createProject(id);
+      apply(next);
+      const designer = next.graph.nodes.find((node) => node.kind === 'spline');
+      setSelectedId(designer?.id ?? next.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ?? null);
       setPreviewNodeId(undefined);
-      setEditingSplineId(null);
+      setEditingSplineId(designer?.id ?? null);
+      if (designer) {
+        setViewMode('2d');
+        setChannel('terrain');
+      }
       setModal(null);
       notify(
         `${PRESETS.find((p) => p.id === id)?.name ?? 'Landscape'} loaded. Undo restores your previous graph.`,
