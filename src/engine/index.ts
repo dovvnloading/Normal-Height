@@ -150,7 +150,7 @@ function estimatedWorkingBytes(
     if (!needed.has(node.id) || metadata(node) || node.kind === 'output') continue;
     // A source has no input to forward; marking it bypassed still generates it.
     if (node.bypassed && node.kind !== 'mountain' && node.kind !== 'noise') continue;
-    buffers += ['hydraulic', 'warp', 'blend'].includes(node.kind) ? 4 : 1;
+    buffers += ['hydraulic', 'warp', 'blend', 'spline'].includes(node.kind) ? 4 : 1;
   }
   for (const edge of graph.edges)
     if (needed.has(edge.target) && edge.sourceHandle && edge.sourceHandle !== 'height') buffers++;
