@@ -3,8 +3,11 @@ import { Download, FileImage, Package, Check, LoaderCircle, ArrowUpRight } from 
 import { Modal } from './Modal';
 import { createTerrainWorker } from '../hooks/useTerrainEngine';
 import type { ExportFormat } from '../export/heightmap';
+import { pbrBudgetMiB, checkPBRExportBudget } from '../export/budget';
 import { downloadBlob } from '../model/project';
 import type { TerrainProject, WorkerResponse } from '../model/types';
+
+const EXPORT_RESOLUTIONS = [256, 512, 768, 1024, 2048] as const;
 
 export function ExportDialog({
   project,
@@ -13,7 +16,7 @@ export function ExportDialog({
   project: TerrainProject;
   onClose: () => void;
 }) {
-  const [resolution, setResolution] = useState(Math.max(512, project.resolution));
+  const [resolution, setResolution] = useState<number>(() => EXPORT_RESOLUTIONS.find((n) => n >= Math.max(512, project.resolution)) ?? 2048);
   const [format, setFormat] = useState<ExportFormat>('png16');
   const [bundle, setBundle] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -42,6 +45,17 @@ export function ExportDialog({
     setStage('Export cancelled');
   };
   const run = () => {
+    const memoryGiB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+    const memoryBudgetMiB = pbrBudgetMiB(memoryGiB);
+    if (format === 'pbr') {
+      try {
+        checkPBRExportBudget(resolution, memoryBudgetMiB);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : 'PBR export exceeds device memory budget.');
+        setSuccess('');
+        return;
+      }
+    }
     const generation = ++generationRef.current;
     setBusy(true);
     setProgress(0);
@@ -100,7 +114,7 @@ export function ExportDialog({
         };
         const field = m.result.field;
         encoder.postMessage(
-          { type: 'encode', id: generation, field, project, format, bundle },
+          { type: 'encode', id: generation, field, project, format, bundle, memoryBudgetMiB },
           [field.height.buffer, field.flow.buffer, field.wear.buffer,
             field.deposition.buffer] as Transferable[],
         );
@@ -166,7 +180,7 @@ export function ExportDialog({
               disabled={busy}
               onChange={(e) => setResolution(Number(e.target.value))}
             >
-              {[256, 512, 1024, 2048].map((n) => (
+              {EXPORT_RESOLUTIONS.map((n) => (
                 <option value={n} key={n}>
                   {n} × {n}
                   {n === 1024 ? ' · 1K' : n === 2048 ? ' · 2K' : ''}
@@ -193,7 +207,7 @@ export function ExportDialog({
           </span>
           <input
             type="checkbox"
-            checked={bundle}
+            checked={format === 'pbr' || bundle}
             disabled={busy || format === 'pbr'}
             onChange={(e) => setBundle(e.target.checked)}
           />

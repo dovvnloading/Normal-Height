@@ -31,9 +31,9 @@ Existing \`.nhterrain.json\` files remain valid. The optional \`surface\` projec
 | \`-material-metadata.json\` | JSON | Map conventions, scale, physical dimensions and authoring parameters |
 | \`.nhterrain.json\` | JSON | Exact reproducible terrain graph and material settings |
 
-PNG rows begin at the north edge of the tile and continue toward the south; columns increase east/right. Map resolution is currently 256–2048 pixels. The original normal and diagnostic export options are still supported separately.
+PNG rows begin at the north edge of the tile and continue toward the south; columns increase east/right. Export choices are 256, 512, 768, 1024, and 2048 pixels; device-memory preflight may restrict large PBR bundles. The original normal and diagnostic export options are still supported separately.
 
-**Color spaces:** Set base color to **sRGB** and all other channels to **Non-Color / Linear**. Never apply sRGB conversion to normal, roughness, AO, metallic, height, or weight data. Metallic is zero for the included organic/geological materials.
+**Color spaces:** Source palette colors are decoded to linear reflectance, blended in linear light, then encoded as sRGB once. Set base color to **sRGB** and all other channels to **Non-Color / Linear**. Never apply sRGB conversion to normal, roughness, AO, metallic, height, or weight data. Metallic is zero for the included organic/geological materials.
 
 **Normal maps:** Normal exports use physical terrain dimensions, not viewport exaggeration. The combined normal is appropriate when the 3D mesh lacks the matching displaced geometry. If your mesh already reproduces the heightfield surface normals, use the **detail-normal** instead. DirectX flips only green relative to OpenGL; confirm any engine's tangent-space and UV conventions.
 
@@ -56,3 +56,15 @@ There is a real sampling limit: a 2K map spanning kilometers cannot encode centi
 ## Validation
 
 Run \`npm test\`, \`npm run build\` and \`npm run test:e2e\`. PBR-specific unit tests verify deterministic output, map alignment, unit length/normal conventions, flat-surface behavior, packed channels, project compatibility, and ZIP content. The full export encoder runs in a separate cancellable Web Worker to avoid blocking the editing interface.
+
+## Repair notes: material scale, caching and export safety
+
+New badlands and volcano scene presets initialize arid and volcanic procedural materials; other presets initialize alpine. Switching presets starts a new scene with new material defaults, while importing a previously saved project preserves its surface overrides. A legacy project without explicit surface settings is saved with its resolved defaults.
+
+Microdetail frequency is specified in physical meters. Wavelengths that cannot be resolved at the selected grid spacing fade out instead of being silently scaled up. The approximate AO samples at 50 m, 150 m and 425 m, using fractional-pixel interpolation at different resolutions.
+
+Live 2D and 3D PBR previews request the same cached material result from a cancellable Web Worker. A stale worker result is never painted over a more recent change; editing materials does not rerun erosion.
+
+The PBR ZIP memory preflight estimates peak allocations (including temporary PNG/ZIP and worker buffers) against a conservative device-memory budget before running the export terrain simulation; the encoding Worker also enforces it. A 2K request may be rejected on lower-memory or unidentified devices. This is a heuristic, not a guarantee of peak RAM: real-device profiling and streaming 4K/8K exports remain open work.
+
+Export metadata now includes resolved, versioned surface parameters, per-map color spaces and channel semantics, exact OpenGL/DirectX normal orientations, and physical AO sampling radii. The material ZIP includes a reproducible project with the resolved surface values.

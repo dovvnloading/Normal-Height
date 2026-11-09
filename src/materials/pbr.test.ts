@@ -1,10 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { unzipSync, strFromU8 } from 'fflate';
+import { unzipSync, strFromU8, unzlibSync } from 'fflate';
 import { createProject } from '../model/presets';
 import { parseProject } from '../model/project';
 import { makeExport } from '../export/heightmap';
 import type { HeightField } from '../model/types';
-import { generatePBR, materialNormalPixels, pbrPixels, resolveSurface } from './pbr';
+import { generatePBR, materialNormalPixels, pbrPixels, resolveSurface, srgbByteToLinear, linearToSrgbByte } from './pbr';
+
+/** Inflate real encoded PNG payloads, rejecting incorrect scanline orientation or format. */
+function decodePNG(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const compressed: Uint8Array[] = [];
+  let width = 0, height = 0, bitDepth = 0, colorType = 0;
+  for (let off = 8; off < bytes.length;) {
+    const size = view.getUint32(off);
+    const type = strFromU8(bytes.subarray(off + 4, off + 8));
+    const data = bytes.subarray(off + 8, off + 8 + size);
+    if (type === 'IHDR') {
+      width = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0);
+      height = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(4);
+      bitDepth = data[8];
+      colorType = data[9];
+    }
+    if (type === 'IDAT') compressed.push(data);
+    off += size + 12;
+    if (type === 'IEND') break;
+  }
+  const joined = new Uint8Array(compressed.reduce((total, p) => total + p.length, 0));
+  let offset = 0;
+  for (const data of compressed) { joined.set(data, offset); offset += data.length; }
+  const scanlines = unzlibSync(joined);
+  const bytesPerPixel = colorType === 0 && bitDepth === 16 ? 2 : 4;
+  const rowSize = width * bytesPerPixel + 1;
+  const pixels = new Uint8Array(width * height * bytesPerPixel);
+  expect(scanlines.length).toBe(rowSize * height);
+  for (let y = 0; y < height; y++) {
+    expect(scanlines[y * rowSize]).toBe(0); // PNG filter None
+    pixels.set(scanlines.subarray(y * rowSize + 1, (y + 1) * rowSize), y * width * bytesPerPixel);
+  }
+  return { width, height, bitDepth, colorType, pixels };
+}
 
 function fixture(n = 16, flat = false): HeightField {
   const size = n * n;
@@ -93,7 +127,8 @@ describe('material maps', () => {
     const next = { ...project, surface: { ...resolveSurface(), biome: 'arid' as const } };
     expect(generatePBR(fixture(), next).basecolor).not.toEqual(alpine.basecolor);
     expect(parseProject(next).surface).toEqual(next.surface);
-    expect(parseProject(project)).not.toHaveProperty('surface');
+    expect(parseProject(project).surface).toEqual(resolveSurface());
+    expect(parseProject({ ...project, surface: undefined })).not.toHaveProperty('surface');
     expect(() => parseProject({ ...project, surface: { detailMeters: -5 } })).toThrow('PBR');
     expect(() => parseProject({ ...project, surface: { biome: 'bogus' } })).toThrow('biome');
   });
@@ -124,4 +159,60 @@ describe('material maps', () => {
   it('rejects arrays whose size does not match the claimed resolution', () => {
     expect(() => generatePBR({ ...fixture(), resolution: 10 }, createProject())).toThrow('aligned');
   });
+  it('mixes encoded palette colors in linear reflectance, not sRGB byte space', () => {
+    const mix = linearToSrgbByte((srgbByteToLinear(83) + srgbByteToLinear(224)) / 2);
+    expect(mix).toBe(173);
+    expect(mix).toBeGreaterThan(Math.round((83 + 224) / 2));
+    for (const sample of [0, 1, 32, 83, 128, 224, 255])
+      expect(linearToSrgbByte(srgbByteToLinear(sample))).toBe(sample);
+  });
+
+  it('decodes every exported PBR PNG and compares actual channel pixels and row order', () => {
+    const field = fixture(16);
+    const project = createProject();
+    const maps = generatePBR(field, project);
+    const files = unzipSync(makeExport(field, project, 'pbr', false).bytes);
+    const prefix = 'alpine-watershed-16-';
+    for (const [file, channel, directX] of [
+      ['basecolor', 'basecolor', false], ['normal-gl', 'normal', false],
+      ['normal-dx', 'normal', true], ['detailnormal-gl', 'detailNormal', false],
+      ['roughness', 'roughness', false], ['ao', 'ao', false],
+      ['metallic', 'metallic', false], ['orm', 'orm', false],
+      ['splat-rgba', 'splat', false], ['curvature', 'curvature', false],
+      ['unity-hdrp-mask', 'unityMask', false],
+    ] as const) {
+      const image = decodePNG(files[prefix + file + '.png']);
+      expect([image.width, image.height, image.bitDepth, image.colorType])
+        .toEqual([16, 16, 8, 6]);
+      const expected = pbrPixels(maps, field, project, channel, directX);
+      expect([...image.pixels], file).toEqual([...expected]);
+    }
+    const height = decodePNG(files[prefix + 'height16.png']);
+    expect([height.bitDepth, height.colorType]).toEqual([16, 0]);
+    const min = Math.min(...field.height), max = Math.max(...field.height);
+    const readHeight = (index: number) =>
+      (height.pixels[index * 2] << 8) | height.pixels[index * 2 + 1];
+    for (const index of [0, 1, 15, 16, 121, 240, 255]) {
+      const normalized = (field.height[index] - min) / (max - min);
+      expect(readHeight(index)).toBe(Math.round(normalized * 65535));
+    }
+    const meta = JSON.parse(strFromU8(files['alpine-watershed-material-metadata.json']));
+    expect(meta.surface).toEqual(resolveSurface());
+    expect(meta.surfaceSchemaVersion).toBe(1);
+    expect(meta.textureChannels.normal_dx.channels[1]).toBe('normalY_DirectX');
+    expect(meta.textureChannels.basecolor.colorSpace).toBe('sRGB');
+    const saved = JSON.parse(strFromU8(files['alpine-watershed.nhterrain.json']));
+    expect(saved.surface).toEqual(resolveSurface());
+  });
+
+  it('preserves authored meter frequency instead of enlarging undersampled detail', () => {
+    const project = { ...createProject(), worldSize: 1600, surface: {
+      ...resolveSurface(), detailMeters: 24, detailStrength: 1,
+    } };
+    const coarse = generatePBR(fixture(64, true), project);
+    const fine = generatePBR(fixture(256, true), project);
+    expect(coarse.detail.every((value) => value === 0)).toBe(true);
+    expect(fine.detail.some((value) => Math.abs(value) > 0.001)).toBe(true);
+  });
+
 });

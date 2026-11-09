@@ -1,6 +1,6 @@
 import { zlibSync, zipSync, strToU8 } from 'fflate';
 import { normalMapPixels, colorizeMap } from '../render/maps';
-import { generatePBR, pbrPixels, SPLAT_LAYERS } from '../materials/pbr';
+import { generatePBR, pbrPixels, SPLAT_LAYERS, resolveSurface, AO_RADII_METERS } from '../materials/pbr';
 import type { PBRChannel } from '../materials/pbr';
 import type { HeightField, TerrainProject } from '../model/types';
 import { slug } from '../model/project';
@@ -117,6 +117,7 @@ export function makeExport(
       application: 'Normal Height',
       version: 1,
       materialVersion: 1,
+      surfaceSchemaVersion: 1,
       resolution: [field.resolution, field.resolution],
       worldSizeMeters: [project.worldSize, project.worldSize],
       sampleSpacingMeters: project.worldSize / (field.resolution - 1),
@@ -137,8 +138,23 @@ export function makeExport(
         splat_rgba: SPLAT_LAYERS,
       },
       materialModel: 'Procedural biome weights; AO is a local terrain-horizon approximation, not a ray-traced bake.',
-      surface: project.surface ?? null,
+      surface: resolveSurface(project.surface),
       seed: project.seed,
+      aoHorizonRadiiMeters: AO_RADII_METERS,
+      textureChannels: {
+        basecolor: { colorSpace: 'sRGB', channels: ['red', 'green', 'blue', 'alpha'] },
+        normal_gl: { colorSpace: 'linear', channels: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'] },
+        normal_dx: { colorSpace: 'linear', channels: ['normalX', 'normalY_DirectX', 'normalZ', 'alpha'] },
+        detailnormal_gl: { colorSpace: 'linear', channels: ['microNormalX', 'microNormalY_OpenGL', 'microNormalZ', 'alpha'] },
+        roughness: { colorSpace: 'linear', channels: ['roughness', 'roughness', 'roughness', 'alpha'] },
+        ao: { colorSpace: 'linear', channels: ['occlusion', 'occlusion', 'occlusion', 'alpha'] },
+        metallic: { colorSpace: 'linear', channels: ['metallic', 'metallic', 'metallic', 'alpha'] },
+        orm: { colorSpace: 'linear', channels: ['occlusion', 'roughness', 'metallic', 'alpha'] },
+        splat_rgba: { colorSpace: 'linear', channels: SPLAT_LAYERS },
+        curvature: { colorSpace: 'linear', channels: ['curvature', 'curvature', 'curvature', 'alpha'] },
+        unity_hdrp_mask: { colorSpace: 'linear', channels: ['metallic', 'occlusion', 'detailMask', 'smoothness'] },
+        height16: { colorSpace: 'linear', channels: ['elevationUNorm16'] },
+      },
     };
     const files: Record<string, Uint8Array> = {
       [prefix + '-height16.png']: encodeHeightPNG(field, range),
@@ -155,10 +171,12 @@ export function makeExport(
       [prefix + '-unity-hdrp-mask.png']: png('unityMask'),
       [name + '-material-metadata.json']: strToU8(JSON.stringify(metadata, null, 2)),
       [name + '.nhterrain.json']: strToU8(
-        JSON.stringify({ ...project, resolution: field.resolution }, null, 2),
+        JSON.stringify({ ...project, surface: resolveSurface(project.surface), resolution: field.resolution }, null, 2),
       ),
     };
-    return { bytes: zipSync(files, { level: 6 }), filename: prefix + '-pbr.zip',
+    // PNG files are already compressed: storing them in ZIP avoids a second
+    // costly deflate pass and lowers peak transient allocations.
+    return { bytes: zipSync(files, { level: 0 }), filename: prefix + '-pbr.zip',
       mime: 'application/zip' };
   }
   let bytes: Uint8Array;
@@ -180,6 +198,17 @@ export function makeExport(
     bytes = encodeRGBA(pixels, field.resolution);
     filename = `${name}-${field.resolution}-${format}.png`;
   }
+  const materialChannelNames: Partial<Record<ExportFormat, string[]>> = {
+    basecolor: ['red', 'green', 'blue', 'alpha'],
+    roughness: ['roughness', 'roughness', 'roughness', 'alpha'],
+    ao: ['occlusion', 'occlusion', 'occlusion', 'alpha'],
+    metallic: ['metallic', 'metallic', 'metallic', 'alpha'],
+    orm: ['occlusion', 'roughness', 'metallic', 'alpha'],
+    splat: [...SPLAT_LAYERS],
+    curvature: ['curvature', 'curvature', 'curvature', 'alpha'],
+    normalDX: ['normalX', 'normalY_DirectX', 'normalZ', 'alpha'],
+    normal: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'],
+  };
   const metadata = {
     application: 'Normal Height',
     version: 1,
@@ -198,14 +227,20 @@ export function makeExport(
           : undefined,
     normalConvention:
       format === 'normal'
-        ? 'Tangent-space +Y (OpenGL): R=east/right, G=north/up in image, B=outward/up from terrain. RGB encoded from [-1,1] to [0,255].'
-        : undefined,
+        ? 'OpenGL +Y: G encodes north/up, RGB maps [-1,1] to [0,255].'
+        : format === 'normalDX'
+          ? 'DirectX -Y: green is inverted relative to OpenGL +Y, RGB maps [-1,1] to [0,255].'
+          : undefined,
     materialEncoding: ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalDX'].includes(format)
       ? 'Procedural PBR material map; see complete PBR bundle for channel packing and color-space conventions.'
       : undefined,
     diagnosticEncoding: ['flow', 'wear', 'deposition'].includes(format)
       ? '8-bit display visualization, normalized independently; not physical flow rate.'
       : undefined,
+    colorSpace: format === 'basecolor' ? 'sRGB' : format === 'raw32' || format === 'png16' ? 'linear' : 'linear-non-color',
+    channelNames: materialChannelNames[format] ?? null,
+    surfaceSchemaVersion: materialChannelNames[format] ? 1 : undefined,
+    surface: materialChannelNames[format] ? resolveSurface(project.surface) : undefined,
     seed: project.seed,
     project,
   };

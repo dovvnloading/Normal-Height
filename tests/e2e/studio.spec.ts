@@ -672,3 +672,62 @@ test('edits surface settings and exports aligned PBR textures in a browser', asy
   expect(project.surface).toEqual(metadata.surface);
   await expect(dialog.getByRole('status')).toContainText('Downloaded alpine-watershed-256-pbr.zip');
 });
+
+test('material edits repaint the visible 2D PBR canvas without rebuilding the erosion field', async ({ page }) => {
+  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Map channel' }).selectOption('basecolor');
+  await expect(page.getByRole('img', { name: /^PBR base color map/ })).toBeVisible();
+  await expect.poll(() => mapColors(page), { timeout: 30_000 }).toBeGreaterThan(8);
+  const before = await mapFingerprint(page);
+  const auditedHeights = await heightAudits(page);
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  await page.getByLabel('Material biome').selectOption('volcanic');
+  // No pan/zoom or channel toggle: the paint must respond to the material alone.
+  await expect.poll(() => mapFingerprint(page), { timeout: 30_000 }).not.toBe(before);
+  expect((await heightAudits(page)).map((entry) => entry.sha256))
+    .toEqual(auditedHeights.map((entry) => entry.sha256));
+});
+
+test('PBR 3D material visibly updates after worker completion without moving the camera', async ({ page }) => {
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  const fingerprint = () => canvas.evaluate((element: HTMLCanvasElement) => {
+    const png = element.toDataURL('image/png');
+    let hash = 2166136261;
+    for (let i = 0; i < png.length; i += 31)
+      hash = Math.imul(hash ^ png.charCodeAt(i), 16777619);
+    return `${element.width}:${element.height}:${hash >>> 0}`;
+  });
+  const before = await fingerprint();
+  const heightsBefore = await heightAudits(page);
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  await page.getByLabel('Material biome').selectOption('arid');
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  await expect.poll(fingerprint, { timeout: 30_000 }).not.toBe(before);
+  expect((await heightAudits(page)).map((h) => h.sha256))
+    .toEqual(heightsBefore.map((h) => h.sha256));
+});
+
+test('export resolution and mandatory PBR bundle controls match their actual state', async ({ page }) => {
+  // Do not run an unrelated, expensive 768-grid erosion simulation.
+  await page.locator('.auto-build input').uncheck();
+  await page.getByRole('combobox', { name: 'Working resolution' }).selectOption('768');
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  const resolution = dialog.getByRole('combobox', { name: 'Export resolution' });
+  const format = dialog.getByRole('combobox', { name: 'Export format' });
+  const bundle = dialog.getByRole('checkbox');
+  await expect(resolution).toHaveValue('768');
+  await expect(dialog).toContainText('768 × 768');
+  await bundle.uncheck();
+  await expect(bundle).not.toBeChecked();
+  await format.selectOption('pbr');
+  await expect(bundle).toBeChecked();
+  await expect(bundle).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Export bundle', exact: true })).toBeEnabled();
+  await format.selectOption('basecolor');
+  await expect(bundle).not.toBeChecked();
+  await expect(bundle).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Export map', exact: true })).toBeEnabled();
+});
+

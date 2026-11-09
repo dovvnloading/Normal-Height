@@ -27,7 +27,8 @@ import type {
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
 import { colorizeMap, sampleSlope } from '../render/maps';
-import { generatePBR, pbrPixels } from '../materials/pbr';
+import { pbrPixels } from '../materials/pbr';
+import { requestPBR } from '../materials/pbrClient';
 import type { PBRChannel } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
@@ -89,6 +90,7 @@ function MapCanvas({
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLCanvasElement | null>(null);
+  const [rasterVersion, setRasterVersion] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [sample, setSample] = useState<{
@@ -133,33 +135,51 @@ function MapCanvas({
   }, []);
 
   useEffect(() => {
+    let active = true;
     if (!field) {
       imageRef.current = null;
+      setRasterVersion((version) => version + 1);
       return;
     }
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = field.resolution;
-    const context = canvas.getContext('2d');
-    if (!context) return;
-    const material = ['basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm'].includes(channel);
-    let pixels = material
-      ? pbrPixels(generatePBR(field, project), field, project, channel as PBRChannel)
-      : colorizeMap(field, channel, project.worldSize, project.heightScale);
-    if (channel === 'splat') {
-      // Splat alpha is the fourth material, not display transparency.
-      const display = pixels.slice();
-      for (let i = 0; i < display.length; i += 4) {
-        display[i] = Math.min(255, pixels[i] + pixels[i + 3]);
-        display[i + 1] = Math.min(255, pixels[i + 1] + pixels[i + 3]);
-        display[i + 2] = Math.min(255, pixels[i + 2] + pixels[i + 3]);
-        display[i + 3] = 255;
+    const paintPixels = (source: Uint8ClampedArray) => {
+      if (!active) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = field.resolution;
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      let pixels = source;
+      if (channel === 'splat') {
+        // Splat alpha is a fourth physical material, not canvas transparency.
+        const display = pixels.slice();
+        for (let i = 0; i < display.length; i += 4) {
+          display[i] = Math.min(255, pixels[i] + pixels[i + 3]);
+          display[i + 1] = Math.min(255, pixels[i + 1] + pixels[i + 3]);
+          display[i + 2] = Math.min(255, pixels[i + 2] + pixels[i + 3]);
+          display[i + 3] = 255;
+        }
+        pixels = display;
       }
-      pixels = display;
+      const image = context.createImageData(field.resolution, field.resolution);
+      image.data.set(pixels);
+      context.putImageData(image, 0, 0);
+      imageRef.current = canvas;
+      // The visible canvas must repaint for every newly generated map. Changing
+      // surface settings/seed does not necessarily change field or view state.
+      setRasterVersion((version) => version + 1);
+    };
+    const material = ['basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm'].includes(channel);
+    if (material) {
+      const request = requestPBR(field, project);
+      request.promise.then((maps) =>
+        paintPixels(pbrPixels(maps, field, project, channel as PBRChannel))
+      ).catch(() => {
+        // A replaced or unmounted request is expected; the next edit queues
+        // the correct version without showing a stale worker result.
+      });
+      return () => { active = false; request.release(); };
     }
-    const image = context.createImageData(field.resolution, field.resolution);
-    image.data.set(pixels);
-    context.putImageData(image, 0, 0);
-    imageRef.current = canvas;
+    paintPixels(colorizeMap(field, channel, project.worldSize, project.heightScale));
+    return () => { active = false; };
   }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed]);
 
   useEffect(() => {
@@ -197,7 +217,7 @@ function MapCanvas({
       context.lineTo(x + dx * length, y);
       context.stroke();
     }
-  }, [dimensions, zoom, offset, field, channel, project.worldSize, project.heightScale]);
+  }, [dimensions, zoom, offset, rasterVersion, field, channel, project.worldSize, project.heightScale]);
 
   useEffect(() => {
     const canvas = hostRef.current;

@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, sampleSlope, terrainColor } from './maps';
-import { generatePBR, pbrPixels } from '../materials/pbr';
+import { pbrPixels } from '../materials/pbr';
+import { requestPBR } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 
@@ -40,6 +41,8 @@ export class TerrainScene {
   private pbrTextures: THREE.DataTexture[] = [];
   private lastPBRField: HeightField | null = null;
   private lastPBRSurface = '';
+  private pbrRelease: (() => void) | null = null;
+  private pbrGeneration = 0;
   private readonly skirtMaterial = new THREE.MeshStandardMaterial({
     color: '#5b6054',
     roughness: 1,
@@ -68,7 +71,7 @@ export class TerrainScene {
   constructor(
     private readonly host: HTMLDivElement,
     settings: ViewSettings,
-    onError: (message: string) => void,
+    private readonly onError: (message: string) => void,
     theme: 'light' | 'dark' = 'light',
   ) {
     this.settings = settings;
@@ -94,6 +97,7 @@ export class TerrainScene {
     this.renderer.domElement.setAttribute('role', 'img');
     this.renderer.domElement.tabIndex = 0;
     host.appendChild(this.renderer.domElement);
+    this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.scene.background = new THREE.Color('#cbd2cf');
     this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
 
@@ -512,10 +516,14 @@ export class TerrainScene {
     colors.needsUpdate = true;
   }
 
-  /** Materials are built from the latest terrain without rerunning erosion. */
+  /** Off-thread material synthesis is shared with 2D and never reruns erosion. */
   private updatePBRTextures() {
     if (!this.field || !this.project) return;
     if (this.settings.material !== 'pbr') {
+      this.renderer.domElement.dataset.materialStatus = 'inactive';
+      ++this.pbrGeneration;
+      this.pbrRelease?.();
+      this.pbrRelease = null;
       const hadTextures = this.pbrTextures.length > 0;
       this.pbrTextures.forEach((texture) => texture.dispose());
       this.pbrTextures = [];
@@ -533,44 +541,66 @@ export class TerrainScene {
       this.needsRender = true;
       return;
     }
-    const surfaceKey = JSON.stringify([this.project.seed, this.project.surface ?? null,
-      this.project.worldSize, this.project.heightScale]);
-    if (this.lastPBRField === this.field && this.lastPBRSurface === surfaceKey) return;
-    const maps = generatePBR(this.field, this.project);
-    const n = maps.resolution;
-    const texture = (rgba: Uint8ClampedArray, srgb = false): THREE.DataTexture => {
-      const result = new THREE.DataTexture(new Uint8Array(rgba), n, n, THREE.RGBAFormat);
-      result.flipY = true; // row 0 is north, matching PlaneGeometry north at UV v=1
-      result.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-      result.generateMipmaps = true;
-      result.minFilter = THREE.LinearMipmapLinearFilter;
-      result.magFilter = THREE.LinearFilter;
-      result.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-      result.needsUpdate = true;
-      return result;
-    };
-    const albedo = texture(maps.basecolor, true);
-    const roughness = texture(pbrPixels(maps, this.field, this.project, 'roughness'));
-    const occlusion = texture(pbrPixels(maps, this.field, this.project, 'ao'));
-    // The mesh already contains macro geometry normals. Applying the full
-    // exported normal here would count those slopes twice.
-    const microNormal = texture(pbrPixels(maps, this.field, this.project, 'detailNormal'));
-    this.pbrTextures.forEach((old) => old.dispose());
-    this.pbrTextures = [albedo, roughness, occlusion, microNormal];
-    this.material.map = albedo;
-    this.material.normalMap = microNormal;
-    this.material.roughnessMap = roughness;
-    this.material.aoMap = occlusion;
-    this.material.aoMapIntensity = 0.85;
-    this.material.color.set('#ffffff');
-    this.material.normalScale.set(1, 1);
-    this.material.vertexColors = false;
-    this.material.roughness = 1;
-    this.material.metalness = 0;
-    this.material.needsUpdate = true;
-    this.lastPBRField = this.field;
+    const field = this.field, project = this.project;
+    const surfaceKey = JSON.stringify([
+      project.seed, project.surface ?? null, project.worldSize, project.heightScale,
+    ]);
+    if (this.lastPBRField === field && this.lastPBRSurface === surfaceKey) return;
+    this.pbrRelease?.();
+    const generation = ++this.pbrGeneration;
+    this.lastPBRField = field;
     this.lastPBRSurface = surfaceKey;
-    this.needsRender = true;
+    this.renderer.domElement.dataset.materialStatus = 'loading';
+    const request = requestPBR(field, project);
+    this.pbrRelease = request.release;
+    request.promise.then((maps) => {
+      if (this.disposed || generation !== this.pbrGeneration ||
+          this.field !== field || this.settings.material !== 'pbr') return;
+      this.pbrRelease?.();
+      this.pbrRelease = null;
+      const n = maps.resolution;
+      const texture = (rgba: Uint8ClampedArray, srgb = false): THREE.DataTexture => {
+        // A Uint8 view avoids copying the synthesized map yet another time.
+        const data = new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
+        const result = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
+        result.flipY = true; // row 0 north; matches plane geometry v=1
+        result.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        result.generateMipmaps = true;
+        result.minFilter = THREE.LinearMipmapLinearFilter;
+        result.magFilter = THREE.LinearFilter;
+        result.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+        result.needsUpdate = true;
+        return result;
+      };
+      const albedo = texture(maps.basecolor, true);
+      const roughness = texture(pbrPixels(maps, field, project, 'roughness'));
+      const occlusion = texture(pbrPixels(maps, field, project, 'ao'));
+      // Geometric normals already hold the macro terrain slopes.
+      const microNormal = texture(pbrPixels(maps, field, project, 'detailNormal'));
+      this.pbrTextures.forEach((old) => old.dispose());
+      this.pbrTextures = [albedo, roughness, occlusion, microNormal];
+      this.material.map = albedo;
+      this.material.normalMap = microNormal;
+      this.material.roughnessMap = roughness;
+      this.material.aoMap = occlusion;
+      this.material.aoMapIntensity = 0.85;
+      this.material.color.set('#ffffff');
+      this.material.normalScale.set(1, 1);
+      this.material.vertexColors = false;
+      this.material.roughness = 1;
+      this.material.metalness = 0;
+      this.material.needsUpdate = true;
+      this.renderer.domElement.dataset.materialStatus = 'ready';
+      this.needsRender = true;
+    }).catch((error: Error) => {
+      if (this.disposed || generation !== this.pbrGeneration) return;
+      this.pbrRelease?.();
+      this.pbrRelease = null;
+      this.lastPBRField = null;
+      this.lastPBRSurface = '';
+      this.renderer.domElement.dataset.materialStatus = 'error';
+      this.onError(error.message || 'Could not generate PBR materials.');
+    });
   }
 
   private fitCamera() {
@@ -653,6 +683,9 @@ export class TerrainScene {
 
   dispose() {
     this.disposed = true;
+    ++this.pbrGeneration;
+    this.pbrRelease?.();
+    this.pbrRelease = null;
     this.pbrTextures.forEach(texture => texture.dispose());
     this.pbrTextures = [];
     cancelAnimationFrame(this.animation);
