@@ -536,6 +536,13 @@ export function TerrainViewport({
   }, [field, project, settings, attempt]);
 
   useEffect(() => {
+    sceneRef.current?.setSplineGuide(
+      spline?.path ?? null,
+      spline?.params.mode === 'ridge' ? 'ridge' : 'river',
+    );
+  }, [spline, field, settings.exaggeration, attempt]);
+
+  useEffect(() => {
     sceneRef.current?.applyTheme(theme);
   }, [theme, attempt]);
 
