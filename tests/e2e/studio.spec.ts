@@ -627,3 +627,48 @@ test('protects the graph inside a modal and exports a real 512-square 16-bit PNG
     'Downloaded alpine-watershed-512-png16.zip',
   );
 });
+
+
+test('edits surface settings and exports aligned PBR textures in a browser', async ({
+  page,
+}, testInfo) => {
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  await page.getByLabel('Material biome').selectOption('volcanic');
+  await page.getByLabel('Snow-line elevation').fill('0.82');
+  await page.getByLabel('Snow-line elevation').press('Enter');
+  await expect(page.getByLabel('Material biome')).toHaveValue('volcanic');
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('pbr');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
+  await expect(dialog.getByRole('button', { name: 'Export bundle', exact: true })).toBeEnabled();
+  const downloading = page.waitForEvent('download', { timeout: 90_000 });
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('alpine-watershed-256-pbr.zip');
+  const filePath = testInfo.outputPath(download.suggestedFilename());
+  await download.saveAs(filePath);
+  expect(await download.failure()).toBeNull();
+  const files = unzipSync(new Uint8Array(await readFile(filePath)));
+  const prefix = 'alpine-watershed-256-';
+  for (const suffix of [
+    'height16.png', 'basecolor.png', 'normal-gl.png', 'normal-dx.png',
+    'detailnormal-gl.png', 'roughness.png', 'ao.png', 'metallic.png', 'orm.png',
+    'splat-rgba.png', 'curvature.png', 'unity-hdrp-mask.png',
+  ]) {
+    const png = files[prefix + suffix];
+    expect(png, suffix + ' should be included').toBeDefined();
+    const header = new DataView(png.buffer, png.byteOffset, png.byteLength);
+    expect(header.getUint32(16)).toBe(256);
+    expect(header.getUint32(20)).toBe(256);
+  }
+  const metadata = JSON.parse(
+    new TextDecoder().decode(files['alpine-watershed-material-metadata.json']),
+  );
+  expect(metadata.surface.biome).toBe('volcanic');
+  expect(metadata.surface.snowLine).toBe(0.82);
+  expect(metadata.packedMaps.splat_rgba).toEqual(['rock', 'soil', 'vegetation', 'snow']);
+  const project = JSON.parse(new TextDecoder().decode(files['alpine-watershed.nhterrain.json']));
+  expect(project.surface).toEqual(metadata.surface);
+  await expect(dialog.getByRole('status')).toContainText('Downloaded alpine-watershed-256-pbr.zip');
+});
