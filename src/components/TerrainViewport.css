@@ -881,3 +881,59 @@
 .nh-display-reset:hover {
   color: #3f5a43;
 }
+
+
+/* Non-destructive spline guide, rendered in normalized tile coordinates. */
+.nh-spline-layer {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  user-select: none;
+  touch-action: none;
+}
+.nh-spline-layer.is-editing { pointer-events: auto; cursor: crosshair; }
+.nh-spline-drawing { display: block; height: 100%; width: 100%; pointer-events: none; overflow: visible; }
+.nh-spline-outline { stroke: #182529bb; stroke-linejoin: round; stroke-linecap: round; }
+.nh-spline-centerline { stroke: #76bfd0; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 6 4; }
+.nh-spline-layer.is-ridge .nh-spline-centerline { stroke: #e3ba79; }
+.nh-spline-layer.is-ridge .nh-spline-outline { stroke: #43372ebd; }
+.nh-spline-handle {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  min-width: 25px;
+  height: 25px;
+  border: 2px solid #3c6672;
+  border-radius: 100px;
+  background: #edf8f5;
+  color: #254b5b;
+  font: 600 10px var(--mono);
+  cursor: grab;
+  box-shadow: 0 1px 6px #001d294b;
+  touch-action: none;
+  padding: 0;
+}
+.nh-spline-handle:first-of-type { border-width: 3px; }
+.nh-spline-handle.is-dragging { cursor: grabbing; background: #fff; }
+.nh-spline-layer.is-ridge .nh-spline-handle {
+  background: #f8f0e2;
+  border-color: #987548;
+  color: #5f482f;
+}
+.nh-spline-handle:hover, .nh-spline-handle:focus-visible { outline: 2px solid #f4f6f2; outline-offset: 2px; }
+.nh-spline-edit-hint {
+  position: absolute;
+  top: -32px;
+  left: 0;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font: 9px var(--mono);
+  white-space: nowrap;
+  color: #edf7f5;
+  background: #385056e8;
+  pointer-events: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
