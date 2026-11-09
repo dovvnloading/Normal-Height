@@ -1,0 +1,50 @@
+name: Terrain studio checks
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terrain-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Check terrain math, project files, and export encoding
+        run: npm test
+      - name: Typecheck and build production app
+        run: npm run build
+      - name: Install browser test runtime
+        run: npx playwright install --with-deps chromium
+      - name: Verify the studio in Chromium
+        run: npm run test:e2e
+      - name: Save browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terrain-studio-browser-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+      - name: Save production webapp
+        uses: actions/upload-artifact@v4
+        with:
+          name: normal-height-webapp
+          path: dist/
+          retention-days: 14
