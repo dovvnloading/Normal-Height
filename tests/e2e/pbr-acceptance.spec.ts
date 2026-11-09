@@ -231,7 +231,7 @@ test('2K PBR preflight fails gracefully on constrained devices before starting a
       }
     };
   });
-  const before = await page.evaluate(() => (window as Window & { __workersCreated: number }).__workersCreated);
+  const before = await page.evaluate(() => (window as Window & typeof globalThis & { __workersCreated: number }).__workersCreated);
   await page.getByRole('button', { name: 'Export maps', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
   await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('pbr');
@@ -239,6 +239,6 @@ test('2K PBR preflight fails gracefully on constrained devices before starting a
   await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
   await expect(dialog.getByRole('alert')).toContainText('above the');
   await expect(dialog.getByRole('alert')).toContainText('Choose a smaller resolution');
-  const after = await page.evaluate(() => (window as Window & { __workersCreated: number }).__workersCreated);
+  const after = await page.evaluate(() => (window as Window & typeof globalThis & { __workersCreated: number }).__workersCreated);
   expect(after).toBe(before);
 });
