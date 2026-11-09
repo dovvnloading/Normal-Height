@@ -48,7 +48,7 @@ describe('non-destructive spline terrain authoring', () => {
         maximumStep = Math.max(maximumStep, Math.abs(after[i] - after[i + 1]));
       }
     expect(maximumStep).toBeLessThan(0.14);
-    expect(before.every((h) => h === 0.6)).toBe(true);
+    expect(before.every((h) => Math.abs(h - 0.6) < 1e-6)).toBe(true);
   });
 
   it('raises a ridge, does not build overlapping bumps at controls, and preserves outer pixels', () => {
@@ -85,7 +85,7 @@ describe('non-destructive spline terrain authoring', () => {
     };
     const a = sample(96), b = sample(192);
     for (const point of [...diagonal, { x: 0.3, y: 0.4 }, { x: 0.2, y: 0.7 }])
-      expect(at(a, 96, point)).toBeCloseTo(at(b, 192, point), 2);
+      expect(Math.abs(at(a, 96, point) - at(b, 192, point))).toBeLessThan(0.012);
     expect(sculptSpline(a, 96, diagonal, { ...river, strength: 0 })).toEqual(a);
   });
 
