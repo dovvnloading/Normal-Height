@@ -28,7 +28,7 @@ export const PRESETS: Preset[] = [
     description:
       'A connected spine, branching tributaries, and weathered slopes. A starting point for natural mountain ranges.',
     seed: 48271,
-    color: '#a9b99d',
+    color: '#748872',
     build: () => [
       node('range', 'mountain', 0, {}, 'Alpine spine'),
       node('warp', 'warp', 270, { strength: 0.12, scale: 2.8 }, 'Break the symmetry'),
@@ -44,7 +44,7 @@ export const PRESETS: Preset[] = [
     description:
       'A broad mountain core with exposed rock, deeper cuts, and a more compact silhouette.',
     seed: 71391,
-    color: '#aaaeb5',
+    color: '#7e898e',
     build: () => [
       node(
         'range',
@@ -79,7 +79,7 @@ export const PRESETS: Preset[] = [
     eyebrow: 'SEDIMENT / GULLIES',
     description: 'Low sedimentary ridges with dense drainage channels and layered shelves.',
     seed: 20814,
-    color: '#c5a784',
+    color: '#a38b73',
     build: () => [
       node(
         'range',
@@ -126,7 +126,7 @@ export const PRESETS: Preset[] = [
     eyebrow: 'RADIAL / EROSION',
     description: 'A volcanic cone and open crater, eroded into radial drainage channels.',
     seed: 93217,
-    color: '#b6a49b',
+    color: '#95817b',
     build: () => [
       node(
         'range',
@@ -154,7 +154,7 @@ export const PRESETS: Preset[] = [
     description:
       'Long, lower ridges, broad valleys, and softened slopes for an older mountain landscape.',
     seed: 16403,
-    color: '#97b0a2',
+    color: '#708e83',
     build: () => [
       node(
         'range',
