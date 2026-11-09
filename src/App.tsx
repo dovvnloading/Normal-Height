@@ -56,7 +56,7 @@ function savedTheme(): ThemeMode | null {
 }
 
 const DEFAULT_SETTINGS: ViewSettings = {
-  material: 'alpine',
+  material: 'pbr',
   sunAzimuth: 315,
   sunElevation: 38,
   exaggeration: 1,

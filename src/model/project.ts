@@ -1,4 +1,5 @@
 import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
+import { resolveSurface, SURFACE_LIMITS } from '../materials/pbr';
 import { NODE_DEFINITIONS, createNode } from './registry';
 import type { NodeKind, TerrainProject, TerrainNode, TerrainEdge, ParamValue } from './types';
 
@@ -118,6 +119,26 @@ export function parseProject(raw: unknown): TerrainProject {
     !finite(p.resolution, 64, 2048)
   )
     throw new Error('Project scale, seed, or resolution is invalid.');
+  let surface: TerrainProject['surface'];
+  if (p.surface !== undefined) {
+    if (!p.surface || typeof p.surface !== 'object' || Array.isArray(p.surface))
+      throw new Error('Invalid PBR surface settings.');
+    const rawSurface = p.surface as Record<string, unknown>;
+    const biome = rawSurface.biome;
+    if (biome !== undefined && !['alpine', 'arid', 'volcanic'].includes(String(biome)))
+      throw new Error('Unknown PBR biome.');
+    const clean = resolveSurface();
+    if (biome !== undefined) clean.biome = biome as typeof clean.biome;
+    for (const key of Object.keys(SURFACE_LIMITS) as (keyof typeof SURFACE_LIMITS)[]) {
+      const value = rawSurface[key];
+      if (value !== undefined) {
+        const [min, max] = SURFACE_LIMITS[key];
+        if (!finite(value, min, max)) throw new Error('Invalid PBR ' + key + '.');
+        clean[key] = value;
+      }
+    }
+    surface = clean;
+  }
   return {
     version: 1,
     name: typeof p.name === 'string' ? p.name.slice(0, 100) : 'Untitled terrain',
@@ -126,6 +147,7 @@ export function parseProject(raw: unknown): TerrainProject {
     worldSize: p.worldSize,
     heightScale: p.heightScale,
     presetId: typeof p.presetId === 'string' ? p.presetId : 'custom',
+    ...(surface ? { surface } : {}),
     graph: { nodes, edges },
   };
 }
@@ -141,7 +163,7 @@ export function downloadBlob(blob: Blob, filename: string) {
 }
 export function saveProject(project: TerrainProject) {
   downloadBlob(
-    new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' }),
+    new Blob([JSON.stringify({ ...project, surface: resolveSurface(project.surface) }, null, 2)], { type: 'application/json' }),
     `${slug(project.name)}.nhterrain.json`,
   );
 }

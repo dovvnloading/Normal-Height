@@ -627,3 +627,107 @@ test('protects the graph inside a modal and exports a real 512-square 16-bit PNG
     'Downloaded alpine-watershed-512-png16.zip',
   );
 });
+
+
+test('edits surface settings and exports aligned PBR textures in a browser', async ({
+  page,
+}, testInfo) => {
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  await page.getByLabel('Material biome').selectOption('volcanic');
+  await page.getByRole('spinbutton', { name: 'Snow-line elevation value' }).fill('0.82');
+  await page.getByRole('spinbutton', { name: 'Snow-line elevation value' }).press('Enter');
+  await expect(page.getByLabel('Material biome')).toHaveValue('volcanic');
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('pbr');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
+  await expect(dialog.getByRole('button', { name: 'Export bundle', exact: true })).toBeEnabled();
+  const downloading = page.waitForEvent('download', { timeout: 90_000 });
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('alpine-watershed-256-pbr.zip');
+  const filePath = testInfo.outputPath(download.suggestedFilename());
+  await download.saveAs(filePath);
+  expect(await download.failure()).toBeNull();
+  const files = unzipSync(new Uint8Array(await readFile(filePath)));
+  const prefix = 'alpine-watershed-256-';
+  for (const suffix of [
+    'height16.png', 'basecolor.png', 'normal-gl.png', 'normal-dx.png',
+    'detailnormal-gl.png', 'roughness.png', 'ao.png', 'metallic.png', 'orm.png',
+    'splat-rgba.png', 'curvature.png', 'unity-hdrp-mask.png',
+  ]) {
+    const png = files[prefix + suffix];
+    expect(png, suffix + ' should be included').toBeDefined();
+    const header = new DataView(png.buffer, png.byteOffset, png.byteLength);
+    expect(header.getUint32(16)).toBe(256);
+    expect(header.getUint32(20)).toBe(256);
+  }
+  const metadata = JSON.parse(
+    new TextDecoder().decode(files['alpine-watershed-material-metadata.json']),
+  );
+  expect(metadata.surface.biome).toBe('volcanic');
+  expect(metadata.surface.snowLine).toBe(0.82);
+  expect(metadata.packedMaps.splat_rgba).toEqual(['rock', 'soil', 'vegetation', 'snow']);
+  const project = JSON.parse(new TextDecoder().decode(files['alpine-watershed.nhterrain.json']));
+  expect(project.surface).toEqual(metadata.surface);
+  await expect(dialog.getByRole('status')).toContainText('Downloaded alpine-watershed-256-pbr.zip');
+});
+
+test('material edits repaint the visible 2D PBR canvas without rebuilding the erosion field', async ({ page }) => {
+  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Map channel' }).selectOption('basecolor');
+  await expect(page.getByRole('img', { name: /^PBR base color map/ })).toBeVisible();
+  await expect.poll(() => mapColors(page), { timeout: 30_000 }).toBeGreaterThan(8);
+  const before = await mapFingerprint(page);
+  const auditedHeights = await heightAudits(page);
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  await page.getByLabel('Material biome').selectOption('volcanic');
+  // No pan/zoom or channel toggle: the paint must respond to the material alone.
+  await expect.poll(() => mapFingerprint(page), { timeout: 30_000 }).not.toBe(before);
+  expect((await heightAudits(page)).map((entry) => entry.sha256))
+    .toEqual(auditedHeights.map((entry) => entry.sha256));
+});
+
+test('PBR 3D material visibly updates after worker completion without moving the camera', async ({ page }) => {
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  const fingerprint = () => canvas.evaluate((element: HTMLCanvasElement) => {
+    const png = element.toDataURL('image/png');
+    let hash = 2166136261;
+    for (let i = 0; i < png.length; i += 31)
+      hash = Math.imul(hash ^ png.charCodeAt(i), 16777619);
+    return `${element.width}:${element.height}:${hash >>> 0}`;
+  });
+  const before = await fingerprint();
+  const heightsBefore = await heightAudits(page);
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  await page.getByLabel('Material biome').selectOption('arid');
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  await expect.poll(fingerprint, { timeout: 30_000 }).not.toBe(before);
+  expect((await heightAudits(page)).map((h) => h.sha256))
+    .toEqual(heightsBefore.map((h) => h.sha256));
+});
+
+test('export resolution and mandatory PBR bundle controls match their actual state', async ({ page }) => {
+  // Do not run an unrelated, expensive 768-grid erosion simulation.
+  await page.locator('.auto-build input').uncheck();
+  await page.getByRole('combobox', { name: 'Working resolution' }).selectOption('768');
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  const resolution = dialog.getByRole('combobox', { name: 'Export resolution' });
+  const format = dialog.getByRole('combobox', { name: 'Export format' });
+  const bundle = dialog.getByRole('checkbox');
+  await expect(resolution).toHaveValue('768');
+  await expect(dialog).toContainText('768 × 768');
+  await bundle.uncheck();
+  await expect(bundle).not.toBeChecked();
+  await format.selectOption('pbr');
+  await expect(bundle).toBeChecked();
+  await expect(bundle).toBeDisabled();
+  await expect(dialog.getByRole('button', { name: 'Export bundle', exact: true })).toBeEnabled();
+  await format.selectOption('basecolor');
+  await expect(bundle).not.toBeChecked();
+  await expect(bundle).toBeEnabled();
+  await expect(dialog.getByRole('button', { name: 'Export map', exact: true })).toBeEnabled();
+});
+

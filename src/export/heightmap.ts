@@ -1,5 +1,7 @@
 import { zlibSync, zipSync, strToU8 } from 'fflate';
 import { normalMapPixels, colorizeMap } from '../render/maps';
+import { generatePBR, pbrPixels, SPLAT_LAYERS, resolveSurface, AO_RADII_METERS } from '../materials/pbr';
+import type { PBRChannel } from '../materials/pbr';
 import type { HeightField, TerrainProject } from '../model/types';
 import { slug } from '../model/project';
 
@@ -95,7 +97,9 @@ export function encodeRawHeight(field: HeightField, heightScale: number) {
     view.setFloat32(i * 4, field.height[i] * heightScale, true);
   return bytes;
 }
-export type ExportFormat = 'png16' | 'raw32' | 'normal' | 'flow' | 'wear' | 'deposition';
+export type ExportFormat = 'png16' | 'raw32' | 'normal' | 'flow' | 'wear' | 'deposition'
+  | 'pbr' | 'basecolor' | 'roughness' | 'ao' | 'metallic' | 'orm'
+  | 'splat' | 'curvature' | 'normalDX';
 export function makeExport(
   field: HeightField,
   project: TerrainProject,
@@ -104,6 +108,77 @@ export function makeExport(
 ) {
   const name = slug(project.name);
   const range = heightRange(field.height);
+  if (format === 'pbr') {
+    const maps = generatePBR(field, project);
+    const prefix = name + '-' + field.resolution;
+    const png = (channel: PBRChannel, directX = false) =>
+      encodeRGBA(pbrPixels(maps, field, project, channel, directX), field.resolution);
+    const metadata = {
+      application: 'Normal Height',
+      version: 1,
+      materialVersion: 1,
+      surfaceSchemaVersion: 1,
+      resolution: [field.resolution, field.resolution],
+      worldSizeMeters: [project.worldSize, project.worldSize],
+      sampleSpacingMeters: project.worldSize / (field.resolution - 1),
+      elevationMinMeters: range.min * project.heightScale,
+      elevationMaxMeters: range.max * project.heightScale,
+      elevationEncoding: '16-bit grayscale UNORM; elevation_m = min_m + sample/65535*(max_m-min_m)',
+      orientation: 'Row-major; first row north (-Z), X east/right.',
+      baseColorSpace: 'sRGB; albedo excludes lighting and ambient occlusion',
+      dataColorSpace: 'Linear / non-color for normals, roughness, AO, ORM, masks and displacement',
+      normals: {
+        normal_gl: 'OpenGL +Y, height and microdetail; intended for flat or low-detail meshes',
+        normal_dx: 'DirectX -Y; exact green-channel inverse of OpenGL normals',
+        detailnormal_gl: 'Microdetail ONLY, for displaced high-resolution terrain; avoids duplicated geometry normals',
+      },
+      packedMaps: {
+        orm: 'R=ambient occlusion, G=roughness, B=metallic (0), A=255; glTF-style',
+        unity_hdrp_mask: 'R=metallic (0), G=AO, B=detail mask (255), A=smoothness (1-roughness)',
+        splat_rgba: SPLAT_LAYERS,
+      },
+      materialModel: 'Procedural biome weights; AO is a local terrain-horizon approximation, not a ray-traced bake.',
+      surface: resolveSurface(project.surface),
+      seed: project.seed,
+      aoHorizonRadiiMeters: AO_RADII_METERS,
+      textureChannels: {
+        basecolor: { colorSpace: 'sRGB', channels: ['red', 'green', 'blue', 'alpha'] },
+        normal_gl: { colorSpace: 'linear', channels: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'] },
+        normal_dx: { colorSpace: 'linear', channels: ['normalX', 'normalY_DirectX', 'normalZ', 'alpha'] },
+        detailnormal_gl: { colorSpace: 'linear', channels: ['microNormalX', 'microNormalY_OpenGL', 'microNormalZ', 'alpha'] },
+        roughness: { colorSpace: 'linear', channels: ['roughness', 'roughness', 'roughness', 'alpha'] },
+        ao: { colorSpace: 'linear', channels: ['occlusion', 'occlusion', 'occlusion', 'alpha'] },
+        metallic: { colorSpace: 'linear', channels: ['metallic', 'metallic', 'metallic', 'alpha'] },
+        orm: { colorSpace: 'linear', channels: ['occlusion', 'roughness', 'metallic', 'alpha'] },
+        splat_rgba: { colorSpace: 'linear', channels: SPLAT_LAYERS },
+        curvature: { colorSpace: 'linear', channels: ['curvature', 'curvature', 'curvature', 'alpha'] },
+        unity_hdrp_mask: { colorSpace: 'linear', channels: ['metallic', 'occlusion', 'detailMask', 'smoothness'] },
+        height16: { colorSpace: 'linear', channels: ['elevationUNorm16'] },
+      },
+    };
+    const files: Record<string, Uint8Array> = {
+      [prefix + '-height16.png']: encodeHeightPNG(field, range),
+      [prefix + '-basecolor.png']: png('basecolor'),
+      [prefix + '-normal-gl.png']: png('normal'),
+      [prefix + '-normal-dx.png']: png('normal', true),
+      [prefix + '-detailnormal-gl.png']: png('detailNormal'),
+      [prefix + '-roughness.png']: png('roughness'),
+      [prefix + '-ao.png']: png('ao'),
+      [prefix + '-metallic.png']: png('metallic'),
+      [prefix + '-orm.png']: png('orm'),
+      [prefix + '-splat-rgba.png']: png('splat'),
+      [prefix + '-curvature.png']: png('curvature'),
+      [prefix + '-unity-hdrp-mask.png']: png('unityMask'),
+      [name + '-material-metadata.json']: strToU8(JSON.stringify(metadata, null, 2)),
+      [name + '.nhterrain.json']: strToU8(
+        JSON.stringify({ ...project, surface: resolveSurface(project.surface), resolution: field.resolution }, null, 2),
+      ),
+    };
+    // PNG files are already compressed: storing them in ZIP avoids a second
+    // costly deflate pass and lowers peak transient allocations.
+    return { bytes: zipSync(files, { level: 0 }), filename: prefix + '-pbr.zip',
+      mime: 'application/zip' };
+  }
   let bytes: Uint8Array;
   let filename: string;
   if (format === 'png16') {
@@ -113,13 +188,27 @@ export function makeExport(
     bytes = encodeRawHeight(field, project.heightScale);
     filename = `${name}-${field.resolution}-elevation-f32le.raw`;
   } else {
-    const pixels =
-      format === 'normal'
+    const pbrChannels = ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature'];
+    const pixels = pbrChannels.includes(format) || format === 'normalDX'
+      ? pbrPixels(generatePBR(field, project), field, project,
+          format === 'normalDX' ? 'normal' : format as PBRChannel, format === 'normalDX')
+      : format === 'normal'
         ? normalMapPixels(field, project.worldSize, project.heightScale)
-        : colorizeMap(field, format, project.worldSize, project.heightScale);
+        : colorizeMap(field, format as 'flow' | 'wear' | 'deposition', project.worldSize, project.heightScale);
     bytes = encodeRGBA(pixels, field.resolution);
     filename = `${name}-${field.resolution}-${format}.png`;
   }
+  const materialChannelNames: Partial<Record<ExportFormat, string[]>> = {
+    basecolor: ['red', 'green', 'blue', 'alpha'],
+    roughness: ['roughness', 'roughness', 'roughness', 'alpha'],
+    ao: ['occlusion', 'occlusion', 'occlusion', 'alpha'],
+    metallic: ['metallic', 'metallic', 'metallic', 'alpha'],
+    orm: ['occlusion', 'roughness', 'metallic', 'alpha'],
+    splat: [...SPLAT_LAYERS],
+    curvature: ['curvature', 'curvature', 'curvature', 'alpha'],
+    normalDX: ['normalX', 'normalY_DirectX', 'normalZ', 'alpha'],
+    normal: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'],
+  };
   const metadata = {
     application: 'Normal Height',
     version: 1,
@@ -138,11 +227,20 @@ export function makeExport(
           : undefined,
     normalConvention:
       format === 'normal'
-        ? 'Tangent-space +Y (OpenGL): R=east/right, G=north/up in image, B=outward/up from terrain. RGB encoded from [-1,1] to [0,255].'
-        : undefined,
+        ? 'OpenGL +Y: G encodes north/up, RGB maps [-1,1] to [0,255].'
+        : format === 'normalDX'
+          ? 'DirectX -Y: green is inverted relative to OpenGL +Y, RGB maps [-1,1] to [0,255].'
+          : undefined,
+    materialEncoding: ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalDX'].includes(format)
+      ? 'Procedural PBR material map; see complete PBR bundle for channel packing and color-space conventions.'
+      : undefined,
     diagnosticEncoding: ['flow', 'wear', 'deposition'].includes(format)
       ? '8-bit display visualization, normalized independently; not physical flow rate.'
       : undefined,
+    colorSpace: format === 'basecolor' ? 'sRGB' : format === 'raw32' || format === 'png16' ? 'linear' : 'linear-non-color',
+    channelNames: materialChannelNames[format] ?? null,
+    surfaceSchemaVersion: materialChannelNames[format] ? 1 : undefined,
+    surface: materialChannelNames[format] ? resolveSurface(project.surface) : undefined,
     seed: project.seed,
     project,
   };

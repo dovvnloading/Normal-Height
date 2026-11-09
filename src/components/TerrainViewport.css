@@ -602,6 +602,9 @@
   box-shadow: inset -4px -4px 6px #0005;
   border: 1px solid #ffffff1a;
 }
+.nh-swatch-pbr {
+  background: linear-gradient(135deg, #dce4df 0%, #737e71 32%, #a58b70 61%, #414f47 100%);
+}
 .nh-swatch-alpine {
   background: linear-gradient(155deg, #e5ece0, #a7aa8d 34%, #737c59 65%, #4b5d44);
 }
