@@ -27,6 +27,8 @@ import type {
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
 import { colorizeMap, sampleSlope } from '../render/maps';
+import { generatePBR, pbrPixels } from '../materials/pbr';
+import type { PBRChannel } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import type { TerrainNode } from '../model/types';
@@ -61,6 +63,12 @@ const CHANNELS: { value: MapChannel; label: string }[] = [
   { value: 'flow', label: 'Water flow' },
   { value: 'wear', label: 'Erosion' },
   { value: 'deposition', label: 'Deposition' },
+  { value: 'basecolor', label: 'PBR base color' },
+  { value: 'roughness', label: 'PBR roughness' },
+  { value: 'ao', label: 'PBR occlusion' },
+  { value: 'splat', label: 'Material weights' },
+  { value: 'curvature', label: 'PBR curvature' },
+  { value: 'orm', label: 'Packed ORM' },
 ];
 
 function MapCanvas({
@@ -133,12 +141,26 @@ function MapCanvas({
     canvas.width = canvas.height = field.resolution;
     const context = canvas.getContext('2d');
     if (!context) return;
-    const pixels = colorizeMap(field, channel, project.worldSize, project.heightScale);
+    const material = ['basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm'].includes(channel);
+    let pixels = material
+      ? pbrPixels(generatePBR(field, project), field, project, channel as PBRChannel)
+      : colorizeMap(field, channel, project.worldSize, project.heightScale);
+    if (channel === 'splat') {
+      // Splat alpha is the fourth material, not display transparency.
+      const display = pixels.slice();
+      for (let i = 0; i < display.length; i += 4) {
+        display[i] = Math.min(255, pixels[i] + pixels[i + 3]);
+        display[i + 1] = Math.min(255, pixels[i + 1] + pixels[i + 3]);
+        display[i + 2] = Math.min(255, pixels[i + 2] + pixels[i + 3]);
+        display[i + 3] = 255;
+      }
+      pixels = display;
+    }
     const image = context.createImageData(field.resolution, field.resolution);
     image.data.set(pixels);
     context.putImageData(image, 0, 0);
     imageRef.current = canvas;
-  }, [field, channel, project.worldSize, project.heightScale]);
+  }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -457,8 +479,17 @@ function MapLegend({
         empty: false,
       };
     }
+    if (['basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm'].includes(channel)) {
+      return { label: channel === 'splat' ? 'R rock · G soil · B vegetation · A snow'
+        : channel === 'orm' ? 'R occlusion · G roughness · B metallic'
+          : CHANNELS.find(c => c.value === channel)?.label ?? 'PBR map',
+        start: channel === 'curvature' ? 'Concave' : '0',
+        end: channel === 'curvature' ? 'Convex' : '1',
+        empty: false };
+    }
     let max = 0;
-    for (const v of field[channel]) max = Math.max(max, v);
+    const diagnostic = field[channel as 'flow' | 'wear' | 'deposition'];
+    for (const v of diagnostic) max = Math.max(max, v);
     return {
       label: max
         ? `${CHANNELS.find((c) => c.value === channel)?.label} · ${channel === 'flow' ? 'normalized' : 'log scale'}`
@@ -643,6 +674,8 @@ export function TerrainViewport({
                   <span>
                     {settings.material === 'alpine'
                       ? 'ALPINE'
+                      : settings.material === 'pbr'
+                        ? 'PBR MATERIAL'
                       : settings.material === 'clay'
                         ? 'CLAY'
                         : 'ELEVATION'}
@@ -757,7 +790,7 @@ export function TerrainViewport({
             </div>
             <label className="nh-display-label">Surface</label>
             <div className="nh-material-options">
-              {(['alpine', 'clay', 'height'] as const).map((material) => (
+              {(['pbr', 'alpine', 'clay', 'height'] as const).map((material) => (
                 <button
                   key={material}
                   type="button"
@@ -769,6 +802,7 @@ export function TerrainViewport({
                   <span>
                     {material === 'height'
                       ? 'Height'
+                      : material === 'pbr' ? 'PBR'
                       : material[0].toUpperCase() + material.slice(1)}
                   </span>
                   {settings.material === material && <Check size={11} />}
