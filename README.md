@@ -49,7 +49,24 @@ For the browser tests, run `npx playwright install chromium` once. CI installs i
 
 Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automated basin routing, groundwater and GPU fluid solvers remain future work.
 
-### Watershed-driven hydraulic erosion
+### Multi-scale landscape evolution (experimental)
+
+New Hydraulic erosion nodes default to **Landscape evolution · multi-scale**.
+The algorithm uses repeated broad-to-fine evolution, routed rainfall that
+branches among downhill neighbors, catchment-based bed incision, physical
+riverbank width/angle, hillslope transport and downstream sediment deposition.
+You can adjust **Evolution steps**, **Valley feature scale** (meters),
+**Hillslope transport**, and **Riverbank angle** in the inspector.
+
+**Watershed v1 · stream power** and **Legacy · particle droplets** remain
+available for side-by-side comparison. Saved projects that explicitly specify
+one of those older models retain it; new nodes use Landscape evolution.
+The algorithm remains an artistic geomorphology approximation, **not** the
+proprietary Terragen/Gaea implementation or a validated water-flow simulation.
+Actual shape quality must be assessed from heightmap/relief output, not only
+from a branched Flow map. See [research and limitations](docs/RESEARCH.md).
+
+### Watershed-driven hydraulic erosion (previous solver)
 
 **Default: Connected watershed / stream power.** A priority-flood pass starts at the open tile boundary and guarantees outlet-connected flow directions, even when the source elevation contains enclosed basins. Downstream receivers are adjusted to favor actual steepest descent while preserving an acyclic routing graph. Rainfall accumulates from every upstream contributing cell, with a physically scaled travel-distance transmission loss. Channel incision responds to contributing area and local physical slope (a stream-power law), while sediment capacity, erosion, downstream transport, over-capacity deposition, and exported sediment are accounted for explicitly. Multi-scale duration first works dominant drainage, then finer tributaries. This creates a connected river hierarchy instead of unrelated random trails.
 
