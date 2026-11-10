@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  MountainSnow,
   ChevronDown,
   Download,
   FolderOpen,
@@ -29,6 +28,7 @@ import { TerrainViewport } from './components/TerrainViewport';
 import { ExportDialog } from './components/ExportDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
+import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
@@ -496,7 +496,7 @@ export default function App() {
           aria-label="Normal Height field guide"
         >
           <span className="brand-mark">
-            <MountainSnow size={24} strokeWidth={1.6} />
+            <TerrainIcon name="normal-height-logo" height={24} />
           </span>
           <span>
             NORMAL<span className="brand-divider">/</span>HEIGHT
@@ -883,7 +883,7 @@ export default function App() {
             <div className="preset-dialog-list">
               {PRESETS.map((p) => (
                 <button key={p.id} onClick={() => loadPreset(p.id)}>
-                  <MountainSnow size={24} style={{ color: p.color }} />
+                  <TerrainIcon name={PRESET_ICON_NAMES[p.id] ?? "mountain-range"} height={32} />
                   <span>
                     <strong>{p.name}</strong>
                     <small>{p.description}</small>
