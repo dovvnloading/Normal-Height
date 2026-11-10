@@ -150,6 +150,16 @@ async function capture(page: Page, testInfo: TestInfo, filename: string) {
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
 
+/** Capture the actual 3D framebuffer rather than asking a software GPU to
+ * composite the entire editor during expensive grazing-angle weather views.
+ * Keep a generous capture timeout while preserving the rendered pixel proof.
+ */
+async function captureTerrain(canvas: Locator, testInfo: TestInfo, filename: string) {
+  const path = testInfo.outputPath(filename);
+  await canvas.screenshot({ path, animations: 'disabled', timeout: 60_000 });
+  await testInfo.attach(filename, { path, contentType: 'image/png' });
+}
+
 async function downloadProject(page: Page, testInfo: TestInfo, filename: string) {
   const downloading = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
@@ -819,13 +829,13 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await page.mouse.down();
   await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.72, { steps: 9 });
   await page.mouse.up();
-  await capture(page, testInfo, 'atmosphere-overcast-horizon.png');
+  await captureTerrain(canvas, testInfo, 'atmosphere-overcast-horizon.png');
 
   await page.getByRole('button', { name: 'Display settings' }).click();
   await page.getByRole('dialog', { name: 'Display settings' })
     .getByRole('button', { name: 'Golden hour sky preset' }).click();
   await page.getByRole('button', { name: 'Close display settings' }).click();
-  await capture(page, testInfo, 'atmosphere-golden-horizon.png');
+  await captureTerrain(canvas, testInfo, 'atmosphere-golden-horizon.png');
 });
 
 test('export resolution and mandatory PBR bundle controls match their actual state', async ({ page }) => {
