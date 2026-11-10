@@ -242,12 +242,15 @@ export class TerrainScene {
       (this.settings.skyEnabled && this.settings.cloudCoverage > 0) ||
       (this.settings.expandGround && this.settings.grassDensity > 0)
     );
-    // Weather runs at 24 FPS; the camera, UI edits and snapshots still render
-    // immediately. Avoid saturating the GPU for a slowly drifting cloud deck.
-    const weatherFrame = weatherMoves && seconds - this.lastWeatherFrame >= 1 / 24;
+    // Clouds drift slowly, so sampling them at 6 Hz is enough for a fluid
+    // apparent motion without monopolizing a software WebGL backend. Camera
+    // and UI edits still trigger immediate unthrottled frames.
+    const weatherFrame = weatherMoves && seconds - this.lastWeatherFrame >= 1 / 6;
     if (this.needsRender || this.controls.autoRotate || weatherFrame) {
-      if (weatherFrame) this.lastWeatherFrame = seconds;
       this.renderer.render(this.scene, this.camera);
+      // Account for render time too: slow software GPUs must get a chance to
+      // process pointer events, map uploads, and Web Worker messages.
+      if (weatherFrame) this.lastWeatherFrame = performance.now() / 1000;
       this.needsRender = false;
     }
   };
