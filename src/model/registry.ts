@@ -396,7 +396,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         1000,
         300000,
         1000,
-        'Landscape/watershed: relative rainfall and contributing discharge (70,000 = 1×). Legacy: droplets per 512².'
+        'Landscape/watershed: relative rainfall and contributing discharge (70,000 = 1×). Legacy: droplets per 512².',
         'Simulation',
         'units',
       ),
@@ -406,7 +406,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         type: 'toggle',
         default: true,
         description:
-          'Landscape model: evolve broad valley structure at coarse physical scales, then add tributaries and fine detail while retaining source relief. Prior watershed model uses three same-grid passes.'
+          'Landscape model: evolve broad valley structure at coarse physical scales, then add tributaries and fine detail while retaining source relief. Prior watershed model uses three same-grid passes.',
         section: 'Simulation',
       },
       range(
