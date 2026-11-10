@@ -63,6 +63,15 @@ const DEFAULT_SETTINGS: ViewSettings = {
   contours: false,
   wireframe: false,
   autoRotate: false,
+  skyEnabled: true,
+  skyTurbidity: 4.5,
+  skyRayleigh: 2.2,
+  skyExposure: 1,
+  cloudCoverage: 0.42,
+  cloudSpeed: 0.35,
+  expandGround: false,
+  groundReach: 5,
+  grassDensity: 0.75,
 };
 function initialProject() {
   try {
