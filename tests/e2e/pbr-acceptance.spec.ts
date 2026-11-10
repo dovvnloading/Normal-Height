@@ -568,7 +568,7 @@ test('2K cancellation terminates workers and a smaller PBR export recovers under
   expect(errors).toEqual([]);
 });
 
-test('near-field material shader compiles, activates at close zoom, and toggles without rerunning PBR', async ({ page }) => {
+test('near-field material shader compiles, activates at close zoom, and toggles without rerunning PBR', async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   const shaderErrors: string[] = [];
   page.on('console', message => {
@@ -584,11 +584,17 @@ test('near-field material shader compiles, activates at close zoom, and toggles 
   const toggle = page.getByRole('checkbox', { name: /Live close-up microdetail/ });
   await expect(toggle).toBeChecked();
   const initialWorkerMs = await viewport.getAttribute('data-pbr-worker-ms');
+  await viewport.dblclick();
   await viewport.hover();
   await page.mouse.wheel(0, -4000);
   await expect(viewport).toHaveAttribute('data-near-field-detail', 'active', { timeout: 15_000 });
+  const enabledImage = await viewport.screenshot();
+  await testInfo.attach('nearfield-enabled.png', { body: enabledImage, contentType: 'image/png' });
   await toggle.uncheck();
   await expect(viewport).toHaveAttribute('data-near-field-detail', 'inactive', { timeout: 15_000 });
+  const disabledImage = await viewport.screenshot();
+  await testInfo.attach('nearfield-disabled.png', { body: disabledImage, contentType: 'image/png' });
+  expect(enabledImage.equals(disabledImage), 'Near-field shading must visibly affect the close-up terrain').toBe(false);
   await toggle.check();
   await expect(viewport).toHaveAttribute('data-near-field-detail', 'active', { timeout: 15_000 });
   expect(await viewport.getAttribute('data-pbr-worker-ms')).toBe(initialWorkerMs);
