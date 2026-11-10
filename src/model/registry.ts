@@ -385,6 +385,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         description: 'Landscape evolution combines multi-scale river incision, sediment transport, hill creep, and physically sized banks. Previous watershed and droplet methods remain for comparisons.',
         options: [
           { value: 'landscape', label: 'Landscape evolution · multi-scale' },
+          { value: 'fluid', label: 'Hydraulic fluid grid · experimental' },
           { value: 'watershed', label: 'Watershed v1 · stream power' },
           { value: 'droplet', label: 'Legacy · particle droplets' },
         ],
@@ -416,7 +417,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         4,
         72,
         1,
-        'Landscape evolution: number of integration steps shared between broad valleys, tributaries, and finer drainage. Changes convergence accuracy, not calibrated geologic years.',
+        'Landscape: evolution iterations. Fluid grid: 4 water/sediment timesteps per unit, progressively refined across 128/256/512 grids. Neither is calibrated geologic years.',
         'Simulation',
         'steps',
       ),
