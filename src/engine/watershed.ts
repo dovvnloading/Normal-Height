@@ -194,10 +194,20 @@ export function watershedErosion(
         const norm = Math.hypot(dx, dy);
         const tx = -dy / norm, ty = dx / norm;
         const bankRadius = Math.min(6, Math.max(1.5, 90 / cell));
-        const across = (
-          elevationAt(x + tx * bankRadius, y + ty * bankRadius) +
-          elevationAt(x - tx * bankRadius, y - ty * bankRadius)
-        ) * 0.5 - height[i];
+        const bankAX = x + tx * bankRadius, bankAY = y + ty * bankRadius;
+        const bankBX = x - tx * bankRadius, bankBY = y - ty * bankRadius;
+        // The gradient itself can be sampled with clamping, but a *valley
+        // classifier* cannot: asymmetric clipping at an open boundary turns
+        // even a perfect plane into a false concavity and creates parallel
+        // scars across that boundary. Require both physical banks.
+        const fullBanks = bankAX >= 0 && bankAX <= n - 1 &&
+          bankBX >= 0 && bankBX <= n - 1 &&
+          bankAY >= 0 && bankAY <= n - 1 &&
+          bankBY >= 0 && bankBY <= n - 1;
+        const across = fullBanks ? (
+          elevationAt(bankAX, bankAY) +
+          elevationAt(bankBX, bankBY)
+        ) * 0.5 - height[i] : 0;
         const valley = clamp((across / relief - 0.0006) / 0.008);
         // Area alone is insufficient: finite-resolution D8 can converge even
         // on a mathematically planar surface. Insist on measured cross-bank
