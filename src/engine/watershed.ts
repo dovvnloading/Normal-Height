@@ -199,7 +199,7 @@ export function watershedErosion(
           elevationAt(x - tx * bankRadius, y - ty * bankRadius)
         ) * 0.5 - height[i];
         const valley = clamp((across / relief - 0.0006) / 0.008);
-        const catchment = clamp((relativeArea - 0.006) / 0.024) * 0.7;
+        const catchment = clamp((relativeArea - 0.012) / 0.025) * 0.7;
         const convergence = Math.max(valley * valley * (3 - 2 * valley), catchment);
         if (convergence > 0.001) {
           const requested = relief * 0.55 * erosion * duration * passStrength *
