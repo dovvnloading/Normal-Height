@@ -150,14 +150,16 @@ async function capture(page: Page, testInfo: TestInfo, filename: string) {
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
 
-/** Capture the actual 3D framebuffer rather than asking a software GPU to
- * composite the entire editor during expensive grazing-angle weather views.
- * Keep a generous capture timeout while preserving the rendered pixel proof.
+/** Preserve the actual WebGL drawing buffer without a costly full-window
+ * compositor readback during grazing-angle scenes in software Chromium.
  */
 async function captureTerrain(canvas: Locator, testInfo: TestInfo, filename: string) {
-  const path = testInfo.outputPath(filename);
-  await canvas.screenshot({ path, animations: 'disabled', timeout: 60_000 });
-  await testInfo.attach(filename, { path, contentType: 'image/png' });
+  const png = await canvas.evaluate((element: HTMLCanvasElement) => element.toDataURL('image/png'));
+  expect(png).toMatch(/^data:image\/png;base64,/);
+  await testInfo.attach(filename, {
+    body: Buffer.from(png.slice('data:image/png;base64,'.length), 'base64'),
+    contentType: 'image/png',
+  });
 }
 
 async function downloadProject(page: Page, testInfo: TestInfo, filename: string) {
