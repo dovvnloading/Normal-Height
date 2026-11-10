@@ -781,6 +781,34 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await dialog.getByRole('button', { name: 'Clear day sky preset' }).click();
   await expect(dialog.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
   const clear = await fingerprint();
+  // A sky can technically render while washing out every terrain material.
+  // Sample the actual WebGL framebuffer's center relief and require useful
+  // highlight headroom and tonal variation in the clear-day preset.
+  const daylightTones = await canvas.evaluate((element: HTMLCanvasElement) => {
+    const sample = document.createElement('canvas');
+    sample.width = 200;
+    sample.height = 120;
+    const ctx = sample.getContext('2d')!;
+    ctx.drawImage(element, element.width * 0.24, element.height * 0.36,
+      element.width * 0.40, element.height * 0.44, 0, 0, sample.width, sample.height);
+    const rgba = ctx.getImageData(0, 0, sample.width, sample.height).data;
+    let sum = 0, squareSum = 0, clipped = 0;
+    const count = rgba.length / 4;
+    for (let i = 0; i < rgba.length; i += 4) {
+      const mean = (rgba[i] + rgba[i + 1] + rgba[i + 2]) / 3;
+      sum += mean;
+      squareSum += mean * mean;
+      if (rgba[i] > 225 && rgba[i + 1] > 225 && rgba[i + 2] > 225) clipped++;
+    }
+    return {
+      mean: sum / count,
+      deviation: Math.sqrt(Math.max(0, squareSum / count - (sum / count) ** 2)),
+      nearlyWhite: clipped / count,
+    };
+  });
+  expect(daylightTones.mean).toBeLessThan(208);
+  expect(daylightTones.deviation).toBeGreaterThan(22);
+  expect(daylightTones.nearlyWhite).toBeLessThan(0.27);
   await capture(page, testInfo, 'atmosphere-clear-day.png');
 
   await dialog.getByRole('button', { name: 'Golden hour sky preset' }).click();
