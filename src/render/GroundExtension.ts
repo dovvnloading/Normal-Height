@@ -46,45 +46,44 @@ export function buildGroundApron(
   const boundaryColors: number[] = [];
   const heightScale = (TERRAIN_SIZE * project.heightScale / project.worldSize) * exaggeration;
 
+  // Evaluate the entire closed perimeter once. Averaging wrapped perimeter
+  // samples, rather than smoothing each side independently, prevents creases
+  // that shoot radially outward from the tile's four corners.
+  const edge = Array.from({ length: count }, (_, i) => {
+    const side = Math.floor(i / segments);
+    const s = (i % segments) / segments;
+    let x = 0, z = 0;
+    if (side === 0) { x = -HALF + s * TERRAIN_SIZE; z = -HALF; }
+    if (side === 1) { x = HALF; z = -HALF + s * TERRAIN_SIZE; }
+    if (side === 2) { x = HALF - s * TERRAIN_SIZE; z = HALF; }
+    if (side === 3) { x = -HALF; z = HALF - s * TERRAIN_SIZE; }
+    return { x, z, height: bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5) };
+  });
+  const offsets: Array<[number, number]> = [
+    [-0.055, 0.7], [-0.025, 1.2], [-0.009, 1.5], [0, 3.2],
+    [0.009, 1.5], [0.025, 1.2], [0.055, 0.7],
+  ];
+  const smoothed = edge.map((_, i) => {
+    let sum = 0, weights = 0;
+    for (const [fraction, weight] of offsets) {
+      const shift = Math.round(fraction * segments);
+      const neighbor = ((i + shift) % count + count) % count;
+      sum += edge[neighbor].height * weight;
+      weights += weight;
+    }
+    return sum / weights;
+  });
+
   for (const t of levels) {
+    const scale = 1 + (APRON_WIDTH / HALF) * t;
+    const fineDetail = Math.exp(-30 * t);
+    const flatten = THREE.MathUtils.smoothstep(t, 0.02, 0.72);
     for (let i = 0; i < count; i++) {
-      const side = Math.floor(i / segments);
-      const s = (i % segments) / segments;
-      let x = 0, z = 0;
-      if (side === 0) { x = -HALF + s * TERRAIN_SIZE; z = -HALF; }
-      if (side === 1) { x = HALF; z = -HALF + s * TERRAIN_SIZE; }
-      if (side === 2) { x = HALF - s * TERRAIN_SIZE; z = HALF; }
-      if (side === 3) { x = -HALF; z = HALF - s * TERRAIN_SIZE; }
-      const height = bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5);
-      // Preserve the exact incoming boundary, then rapidly attenuate the fine
-      // shoreline detail while the broad forms relax toward a level meadow.
-      // Sampling along the edge (not radially outward) avoids fan-shaped lines.
-      let broadHeight = height * 2.5;
-      let weight = 2.5;
-      const radius = TERRAIN_SIZE * 0.06;
-      for (const [offset, influence] of [
-        [-1, 1], [1, 1], [-0.6, 1.3], [0.6, 1.3], [-0.25, 1.6], [0.25, 1.6],
-      ]) {
-        const step = offset * radius;
-        const sx = THREE.MathUtils.clamp(x + (side % 2 === 0 ? step : 0), -HALF, HALF);
-        const sz = THREE.MathUtils.clamp(z + (side % 2 === 1 ? step : 0), -HALF, HALF);
-        broadHeight += bilinear(field, sx / TERRAIN_SIZE + 0.5, sz / TERRAIN_SIZE + 0.5)
-          * influence;
-        weight += influence;
-      }
-      broadHeight /= weight;
-      const highFrequency = Math.exp(-30 * t);
-      const shorelineHeight = broadHeight + (height - broadHeight) * highFrequency;
-      // The final two rings are exactly coplanar with the infinite meadow,
-      // eliminating its former square normal/height silhouette.
-      const flatten = THREE.MathUtils.smoothstep(t, 0.02, 0.72);
-      const shapeY = THREE.MathUtils.lerp(shorelineHeight * heightScale, flatY, flatten);
-      const scale = 1 + (APRON_WIDTH / HALF) * t;
+      const { x, z, height } = edge[i];
+      const seamlessHeight = smoothed[i] + (height - smoothed[i]) * fineDetail;
       const px = x * scale, pz = z * scale;
-      vertices.push(px, shapeY, pz);
+      vertices.push(px, THREE.MathUtils.lerp(seamlessHeight * heightScale, flatY, flatten), pz);
       uvs.push(0.5 + px / extent, 0.5 - pz / extent);
-      // The tile now fades its own exterior into the exact same grass map.
-      // Use grass right up to the edge, so the boundary is color-continuous.
       blends.push(1);
       boundaryColors.push(0.38, 0.45, 0.32);
     }
@@ -187,8 +186,8 @@ function bladeGeometry(): THREE.BufferGeometry {
   for (let blade = 0; blade < 4; blade++) {
     const angle = (blade * Math.PI) / 4;
     const c = Math.cos(angle), s = Math.sin(angle);
-    const height = 0.028 + (blade % 3) * 0.008;
-    const width = 0.007 + (blade % 2) * 0.003;
+    const height = 0.019 + (blade % 3) * 0.004;
+    const width = 0.0045 + (blade % 2) * 0.002;
     const points = [
       [-width, 0, 0],
       [width, 0, 0],
@@ -226,7 +225,7 @@ export class GroundExtension {
     map: this.texture, color: '#ffffff', roughness: 0.98, metalness: 0, side: THREE.DoubleSide,
   });
   private readonly apronMaterial = new THREE.MeshStandardMaterial({
-    map: this.texture, color: '#ffffff', roughness: 0.94, metalness: 0, side: THREE.DoubleSide,
+    map: this.texture, color: '#ffffff', roughness: 0.98, metalness: 0, side: THREE.DoubleSide,
   });
   private readonly bladeTime = { value: 0 };
   private readonly bladeMaterial = new THREE.MeshStandardMaterial({
@@ -347,7 +346,7 @@ export class GroundExtension {
       // Density changes only update the active instance count; no expensive
       // blade geometry or GPU buffers are recreated while dragging the slider.
       this.tufts.count = Math.min(this.tufts.instanceMatrix.count,
-        Math.round(area * 15 * settings.grassDensity));
+        Math.round(area * 27 * settings.grassDensity));
       this.tufts.position.y = base + 0.001;
       this.tufts.visible = true;
     }
@@ -444,7 +443,7 @@ export class GroundExtension {
     const half = extent * 0.5;
     const edge = HALF + APRON_WIDTH + 0.08;
     const availableArea = Math.max(0, extent * extent - (2 * edge) ** 2);
-    const count = Math.min(5000, Math.round(availableArea * 15 * 1.5));
+    const count = Math.min(8500, Math.round(availableArea * 27 * 1.5));
     const mesh = new THREE.InstancedMesh(bladeGeometry(), this.bladeMaterial, count);
     mesh.name = 'Instanced meadow grass';
     mesh.castShadow = false;
