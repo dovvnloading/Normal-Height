@@ -755,9 +755,9 @@ test('the sky and expanded meadow change rendered pixels without rebuilding the 
   const withoutGround = await fingerprint();
   await panel.getByRole('checkbox', { name: 'Expand ground' }).check();
   await expect(panel.getByRole('slider', { name: 'Ground reach' })).toBeVisible();
-  await expect(panel.getByRole('slider', { name: 'Grass density' })).toBeVisible();
+  await expect(panel.getByRole('slider', { name: 'Grass density' })).toHaveCount(0);
   await expect.poll(fingerprint).not.toBe(withoutGround);
-  await capture(page, testInfo, 'sky-and-expanded-grass.png');
+  await capture(page, testInfo, 'sky-and-textured-meadow.png');
 
   await panel.getByRole('checkbox', { name: 'Expand ground' }).uncheck();
   expect((await heightAudits(page)).map((h) => h.sha256)).toEqual(heightsBefore);
@@ -825,12 +825,11 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await dialog.getByRole('button', { name: 'Overcast sky preset' }).click();
   await expect.poll(fingerprint).not.toBe(golden);
   await dialog.getByRole('checkbox', { name: 'Expand ground' }).check();
-  await dialog.getByRole('slider', { name: 'Grass density' }).focus();
-  await dialog.getByRole('slider', { name: 'Grass density' }).press('End');
+  await expect(dialog.getByRole('slider', { name: 'Grass density' })).toHaveCount(0);
   await capture(page, testInfo, 'atmosphere-overcast-meadow.png');
 
   // Reload preserves artist controls; 2D inspection still repaints accurately
-  // while the physical sky and grass are enabled.
+  // while the physical sky and static textured meadow are enabled.
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
   await ready(page);
   await page.getByRole('button', { name: 'Display settings' }).click();
@@ -838,7 +837,8 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await expect(restored.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
   await expect(restored.getByRole('checkbox', { name: 'Expand ground' })).toBeChecked();
   await expect(restored.getByRole('slider', { name: 'Cloud cover' })).toHaveValue('0.88');
-  await expect(restored.getByRole('slider', { name: 'Grass density' })).toHaveValue('1.5');
+  await expect(restored.getByRole('slider', { name: 'Grass density' })).toHaveCount(0);
+  await expect(restored.getByRole('slider', { name: 'Ground reach' })).toHaveValue('5');
   await page.getByRole('button', { name: 'Close display settings' }).click();
   await page.getByRole('button', { name: 'Split', exact: true }).click();
   await expect(page.getByRole('img', { name: /^Height map\./ })).toBeVisible();

@@ -36,7 +36,8 @@ describe('versioned preview settings', () => {
     expect(settings.skyExposure).toBe(1);
     expect(settings.skyTurbidity).toBe(1);
     expect(settings.groundReach).toBe(5);
-    expect(settings.grassDensity).toBe(1.5);
+    // Old saved grass-density preferences are ignored after removing blades.
+    expect('grassDensity' in settings).toBe(false);
     expect(settings.material).toBe('pbr');
     expect(Object.keys(settings)).toEqual(Object.keys(DEFAULT_VIEW_SETTINGS));
     expect(parseViewSettings(null)).toEqual(DEFAULT_VIEW_SETTINGS);

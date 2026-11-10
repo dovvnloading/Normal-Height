@@ -264,11 +264,10 @@ export class TerrainScene {
     const seconds = performance.now() / 1000;
     this.atmosphere?.follow(this.camera);
     this.atmosphere?.tick(seconds, this.settings);
-    this.groundExtension?.tick(seconds, this.settings.cloudSpeed);
-    const weatherMoves = this.settings.cloudSpeed > 0 && (
-      (this.settings.skyEnabled && this.settings.cloudCoverage > 0) ||
-      (this.settings.expandGround && this.settings.grassDensity > 0)
-    );
+    // The meadow is a static textured surface. Only moving sky clouds need
+    // autonomous redraws; no grass sprites or wind-driven foliage remain.
+    const weatherMoves = this.settings.cloudSpeed > 0 &&
+      this.settings.skyEnabled && this.settings.cloudCoverage > 0;
     // Smooth 24 Hz weather on capable hardware; adapt toward 6 Hz on slow
     // software devices. User actions are never throttled.
     const weatherFrame = weatherMoves &&
@@ -465,7 +464,7 @@ export class TerrainScene {
     }
     if (scaleChanged && this.terrain) this.rebuildSplineGuide();
     if (scaleChanged && this.terrain && !this.cameraAdjusted) this.fitCamera();
-    // Changing haze, exposure, cloud shadows, grass density or materials must
+    // Changing haze, exposure, cloud shadows or materials must
     // not trigger a costly 2048² sun-shadow regeneration. Only the actual
     // shadow-caster geometry or light direction requires it.
     if (shadowGeometryChanged) this.renderer.shadowMap.needsUpdate = true;
