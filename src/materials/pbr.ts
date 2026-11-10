@@ -53,7 +53,8 @@ export type PBRChannel =
   | 'splat'
   | 'curvature'
   | 'normal'
-  | 'detailNormal';
+  | 'detailNormal'
+  | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
 
 export interface PBRMaps {
   resolution: number;
@@ -169,6 +170,21 @@ export function pbrPixels(
 ): Uint8ClampedArray {
   if (channel === 'basecolor') return maps.basecolor;
   if (channel === 'splat') return maps.splat;
+  // Inspect individual physically synthesized coverage masks as opaque grayscale
+  // percentages. These are derived from the exact exported RGBA splat bytes.
+  const weightIndex = channel === 'rockWeight' ? 0 :
+    channel === 'soilWeight' ? 1 : channel === 'vegetationWeight' ? 2 :
+    channel === 'snowWeight' ? 3 : -1;
+  if (weightIndex >= 0) {
+    const out = new Uint8ClampedArray(maps.resolution * maps.resolution * 4);
+    for (let i = 0; i < maps.resolution * maps.resolution; i++) {
+      const p = i * 4;
+      const weight = maps.splat[p + weightIndex];
+      out[p] = out[p + 1] = out[p + 2] = weight;
+      out[p + 3] = 255;
+    }
+    return out;
+  }
   if (channel === 'normal') return materialNormalPixels(maps, field, project, false, directX);
   if (channel === 'detailNormal') return materialNormalPixels(maps, field, project, true, directX);
   if (channel === 'roughness') return grayscale(maps.roughness);
