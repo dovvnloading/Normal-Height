@@ -221,6 +221,11 @@ export class Atmosphere {
     this.attachedMaterials.set(material, wrapCloudShadows(material, this.shadowUniforms));
   }
 
+  detach(material: THREE.MeshStandardMaterial) {
+    this.attachedMaterials.get(material)?.();
+    this.attachedMaterials.delete(material);
+  }
+
   follow(camera: THREE.Camera) {
     if (!this.enabled) return;
     this.sky.position.copy(camera.position);
