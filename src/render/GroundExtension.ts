@@ -32,7 +32,9 @@ export function buildGroundApron(
   flatY: number,
   extent: number,
 ): THREE.BufferGeometry {
-  const segments = Math.min(128, Math.max(16, field.resolution - 1));
+  // Match the 3D tile's tessellation exactly, eliminating border cracks on
+  // high-frequency heightfields and at reduced working mesh resolutions.
+  const segments = Math.max(1, Math.min(511, field.resolution - 1));
   const count = segments * 4;
   const levels = [0, 0.2, 0.45, 0.7, 0.9, 1];
   const vertices: number[] = [];
@@ -51,9 +53,17 @@ export function buildGroundApron(
       if (side === 2) { x = HALF - s * TERRAIN_SIZE; z = HALF; }
       if (side === 3) { x = -HALF; z = HALF - s * TERRAIN_SIZE; }
       const height = bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5);
+      // Start with the actual outward terrain slope before easing into flat
+      // ground. This preserves the silhouette and normal transition at the tile.
+      const step = TERRAIN_SIZE / Math.max(1, field.resolution - 1);
+      const insideX = x + (side === 1 ? -step : side === 3 ? step : 0);
+      const insideZ = z + (side === 0 ? step : side === 2 ? -step : 0);
+      const innerHeight = bilinear(field, insideX / TERRAIN_SIZE + 0.5, insideZ / TERRAIN_SIZE + 0.5);
+      const edgeSlope = THREE.MathUtils.clamp((height - innerHeight) * heightScale / step, -1.5, 1.5);
       const scale = 1 + (APRON_WIDTH / HALF) * t;
       const px = x * scale, pz = z * scale;
-      vertices.push(px, THREE.MathUtils.lerp(height * heightScale, flatY, eased), pz);
+      const projected = height * heightScale + edgeSlope * APRON_WIDTH * t;
+      vertices.push(px, THREE.MathUtils.lerp(projected, flatY, eased), pz);
       uvs.push(0.5 + px / extent, 0.5 - pz / extent);
     }
   }
