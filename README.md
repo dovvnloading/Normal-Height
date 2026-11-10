@@ -78,7 +78,9 @@ The solver is an artistic particle model, not a calibrated watershed or geologic
 
 ### Preview
 
-- **3D:** real displaced geometry, computed normals, cast shadows, alpine/clay/elevation materials, sun controls, contours, wireframe, orbit controls, and image capture.
+- **3D:** real displaced geometry, computed normals, cast shadows, alpine/clay/elevation/PBR materials, physical atmospheric sky, dynamic clouds, matched sun and ambient illumination, contours, wireframe, orbit controls, and image capture.
+- **Sky dome:** open **Display → Atmosphere & lighting**. Enable/disable the sky, rotate and elevate the sun, and adjust haze, Rayleigh scattering, exposure, cloud coverage, and wind. The sky supplies a debounced prefiltered environment map for PBR, while sunlight, ambient fill, fog, and tone mapping respond immediately. Disabling it restores the original neutral studio lighting.
+- **Expand ground:** open **Display → Landscape context** to show a flat, procedurally textured meadow around the generated tile, including an edge-conforming transition and animated instanced grass. Control ground reach and grass density independently of the sky. This visual preview does not extend the simulation mesh or modify any exported heightmap. Weather animation pauses rendering when wind is zero.
 - **2D:** height, shaded terrain, OpenGL normals, physical slope, flow, wear, and deposition, with pan/zoom and pixel/elevation inspection.
 - **Split view:** inspect the surface and map together.
 - The 3D display mesh is capped at 512 × 512 vertices. Working simulation grids reach 1024 × 1024 and export grids reach 2048 × 2048. High-resolution exports rerun the entire connected graph.
