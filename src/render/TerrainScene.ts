@@ -407,6 +407,8 @@ export class TerrainScene {
       if (this.atmosphere) for (const material of this.groundExtension.materials)
         this.atmosphere.attach(material);
     } else if (this.groundExtension) {
+      if (this.atmosphere) for (const material of this.groundExtension.materials)
+        this.atmosphere.detach(material);
       this.groundExtension.dispose();
       this.groundExtension = null;
     }
