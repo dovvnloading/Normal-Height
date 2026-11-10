@@ -63,7 +63,7 @@ const DEFAULT_SETTINGS: ViewSettings = {
   contours: false,
   wireframe: false,
   autoRotate: false,
-  skyEnabled: true,
+  skyEnabled: false,
   skyTurbidity: 4.5,
   skyRayleigh: 2.2,
   skyExposure: 1,
