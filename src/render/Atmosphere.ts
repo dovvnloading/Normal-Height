@@ -160,7 +160,8 @@ export class Atmosphere {
     const sunDaylight = THREE.MathUtils.smoothstep(settings.sunElevation, 4, 30);
     const brokenClouds = 1 - THREE.MathUtils.smoothstep(settings.cloudCoverage, 0.8, 1) * 0.6;
     this.shadowUniforms.nhCloudShadowStrength.value =
-      0.66 * sunDaylight * brokenClouds * THREE.MathUtils.smoothstep(settings.cloudCoverage, 0.05, 0.65);
+      settings.cloudShadowStrength * sunDaylight * brokenClouds *
+      THREE.MathUtils.smoothstep(settings.cloudCoverage, 0.05, 0.65);
     this.cloudMaterial.uniforms.haze.value = (settings.skyTurbidity - 2) / 14;
 
     const azimuth = THREE.MathUtils.degToRad(settings.sunAzimuth);
