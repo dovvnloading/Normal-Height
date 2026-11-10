@@ -109,9 +109,14 @@ for (const resolution of [512, 1024] as const) {
     page.on('pageerror', e => errors.push(e.message));
     await loadFastProject(page, resolution);
     await page.getByRole('button', { name: 'Split', exact: true }).click();
+    await expect.poll(() => mapColors(page), { timeout: 45_000 }).toBeGreaterThan(8);
+    const heightRaster = await mapHash(page);
     await page.getByRole('combobox', { name: 'Map channel' }).selectOption('basecolor');
     const gl = page.getByRole('img', { name: /^Interactive 3D terrain/ });
     await expect(gl).toHaveAttribute('data-material-status', 'ready', { timeout: 45_000 });
+    // MapCanvas retains the previously painted height channel while its
+    // PBR material worker finishes. Do not mistake that old raster for albedo.
+    await expect.poll(() => mapHash(page), { timeout: 60_000 }).not.toBe(heightRaster);
     await expect.poll(() => mapColors(page), { timeout: 45_000 }).toBeGreaterThan(8);
     const original = await mapHash(page);
     await page.getByRole('button', { name: 'Scene', exact: true }).click();
@@ -175,7 +180,12 @@ test('1K browser export decodes every PBR PNG and aligns with the visible 2D map
   test.setTimeout(240_000);
   await loadFastProject(page, 1024);
   await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await expect.poll(() => mapColors(page), { timeout: 60_000 }).toBeGreaterThan(8);
+  const heightRaster = await mapHash(page);
   await page.getByRole('combobox', { name: 'Map channel' }).selectOption('basecolor');
+  // A non-empty canvas alone is insufficient: it can still contain the old
+  // 16-bit height visualization when the PBR worker has not painted yet.
+  await expect.poll(() => mapHash(page), { timeout: 90_000 }).not.toBe(heightRaster);
   await expect.poll(() => mapColors(page), { timeout: 60_000 }).toBeGreaterThan(8);
   const previews = await mapCanvas(page).evaluate((canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
