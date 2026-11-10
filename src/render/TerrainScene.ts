@@ -359,7 +359,7 @@ export class TerrainScene {
       this.hemisphere.intensity = lighting.ambientIntensity;
       this.scene.background = null; // let the physical dome fill the sky
       this.scene.fog = new THREE.Fog(lighting.fogColor, 6, lighting.fogFar);
-      this.renderer.toneMappingExposure = 1.08 * this.settings.skyExposure;
+      this.renderer.toneMappingExposure = 0.97 * this.settings.skyExposure;
     } else {
       this.sun.color.set('#fff7e9');
       this.sun.intensity = 2.55;
@@ -392,6 +392,7 @@ export class TerrainScene {
         this.needsRender = true;
       });
       this.atmosphere.apply(settings);
+      this.atmosphere.attach(this.material);
     } else if (this.atmosphere) {
       this.atmosphere.dispose();
       this.atmosphere = null;
@@ -403,6 +404,8 @@ export class TerrainScene {
     if (settings.expandGround) {
       this.groundExtension ??= new GroundExtension(this.scene, this.renderer);
       this.groundExtension.update(this.field, this.project, settings, this.minimumElevation, this.terrain);
+      if (this.atmosphere) for (const material of this.groundExtension.materials)
+        this.atmosphere.attach(material);
     } else if (this.groundExtension) {
       this.groundExtension.dispose();
       this.groundExtension = null;
