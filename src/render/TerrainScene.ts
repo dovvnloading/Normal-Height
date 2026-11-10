@@ -71,6 +71,8 @@ export class TerrainScene {
   private lastWeatherFrame = 0;
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
+  private meadowBlendUniform = { value: 0 };
+  private meadowTextureUniform: { value: THREE.Texture | null } = { value: null };
   private splinePath: readonly SplinePoint[] | null = null;
   private splineMode: 'river' | 'ridge' = 'river';
   private splineGuide: THREE.Group | null = null;
@@ -161,14 +163,32 @@ export class TerrainScene {
     this.material.onBeforeCompile = (shader) => {
       shader.uniforms.nhContours = this.contourUniform;
       shader.uniforms.nhSpacing = this.spacingUniform;
+      shader.uniforms.nhMeadowBlend = this.meadowBlendUniform;
+      shader.uniforms.nhMeadowMap = this.meadowTextureUniform;
       shader.vertexShader = 'varying vec3 vNHPosition;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         '#include <begin_vertex>\nvNHPosition = position;',
       );
       shader.fragmentShader =
-        'varying vec3 vNHPosition;\nuniform bool nhContours;\nuniform float nhSpacing;\n' +
+        'varying vec3 vNHPosition;\nuniform bool nhContours;\nuniform float nhSpacing;\nuniform float nhMeadowBlend;\nuniform sampler2D nhMeadowMap;\n' +
         shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        if (nhMeadowBlend > 0.5) {
+          // Blend the outer 12% of the displayed terrain into the adjacent
+          // meadow. The generated PBR textures and actual elevations stay
+          // completely unchanged; this affects the studio preview only.
+          float edgeDistance = 1.3 - max(abs(vNHPosition.x), abs(vNHPosition.z));
+          float grassFraction = 1.0 - smoothstep(0.0, 0.32, edgeDistance);
+          if (grassFraction > 0.001) {
+            vec2 meadowUv = vec2(vNHPosition.x * 0.8 + 0.6, 0.6 - vNHPosition.z * 0.8);
+            vec3 meadowAlbedo = texture2D(nhMeadowMap, meadowUv).rgb;
+            diffuseColor.rgb = mix(diffuseColor.rgb, meadowAlbedo, grassFraction);
+          }
+        }`,
+      );
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -404,13 +424,19 @@ export class TerrainScene {
     if (settings.expandGround) {
       this.groundExtension ??= new GroundExtension(this.scene, this.renderer);
       this.groundExtension.update(this.field, this.project, settings, this.minimumElevation, this.terrain);
+      this.meadowBlendUniform.value = 1;
+      this.meadowTextureUniform.value = this.groundExtension.grassMap;
       if (this.atmosphere) for (const material of this.groundExtension.materials)
         this.atmosphere.attach(material);
-    } else if (this.groundExtension) {
-      if (this.atmosphere) for (const material of this.groundExtension.materials)
-        this.atmosphere.detach(material);
-      this.groundExtension.dispose();
-      this.groundExtension = null;
+    } else {
+      this.meadowBlendUniform.value = 0;
+      this.meadowTextureUniform.value = null;
+      if (this.groundExtension) {
+        if (this.atmosphere) for (const material of this.groundExtension.materials)
+          this.atmosphere.detach(material);
+        this.groundExtension.dispose();
+        this.groundExtension = null;
+      }
     }
     if (paletteChanged && this.terrain) {
       this.updateColors();
