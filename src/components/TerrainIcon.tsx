@@ -72,6 +72,10 @@ export const MAP_ICON_NAMES: Record<MapChannel, TerrainIconName> = {
   roughness: 'roughness-map',
   ao: 'ambient-occlusion',
   splat: 'material-weights',
+  rockWeight: 'material-weights',
+  soilWeight: 'material-weights',
+  vegetationWeight: 'material-weights',
+  snowWeight: 'material-weights',
   curvature: 'curvature-map',
   orm: 'packed-orm',
 };

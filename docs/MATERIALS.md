@@ -7,7 +7,7 @@ Normal Height can turn a single evaluated terrain graph into a coordinated set o
 1. Build a terrain in the normal graph.
 2. Open **Scene** in the right inspector. Under **PBR material studio**, choose a biome (Alpine/temperate, Arid/desert, or Volcanic) and adjust the snow-line (fraction of local height range), exposed-rock slope, moisture, detail scale in meters, microdetail depth, and cavity AO strength.
 3. Select **PBR** in the 3D Display panel. The mesh uses sRGB base color and separate linear roughness, occlusion and micro-normal maps. Clay, alpine vertex colors, and height previews remain available.
-4. Switch to **2D map** and select Base color, Roughness, Occlusion, Material weights, Curvature, or ORM to inspect actual export data.
+4. Switch to **2D map** and select Base color, Roughness, Occlusion, Material weights, **Rock coverage, Soil coverage, Vegetation coverage, Snow coverage**, Curvature, or ORM to inspect the exact worker-produced channels. Individual coverage views are opaque grayscale (black 0%, white 100%) with an exact percentage on pixel hover; all four are derived directly from the exported RGBA splat.
 5. Choose **Export maps → Complete PBR material set (ZIP)** and a resolution.
 
 Existing \`.nhterrain.json\` files remain valid. The optional \`surface\` project property uses the original v1 project format and is validated on import.
@@ -41,9 +41,24 @@ PNG rows begin at the north edge of the tile and continue toward the south; colu
 
 ## What the generator does and does not do
 
-The material pipeline deterministically combines physical terrain slope, elevation, water-flow visits, erosion wear and deposition with seeded coherent spatial detail. It derives rock/soil/vegetation/snow weights, color, roughness, curvature and local multi-radius cavity occlusion. All maps share the same input grid and remain reproducible from the saved project.
+The material pipeline deterministically combines physical terrain slope, aspect, elevation, curvature, water-flow visits, erosion wear and deposition with seeded coherent spatial detail. It derives rock/soil/vegetation/snow weights, color, roughness, signed curvature and local multi-radius cavity occlusion. All maps share the same input grid and remain reproducible from the saved project.
 
-It is an artist-directed **100% procedural foundation**, not a calibrated geological/soil classifier. Flow and sediment diagnostics are heuristic weights rather than absolute physical measurements. AO is **not** a ray-traced bake; it uses a plane-corrected local horizon approximation. The three biome palettes are authored starter values, **not** measured albedo from a specific real location. The current preview still uses whole-tile UVs; material-specific 3D procedural patterns, triplanar projection and 4K/8K streaming are future improvements.
+### Geomorphology-driven layering (material algorithm v2)
+
+This stage is a **terrain interpretation**, not four elevation ramps:
+
+- **Physical gradient and aspect:** central differences use `heightScale / (worldSize / (resolution - 1))` to obtain slope in degrees and determine the north/south exposure proxy. The same physical terrain has the same slope at different export resolutions.
+- **Valley / ridge position:** symmetric bilinear elevation samples at **50, 150 and 425 meters** are compared with the tangent plane at each pixel. Positive residuals indicate locally concave bowls/channels and negative residuals indicate exposed crests. A sloping plane has zero residual; incomplete border pairs are excluded. The exported curvature map represents this signed, multiscale landform value (128 is approximately neutral).
+- **Deposition vs. erosion:** positive erosion and deposition diagnostics are scaled by the approximate **90th percentile of each field's non-zero values**, so a fixed 0.016-unit cutoff does not silently determine whether an entire landscape is bare rock or soil. These are *relative* solver signals, not calibrated sediment depths.
+- **Substrate evidence:** steepness, convex ridges and erosion wear expose rock. Gentle or concave slopes and deposition retain soil. Vegetation requires soil, a suitable elevation range and a moisture-supported biome; runoff and concavity modulate surface wetness. Substrate scores are normalized first, and retained snow occupies a fraction of that mixture. The exported RGBA splat always sums to 255.
+- **Snow placement:** the authored relative snow line establishes the altitude envelope; slopes too steep for stable coverage and convex wind-scoured ridges retain less snow, while concave and north-facing shelves retain more. This is a *heuristic*, not computed sun-hours or a snow-transport simulation.
+- **Material-specific procedural signals:** coherent fractures and geological bedding only affect exposed rock; transported-soil grain, vegetation patchiness and snow drift/crust have distinct signals. Each signal participates consistently in the material's **linear-light albedo**, **roughness** and **micro-height** so cracks are not just dark paint. Bedrock fracture fields are evaluated **triplanarly in world XYZ meters**, weighted by physical surface normals; this reduces sideways stretching on steep faces even in the exported heightfield-aligned UV textures. The frequency guard additionally considers local surface-arc distance, not just horizontal grid spacing. Bedding thickness and fracture spacing are physical meters, exposed as editable Scene controls.
+
+The renderer and exported maps use the same worker-synthesized material buffers. At a source resolution unable to resolve a wavelength, that contribution fades by a smooth grid-spacing guard rather than aliasing into a plausible-looking but false frequency. The main material controls remain **snow-line fraction**, **rock-exposure slope**, **environment moisture**, **microdetail wavelength/depth**, **AO strength**, plus the new **rock bedding separation** and **fracture spacing**. Project v1 files still open; both new controls are optional and have validated defaults.
+
+**Interpretation boundaries:** the erosion channels are generated by an artistic particle solver. There is no absolute geographic altitude, lithologic field survey, soil-depth model, radiation/weather solver, river-basin groundwater calculation or realistic snowpack time evolution. The north-facing proxy assumes northern-hemisphere conditions. Color palettes remain authored sRGB references rather than measured spectral albedos. The physical meter scales constrain the *computation*, not the provenance of geology.
+
+It is an artist-directed **100% procedural foundation**, not a calibrated geological/soil classifier. Flow and sediment diagnostics are heuristic weights rather than absolute physical measurements. AO is **not** a ray-traced bake; it uses a plane-corrected local horizon approximation. The three biome palettes are authored starter values, **not** measured albedo from a specific real location. The preview still uses whole-tile UVs for its baked maps, although rock joint detail is evaluated from triplanar world-space coordinates during synthesis. Close-up procedural microstructure now uses 3D world-space sampling directly in the fragment shader. A general streamed 4K/8K material system, full lithology-aware per-fragment procedural shading in external engines, and non-heightfield 3D overhang materials remain future improvements.
 
 ### Permanent constraint: no external material inputs
 
@@ -57,6 +72,45 @@ There is a real sampling limit: a 2K map spanning kilometers cannot encode centi
 
 Run \`npm test\`, \`npm run build\` and \`npm run test:e2e\`. PBR-specific unit tests verify deterministic output, map alignment, unit length/normal conventions, flat-surface behavior, packed channels, project compatibility, and ZIP content. The full export encoder runs in a separate cancellable Web Worker to avoid blocking the editing interface.
 
+
+### Live 3D near-field surface detail (display-only)
+
+The Scene inspector offers **Live close-up microdetail** (on by default). **Double-click any visible terrain surface in 3D** to refocus orbit controls on that point, then scroll closer; the camera has a 6 m-equivalent near plane (on a nominal 8 km tile) and permits ~138 m targeting distance to actually resolve fine detail. This is a
+different job from the downloadable PBR maps: the Worker computes material
+coverage, rock exposure, snow, soil, slope and macroscopic texture at the exact
+heightfield grid resolution. The **fragment shader** then adds finer shading
+only when close enough to see it, without changing or inventing terrain
+geometry:
+
+- The entire added signal is sampled in **world-space XYZ meters** at scales
+  derived from the authored `detailMeters` control. Coherent 3D noise does not
+  stretch on a nearly vertical cliff or drift as the camera moves.
+- Four material-specific height/color/roughness responses use the **same
+  calculated splat weights** as the 2D material preview. Narrow rock-joint
+  recesses, soil grain, heterogeneous vegetation and restrained snow crust
+  alter albedo (in linear light), roughness and micro-normals together.
+- Screen-space derivatives attenuate frequencies that exceed the pixel
+  sampling limit. A camera-distance preflight disables the shader's extra
+  work altogether at ordinary full-tile zoom; there is no scene-wide
+  high-frequency checkerboard or shimmering.
+- The shader modifies the existing **MeshStandardMaterial** BRDF rather than
+  replacing its lighting, AO, environment maps, terrain normals or shadows.
+  Geometry and 16-bit height exports are unchanged.
+- There are still **three GPU PBR textures**. During *preview only*, spare
+  channels encode rock/soil in packed AO+roughness B/A and vegetation in the
+  detail-normal alpha. Snow = 1 - other three layers. The worker's ordinary
+  `splat-rgba` remains independent. **Exported ORM still has metallic=0,
+  alpha=255**, and exported detail normals still have alpha=255. Never use
+  these specially packed preview images as standard glTF/Unity assets.
+
+**Preview versus export:** Subpixel procedural shading is not baked into
+`-basecolor.png`, `-roughness.png` or `-detailnormal-gl.png` at a resolution
+that cannot encode it. The export remains a reproducible physically scaled
+representation of its requested grid. For equivalent close-up detail in
+another renderer, that renderer must evaluate comparable physical-frequency
+procedural shaders or use a sufficiently high resolution/streamed material
+layer. The on/off control is a local View preference, not part of the
+portable terrain project, to avoid changing exported geometry or maps.
 
 ### Follow-up QA and preview performance
 

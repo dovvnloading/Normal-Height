@@ -215,4 +215,23 @@ describe('material maps', () => {
     expect(fine.detail.some((value) => Math.abs(value) > 0.001)).toBe(true);
   });
 
+  it('renders all four calculated splat channels as inspectable grayscale weights', () => {
+    const field = fixture(32);
+    const project = createProject();
+    const maps = generatePBR(field, project);
+    for (const [channel, index] of [
+      ['rockWeight', 0], ['soilWeight', 1],
+      ['vegetationWeight', 2], ['snowWeight', 3],
+    ] as const) {
+      const pixels = pbrPixels(maps, field, project, channel);
+      for (let pixel = 0; pixel < field.height.length; pixel++) {
+        const p = pixel * 4;
+        expect([...pixels.subarray(p, p + 4)]).toEqual([
+          maps.splat[p + index], maps.splat[p + index],
+          maps.splat[p + index], 255,
+        ]);
+      }
+    }
+  });
+
 });

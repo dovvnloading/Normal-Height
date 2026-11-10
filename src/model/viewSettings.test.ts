@@ -9,6 +9,7 @@ describe('versioned preview settings', () => {
       groundReach: 6,
       expandGround: true,
       material: 'alpine',
+      nearFieldDetail: false,
       exaggeration: 1.8,
     });
     expect(settings.skyEnabled).toBe(true);
@@ -16,6 +17,7 @@ describe('versioned preview settings', () => {
     expect(settings.expandGround).toBe(true);
     expect(settings.groundReach).toBe(6);
     expect(settings.material).toBe('alpine');
+    expect(settings.nearFieldDetail).toBe(false);
     expect(settings.exaggeration).toBe(1.8);
     expect(settings.sunAzimuth).toBe(DEFAULT_VIEW_SETTINGS.sunAzimuth);
   });
@@ -28,6 +30,7 @@ describe('versioned preview settings', () => {
       skyTurbidity: -4,
       groundReach: Infinity,
       grassDensity: 100000,
+      nearFieldDetail: 'false',
       material: 'unrecognized',
       __proto__: { pollution: true },
     });
@@ -39,6 +42,7 @@ describe('versioned preview settings', () => {
     // Old saved grass-density preferences are ignored after removing blades.
     expect('grassDensity' in settings).toBe(false);
     expect(settings.material).toBe('pbr');
+    expect(settings.nearFieldDetail).toBe(true);
     expect(Object.keys(settings)).toEqual(Object.keys(DEFAULT_VIEW_SETTINGS));
     expect(parseViewSettings(null)).toEqual(DEFAULT_VIEW_SETTINGS);
   });

@@ -1029,6 +1029,9 @@ kbd {
   margin: 0;
 }
 .switch {
+  /* Decorative track must not cover the real, keyboard-accessible checkbox.
+     Pointer hits go to the input or its wrapping label. */
+  pointer-events: none;
   width: 27px;
   height: 15px;
   background: #f4f5f1;

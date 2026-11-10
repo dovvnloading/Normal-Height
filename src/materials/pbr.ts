@@ -1,4 +1,5 @@
-import { Noise } from '../engine/noise';
+import { synthesizeMaterials } from './layerSynthesis';
+export { AO_RADII_METERS } from './terrainAnalysis';
 import type { HeightField, TerrainProject } from '../model/types';
 
 export type SurfaceBiome = 'alpine' | 'arid' | 'volcanic';
@@ -10,6 +11,10 @@ export interface SurfaceSettings {
   detailMeters: number;
   detailStrength: number;
   aoStrength: number;
+  /** Physical vertical separation of geological bedding planes, in meters. */
+  strataMeters: number;
+  /** Physical lateral spacing of coherent exposed-rock fractures, in meters. */
+  fractureMeters: number;
 }
 export const DEFAULT_SURFACE: SurfaceSettings = {
   biome: 'alpine',
@@ -19,6 +24,8 @@ export const DEFAULT_SURFACE: SurfaceSettings = {
   detailMeters: 24,
   detailStrength: 0.65,
   aoStrength: 0.7,
+  strataMeters: 76,
+  fractureMeters: 68,
 };
 export const SURFACE_LIMITS = {
   snowLine: [0.35, 1] as const,
@@ -27,16 +34,14 @@ export const SURFACE_LIMITS = {
   detailMeters: [4, 200] as const,
   detailStrength: [0, 2] as const,
   aoStrength: [0, 1] as const,
+  strataMeters: [12, 500] as const,
+  fractureMeters: [12, 320] as const,
 };
 export function resolveSurface(settings?: Partial<SurfaceSettings>): SurfaceSettings {
   return { ...DEFAULT_SURFACE, ...settings };
 }
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
-const smooth = (a: number, b: number, v: number) => {
-  const t = clamp((v - a) / Math.max(1e-8, b - a));
-  return t * t * (3 - 2 * t);
-};
 
 export type PBRChannel =
   | 'basecolor'
@@ -48,7 +53,8 @@ export type PBRChannel =
   | 'splat'
   | 'curvature'
   | 'normal'
-  | 'detailNormal';
+  | 'detailNormal'
+  | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
 
 export interface PBRMaps {
   resolution: number;
@@ -101,141 +107,15 @@ const LINEAR_PALETTES: Record<SurfaceBiome, number[][]> = {
   volcanic: PALETTES.volcanic.map((layer) => layer.map(srgbByteToLinear)),
 };
 
-/** Fixed, physical AO horizon distances. Never measured in grid pixels. */
-export const AO_RADII_METERS = [50, 150, 425] as const;
-
-function neighbor(values: Float32Array, n: number, x: number, y: number): number {
-  return values[clamp(y, 0, n - 1) * n + clamp(x, 0, n - 1)];
-}
-
-// Interpolate at fractional samples so AO reaches the same world coordinates
-// regardless of working/export resolution.
-function elevationAt(values: Float32Array, n: number, x: number, y: number): number {
-  const x0 = Math.floor(x), y0 = Math.floor(y);
-  const tx = x - x0, ty = y - y0;
-  const top = neighbor(values, n, x0, y0) * (1 - tx) +
-    neighbor(values, n, x0 + 1, y0) * tx;
-  const bottom = neighbor(values, n, x0, y0 + 1) * (1 - tx) +
-    neighbor(values, n, x0 + 1, y0 + 1) * tx;
-  return top * (1 - ty) + bottom * ty;
-}
-
 /**
- * Deterministic terrain material synthesis. Uses geological evidence from the
- * simulation rather than guessing material identity from elevation alone.
- * Work is linear in pixel count and no diagnostic is modified in place.
+ * Shared preview/export entrypoint. Physical terrain analysis and material
+ * microstructure live in independent modules; map encoding remains unchanged.
  */
 export function generatePBR(field: HeightField, project: TerrainProject): PBRMaps {
-  const n = field.resolution;
-  const count = n * n;
-  if (n < 2 || field.height.length !== count ||
-      field.flow.length !== count || field.wear.length !== count ||
-      field.deposition.length !== count) {
-    throw new Error('PBR generation requires aligned height and erosion fields.');
-  }
   const params = resolveSurface(project.surface);
-  const basecolor = new Uint8ClampedArray(count * 4);
-  const splat = new Uint8ClampedArray(count * 4);
-  const roughness = new Uint8Array(count);
-  const ao = new Uint8Array(count);
-  const curvature = new Uint8Array(count);
-  const detail = new Float32Array(count);
-  const noise = new Noise((project.seed + 0x3b9aca07) >>> 0);
-  const palette = LINEAR_PALETTES[params.biome];
-  const cell = project.worldSize / (n - 1);
-  const physicalSlope = project.heightScale / cell;
-  const cycles = project.worldSize / params.detailMeters;
-  // Below the grid Nyquist limit, fade out unresolved wavelengths rather than
-  // silently enlarging authored microstructure at lower resolutions.
-  const grainVisibility = smooth(2, 3.5, params.detailMeters / cell);
-  const fineVisibility = smooth(2, 3.5, params.detailMeters / (2.1 * cell));
-  let min = Infinity, max = -Infinity;
-  for (const h of field.height) {
-    if (!Number.isFinite(h)) throw new Error('Invalid terrain elevation for PBR synthesis.');
-    min = Math.min(min, h);
-    max = Math.max(max, h);
-  }
-  const span = Math.max(1e-8, max - min);
-  for (let y = 0; y < n; y++) {
-    const v = y / (n - 1);
-    for (let x = 0; x < n; x++) {
-      const u = x / (n - 1);
-      const i = y * n + x, p = i * 4;
-      const h = field.height[i];
-      const left = neighbor(field.height, n, x - 1, y);
-      const right = neighbor(field.height, n, x + 1, y);
-      const top = neighbor(field.height, n, x, y - 1);
-      const bottom = neighbor(field.height, n, x, y + 1);
-      const gx = (right - left) / (x > 0 && x < n - 1 ? 2 : 1);
-      const gy = (bottom - top) / (y > 0 && y < n - 1 ? 2 : 1);
-      const slope = Math.atan(Math.hypot(gx, gy) * physicalSlope) * 180 / Math.PI;
-      const height01 = (h - min) / span;
-      const macro = noise.simplex(u * 17.1 + 3.9, v * 17.1 - 7.2);
-      const grain = grainVisibility ? noise.simplex(u * cycles + 11.3, v * cycles - 5.7) : 0;
-      const fine = fineVisibility ? noise.simplex(u * cycles * 2.1 - 21.1,
-        v * cycles * 2.1 + 8.2) : 0;
-      const grit = grain * 0.76 * grainVisibility + fine * 0.24 * fineVisibility;
-      detail[i] = grit * params.detailStrength * 1.4;
-      const flow = clamp(field.flow[i]);
-      // These are erosion diagnostics, not calibrated moisture/sediment measurements.
-      const deposited = smooth(0, 0.016, field.deposition[i]);
-      const worn = smooth(0, 0.016, field.wear[i]);
-      const wet = clamp(params.moisture * (flow * 0.65 + deposited * 0.22));
-      const exposed = smooth(params.rockSlope - 11, params.rockSlope + 8,
-        slope + macro * 3 + worn * 7);
-      const snow = params.biome === 'alpine' || params.biome === 'volcanic'
-        ? smooth(params.snowLine - 0.1, params.snowLine + 0.08,
-            height01 + macro * 0.025) * (1 - exposed * 0.64)
-        : 0;
-      const vegetation = (params.biome === 'arid' ? 0.22 : params.biome === 'volcanic' ? 0.44 : 1)
-        * smooth(0.02, 0.23, height01) * (1 - smooth(0.58, 0.88, height01))
-        * (1 - exposed) * (0.24 + params.moisture * 0.92)
-        * (1 - snow) * (1 - wet * 0.28);
-      const rock = (0.14 + exposed * 2.9 + worn * 0.42) * (1 - snow);
-      const soil = (0.34 + deposited * 0.85 + wet * 0.23 + (1 - height01) * 0.15)
-        * (1 - exposed * 0.6) * (1 - snow);
-      const snowWeight = snow * 3.5;
-      const weightSum = Math.max(1e-9, rock + soil + vegetation + snowWeight);
-      const weights = [rock, soil, vegetation, snowWeight].map(w => w / weightSum);
-      const r = Math.round(weights[0] * 255);
-      const g = Math.min(255 - r, Math.round(weights[1] * 255));
-      const b = Math.min(255 - r - g, Math.round(weights[2] * 255));
-      splat[p] = r;
-      splat[p + 1] = g;
-      splat[p + 2] = b;
-      splat[p + 3] = 255 - r - g - b;
-
-      for (let channel = 0; channel < 3; channel++) {
-        let c = 0;
-        for (let layer = 0; layer < 4; layer++) c += palette[layer][channel] * weights[layer];
-        const tint = 1 + macro * 0.075 + grit * (channel === 1 ? 0.095 : 0.07);
-        // Apply tint/moisture to linear reflectance and encode sRGB exactly once.
-        basecolor[p + channel] = linearToSrgbByte(c * tint * (1 - wet * 0.22));
-      }
-      basecolor[p + 3] = 255;
-      const layerRoughness = [0.88, 0.94, 0.86, 0.76];
-      let rough = 0;
-      for (let layer = 0; layer < 4; layer++) rough += layerRoughness[layer] * weights[layer];
-      roughness[i] = Math.round(clamp(rough + grain * grainVisibility * 0.045 - wet * 0.32, 0.25, 1) * 255);
-
-      // Plane-corrected, multi-radius local horizon approximation: a uniformly
-      // sloping plane should have no self-occlusion, but a concavity should.
-      let horizon = 0;
-      for (const meters of AO_RADII_METERS) {
-        const radius = meters / cell;
-        for (const [ox, oy] of [[radius, 0], [-radius, 0], [0, radius], [0, -radius]]) {
-          if (x + ox < 0 || y + oy < 0 || x + ox >= n || y + oy >= n) continue;
-          const elevation = elevationAt(field.height, n, x + ox, y + oy);
-          const rise = (elevation - h - gx * ox - gy * oy) * project.heightScale / meters;
-          horizon += clamp(rise * 1.8, 0, 1);
-        }
-      }
-      ao[i] = Math.round(255 * clamp(1 - params.aoStrength * horizon / 12 * 2.2, 0.45, 1));
-      const laplace = h - (left + right + top + bottom) * 0.25;
-      curvature[i] = Math.round(clamp(0.5 + laplace * physicalSlope * 1.8) * 255);
-    }
-  }
-  return { resolution: n, basecolor, splat, roughness, ao, curvature, detail };
+  return synthesizeMaterials(
+    field, project, params, LINEAR_PALETTES[params.biome], linearToSrgbByte,
+  );
 }
 
 function grayscale(values: Uint8Array): Uint8ClampedArray {
@@ -290,6 +170,21 @@ export function pbrPixels(
 ): Uint8ClampedArray {
   if (channel === 'basecolor') return maps.basecolor;
   if (channel === 'splat') return maps.splat;
+  // Inspect individual physically synthesized coverage masks as opaque grayscale
+  // percentages. These are derived from the exact exported RGBA splat bytes.
+  const weightIndex = channel === 'rockWeight' ? 0 :
+    channel === 'soilWeight' ? 1 : channel === 'vegetationWeight' ? 2 :
+    channel === 'snowWeight' ? 3 : -1;
+  if (weightIndex >= 0) {
+    const out = new Uint8ClampedArray(maps.resolution * maps.resolution * 4);
+    for (let i = 0; i < maps.resolution * maps.resolution; i++) {
+      const p = i * 4;
+      const weight = maps.splat[p + weightIndex];
+      out[p] = out[p + 1] = out[p + 2] = weight;
+      out[p + 3] = 255;
+    }
+    return out;
+  }
   if (channel === 'normal') return materialNormalPixels(maps, field, project, false, directX);
   if (channel === 'detailNormal') return materialNormalPixels(maps, field, project, true, directX);
   if (channel === 'roughness') return grayscale(maps.roughness);
