@@ -2,14 +2,10 @@ name: PBR visual and physically memory-capped 2K acceptance
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'src/render/**'
-      - 'src/materials/**'
-      - 'src/export/**'
-      - 'tests/e2e/pbr-acceptance.spec.ts'
-      - '.github/workflows/pbr-validation.yml'
+  # Explicit/branch-only QA; expensive 2K+Metal jobs should not run on
+  # every unrelated pull request after this feature merges.
+  push:
+    branches: ['fix/pbr-closure-*']
 
 permissions:
   contents: read
@@ -78,6 +74,13 @@ jobs:
           set +e
           npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep '2K full PBR export' --retries=0
           status=$?
+          if [ "$status" -eq 0 ]; then
+            # Playwright cleans its output directory on a new invocation.
+            # Preserve the real 2K archive evidence separately.
+            mv test-results test-results-full-2k
+            PBR_CONSTRAINED_CANCEL=1 npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep '2K cancellation' --retries=0
+            status=$?
+          fi
           mkdir -p test-results
           node -e "const fs=require('node:fs');const p='/sys/fs/cgroup/'; const read=x=>fs.readFileSync(p+x,'utf8').trim();fs.writeFileSync('test-results/pbr-cgroup-memory.json',JSON.stringify({ limitBytes:read('memory.max'), peakBytes:read('memory.peak'), events:read('memory.events'), testExitCode:Number(process.argv[1]) },null,2))" "$status"
           cat test-results/pbr-cgroup-memory.json
@@ -87,7 +90,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pbr-real-2gib-memory-qa
-          path: test-results/
+          path: |
+            test-results/
+            test-results-full-2k/
+            playwright-report/
           retention-days: 30
 
   hardware-accelerated-pbr:

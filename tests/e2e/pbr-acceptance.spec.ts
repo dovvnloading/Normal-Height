@@ -502,3 +502,68 @@ test('fixed-light 3D PBR material captures a reproducible visual baseline (#17)'
   expect(p95Error).toBeLessThanOrEqual(20);
   expect(Math.abs(data.contrast - golden.contrast)).toBeLessThanOrEqual(12);
 });
+
+test('2K cancellation terminates workers and a smaller PBR export recovers under bounded RAM (#17)', async ({ page }, testInfo) => {
+  test.skip(!process.env.PBR_CONSTRAINED_CANCEL,
+    'Real export cancellation is exercised only inside the capped 2-GiB container.');
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  const downloads: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('download', download => downloads.push(download.suggestedFilename()));
+  await loadFastProject(page, 512);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'deviceMemory', { value: 8, configurable: true });
+    const scope = window as typeof window & {
+      __exportWorkerAudit?: { started: number; terminated: number };
+    };
+    const count = { started: 0, terminated: 0 };
+    scope.__exportWorkerAudit = count;
+    const Original = window.Worker;
+    window.Worker = class extends Original {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        count.started++;
+      }
+      override terminate() {
+        count.terminated++;
+        super.terminate();
+      }
+    };
+  });
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('pbr');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('2048');
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Cancel export' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel export' }).click();
+  await expect(dialog.locator('.export-progress')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Export bundle', exact: true })).toBeEnabled();
+  await page.waitForTimeout(300);
+  expect(downloads).toHaveLength(0);
+
+  // A successful retry proves we did not leak an active Worker or leave the
+  // export UI in the prior generation's busy/error state.
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
+  const nextDownload = page.waitForEvent('download', { timeout: 60_000 });
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  const archive = await nextDownload;
+  expect(archive.suggestedFilename()).toBe('pbr-acceptance-512-256-pbr.zip');
+  const path = testInfo.outputPath('pbr-256-after-cancel.zip');
+  await archive.saveAs(path);
+  const files = unzipSync(new Uint8Array(await readFile(path)));
+  expect(files['pbr-acceptance-512-256-basecolor.png']).toBeDefined();
+  expect(files['pbr-acceptance-512-256-height16.png']).toBeDefined();
+  const workerAudit = await page.evaluate(() =>
+    (window as typeof window & {
+      __exportWorkerAudit: { started: number; terminated: number };
+    }).__exportWorkerAudit);
+  await testInfo.attach('pbr-export-cancel-workers.json', {
+    body: JSON.stringify(workerAudit, null, 2), contentType: 'application/json',
+  });
+  expect(workerAudit.started).toBeGreaterThanOrEqual(3);
+  expect(workerAudit.terminated).toBe(workerAudit.started);
+  expect(downloads).toEqual(['pbr-acceptance-512-256-pbr.zip']);
+  expect(errors).toEqual([]);
+});
