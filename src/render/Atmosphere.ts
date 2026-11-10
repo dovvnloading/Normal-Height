@@ -69,11 +69,11 @@ export function skyLighting(settings: ViewSettings): SkyLighting {
   return {
     sunColor: new THREE.Color('#fff8ea').lerp(new THREE.Color('#ff965c'), sunset * 0.83),
     // Thick cloud cover dims direct sunlight while maintaining diffuse fill.
-    sunIntensity: (0.65 + 2.05 * daylight) * (1 - haze * 0.20) * (1 - overcast * 0.46),
+    sunIntensity: (0.70 + 1.60 * daylight) * (1 - haze * 0.20) * (1 - overcast * 0.46),
     ambientSky: new THREE.Color('#c5daef').lerp(new THREE.Color('#e7a98a'), sunset * 0.67)
       .lerp(new THREE.Color('#b8c0c5'), overcast * 0.48),
     ambientGround: new THREE.Color('#636b56').lerp(new THREE.Color('#665046'), sunset * 0.55),
-    ambientIntensity: (0.46 + 0.82 * daylight) * (1 - haze * 0.12) * (1 + overcast * 0.12),
+    ambientIntensity: (0.42 + 0.64 * daylight) * (1 - haze * 0.12) * (1 + overcast * 0.12),
     fogColor: new THREE.Color('#b4cad9').lerp(new THREE.Color('#d6a787'), sunset * 0.64)
       .lerp(new THREE.Color('#c3c5bf'), haze * 0.34)
       .lerp(new THREE.Color('#b7c2c3'), overcast * 0.35),
@@ -154,7 +154,13 @@ export class Atmosphere {
     this.cloudMesh.visible = this.enabled && settings.cloudCoverage > 0;
     // Exposure belongs to the camera; multiplying IBL by it as well would
     // square the slider's influence and wash out the PBR surface.
-    this.scene.environmentIntensity = 1;
+    // Three.js Sky emits an HDR radiance distribution. A full-strength
+    // PMREM probe plus direct sunlight clips bright alpine rock under clear
+    // skies; compensate with a daylight-dependent probe calibration. Keep
+    // the exposure slider mapped only to camera tone mapping.
+    const daylightFill = THREE.MathUtils.smoothstep(settings.sunElevation, 8, 65);
+    this.scene.environmentIntensity = 0.26 + (1 - daylightFill) * 0.36 +
+      settings.cloudCoverage * 0.08;
     this.iblCloud.visible = this.enabled && settings.cloudCoverage > 0;
     this.shadowUniforms.nhCloudCoverage.value = settings.cloudCoverage;
     const sunDaylight = THREE.MathUtils.smoothstep(settings.sunElevation, 4, 30);
