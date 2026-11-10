@@ -75,7 +75,9 @@ export function buildGroundApron(
       broadHeight /= weight;
       const highFrequency = Math.exp(-30 * t);
       const shorelineHeight = broadHeight + (height - broadHeight) * highFrequency;
-      const flatten = THREE.MathUtils.smoothstep(t, 0.02, 0.94);
+      // The final two rings are exactly coplanar with the infinite meadow,
+      // eliminating its former square normal/height silhouette.
+      const flatten = THREE.MathUtils.smoothstep(t, 0.02, 0.72);
       const shapeY = THREE.MathUtils.lerp(shorelineHeight * heightScale, flatY, flatten);
       const scale = 1 + (APRON_WIDTH / HALF) * t;
       const px = x * scale, pz = z * scale;
@@ -113,7 +115,7 @@ function grassTexture(): THREE.CanvasTexture {
   canvas.width = canvas.height = 256;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('The grass preview texture could not be created.');
-  ctx.fillStyle = '#667e46';
+  ctx.fillStyle = '#4e6a39';
   ctx.fillRect(0, 0, 256, 256);
   // Fine, tileable-looking field strokes: no network requests or stock textures.
   let seed = 0x9168c25;
@@ -121,7 +123,17 @@ function grassTexture(): THREE.CanvasTexture {
     seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
     return (seed >>> 0) / 4294967296;
   };
-  const palette = ['#819653', '#526f3c', '#89945a', '#4b693b', '#a2a475', '#738a43'];
+  const palette = ['#768a4e', '#425d31', '#87955b', '#3f5c35', '#a6a16b', '#5d783e'];
+  // Broad, restrained tonal patches keep the meadow from looking like a
+  // uniformly colored plane at high camera altitude.
+  for (let patch = 0; patch < 240; patch++) {
+    ctx.globalAlpha = 0.025 + random() * 0.075;
+    ctx.fillStyle = palette[Math.floor(random() * palette.length)];
+    ctx.beginPath();
+    ctx.ellipse(random() * 256, random() * 256, 5 + random() * 21,
+      3 + random() * 13, random() * Math.PI, 0, Math.PI * 2);
+    ctx.fill();
+  }
   for (let i = 0; i < 18000; i++) {
     const x = random() * 256, y = random() * 256;
     ctx.globalAlpha = 0.11 + random() * 0.42;
@@ -175,8 +187,8 @@ function bladeGeometry(): THREE.BufferGeometry {
   for (let blade = 0; blade < 4; blade++) {
     const angle = (blade * Math.PI) / 4;
     const c = Math.cos(angle), s = Math.sin(angle);
-    const height = 0.058 + (blade % 3) * 0.012;
-    const width = 0.013 + (blade % 2) * 0.004;
+    const height = 0.028 + (blade % 3) * 0.008;
+    const width = 0.007 + (blade % 2) * 0.003;
     const points = [
       [-width, 0, 0],
       [width, 0, 0],
@@ -211,7 +223,7 @@ function seededRandom(seed: number): () => number {
 export class GroundExtension {
   private readonly texture = grassTexture();
   private readonly meadowMaterial = new THREE.MeshStandardMaterial({
-    map: this.texture, color: '#f4f3e5', roughness: 0.96, metalness: 0, side: THREE.DoubleSide,
+    map: this.texture, color: '#ffffff', roughness: 0.98, metalness: 0, side: THREE.DoubleSide,
   });
   private readonly apronMaterial = new THREE.MeshStandardMaterial({
     map: this.texture, color: '#ffffff', roughness: 0.94, metalness: 0, side: THREE.DoubleSide,
@@ -453,7 +465,7 @@ export class GroundExtension {
       dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
-      color.setHSL(0.22 + random() * 0.07, 0.28 + random() * 0.17, 0.68 + random() * 0.22);
+      color.setHSL(0.23 + random() * 0.06, 0.32 + random() * 0.16, 0.39 + random() * 0.19);
       mesh.setColorAt(i, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
