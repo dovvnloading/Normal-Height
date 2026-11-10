@@ -752,6 +752,51 @@ test('the sky and expanded meadow change rendered pixels without rebuilding the 
   await expect(page.locator('.nh-render-progress')).toHaveCount(0);
 });
 
+test('sky look presets survive a reload and keep the split map responsive', async ({ page }, testInfo) => {
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  const fingerprint = () => canvas.evaluate((element: HTMLCanvasElement) => {
+    const png = element.toDataURL('image/png');
+    let hash = 2166136261;
+    for (let i = 0; i < png.length; i += 43)
+      hash = Math.imul(hash ^ png.charCodeAt(i), 16777619);
+    return hash >>> 0;
+  });
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Display settings' });
+  await dialog.getByRole('slider', { name: 'Wind speed' }).fill('0');
+  await dialog.getByRole('button', { name: 'Clear day sky preset' }).click();
+  await expect(dialog.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
+  const clear = await fingerprint();
+  await capture(page, testInfo, 'atmosphere-clear-day.png');
+
+  await dialog.getByRole('button', { name: 'Golden hour sky preset' }).click();
+  await expect.poll(fingerprint).not.toBe(clear);
+  const golden = await fingerprint();
+  await capture(page, testInfo, 'atmosphere-golden-hour.png');
+
+  await dialog.getByRole('button', { name: 'Overcast sky preset' }).click();
+  await expect.poll(fingerprint).not.toBe(golden);
+  await dialog.getByRole('checkbox', { name: 'Expand ground' }).check();
+  await dialog.getByRole('slider', { name: 'Grass density' }).fill('1');
+  await capture(page, testInfo, 'atmosphere-overcast-meadow.png');
+
+  // Reload preserves artist controls; 2D inspection still repaints accurately
+  // while the physical sky and grass are enabled.
+  await page.reload();
+  await ready(page);
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const restored = page.getByRole('dialog', { name: 'Display settings' });
+  await expect(restored.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
+  await expect(restored.getByRole('checkbox', { name: 'Expand ground' })).toBeChecked();
+  await expect(restored.getByRole('slider', { name: 'Cloud cover' })).toHaveValue('0.88');
+  await expect(restored.getByRole('slider', { name: 'Grass density' })).toHaveValue('1');
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+  await page.getByRole('button', { name: 'Split', exact: true }).click();
+  await expect(page.getByRole('img', { name: /^Height map\./ })).toBeVisible();
+  await expect.poll(() => mapColors(page), { timeout: 30_000 }).toBeGreaterThan(12);
+});
+
 test('export resolution and mandatory PBR bundle controls match their actual state', async ({ page }) => {
   // Do not run an unrelated, expensive 768-grid erosion simulation.
   await page.locator('.auto-build input').uncheck();
