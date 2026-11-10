@@ -1365,6 +1365,12 @@
 :root[data-theme="dark"] .nh-display-label {
   color: #b0b7b0;
 }
+:root[data-theme="dark"] .nh-display-section-heading {
+  color: #bbcebd;
+}
+:root[data-theme="dark"] .nh-display-subsection {
+  border-left-color: #5f7d66;
+}
 
 :root[data-theme="dark"] .nh-material-options > button {
   background: #2e3131;
