@@ -25,6 +25,10 @@ for (const [preset, mountainId] of [
       mountain.params.profile = 'orogenic';
       const evolved = evaluateGraph(project, { resolution: n, previewNodeId: mountainId }).field;
       mountain.params.profile = originalProfile;
+      const hydraulicNode = project.graph.nodes.find(node => node.kind === 'hydraulic')!;
+      const afterHydraulic = evaluateGraph(project, {
+        resolution: n, previewNodeId: hydraulicNode.id,
+      }).field;
       const finalTerrain = evaluateGraph(project, { resolution: n }).field;
 
       const save = async (label: string, field: typeof classic,
@@ -39,6 +43,7 @@ for (const [preset, mountainId] of [
       await save('orogenic-source-height', evolved, 'height');
       await save('classic-source-relief', classic, 'terrain');
       await save('orogenic-source-relief', evolved, 'terrain');
+      await save('after-hydraulic-height', afterHydraulic, 'height');
       await save('orogenic-with-hydraulic-erosion-height', finalTerrain, 'height');
       await save('orogenic-with-hydraulic-erosion-relief', finalTerrain, 'terrain');
 
@@ -58,10 +63,15 @@ for (const [preset, mountainId] of [
       };
       const classicFine = fineRelief(classic.height);
       const evolvedFine = fineRelief(evolved.height);
+      const hydraulicFine = fineRelief(afterHydraulic.height);
+      const finalFine = fineRelief(finalTerrain.height);
       await testInfo.attach(`${preset}-orogenic-audit.json`, {
         body: Buffer.from(JSON.stringify({
           preset, resolution: n, meanAbsoluteHeightChange: meanDelta,
           classicFineRelief: classicFine, orogenicFineRelief: evolvedFine,
+          afterHydraulicFineRelief: hydraulicFine,
+          exportedFinalFineRelief: finalFine,
+          finalVsSourcePreservation: finalFine / Math.max(evolvedFine, 1e-10),
           fineReliefRatio: evolvedFine / Math.max(classicFine, 1e-10),
           note: 'A measurable difference does not prove visual realism. Review height PNGs.',
         }, null, 2)),
@@ -69,6 +79,9 @@ for (const [preset, mountainId] of [
       });
       expect(meanDelta).toBeGreaterThan(0.008);
       expect(evolvedFine).toBeGreaterThan(classicFine * 1.2);
+      // An exported heightmap must retain the newly formed bedrock
+      // tributaries. Heavy thermal smoothing used to erase over 75%.
+      expect(finalFine).toBeGreaterThan(evolvedFine * 0.55);
       expect(evolved.height.every(Number.isFinite)).toBe(true);
       expect(finalTerrain.height.every(Number.isFinite)).toBe(true);
     });

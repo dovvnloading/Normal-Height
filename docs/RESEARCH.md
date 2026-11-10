@@ -150,6 +150,31 @@ This improves the valley/ridge relationship while keeping `O(n²)`
 buffers; the reconstruction works up to 1024² and applies its continuous
 incision delta to the original height samples at larger export sizes.
 
+### Protecting bedrock valleys downstream
+
+The first end-to-end 384² audit revealed a critical coupling bug: the new
+source generated fine-scale incision comparable in local-height contrast to
+the supplied reference, but the default Alpine/Folded-highlands downstream
+warp and talus relaxation smoothed most of it away before export. The
+thermal operator currently relaxes all steep *solid* height differences,
+including hard-rock river walls, as if they were loose scree; this is not a
+realistic regolith model. A large domain warp also resamples one-cell-wide
+tributaries and blurs them before subsequent water transport.
+
+The **new orogenic presets** therefore begin with zero additional domain
+warp (the source already jitters the drainage graph), low hillslope-motion
+settings in the hydraulic stage, and a restrained final thermal pass with
+higher bank-repose threshold. These settings are editable: users can still
+increase warp, hillslope and scree settling, and classic non-orogenic
+presets are unchanged. This is an art-directed protection measure, not a
+claim of physically solved sediment mechanics.
+
+The Chromium test now captures the intermediate hydraulic node and
+**asserts that the final exported terrain retains at least 55% of the
+source's measured fine relief**, alongside the same signed riverbed tests.
+This prevents a green unit-test suite from hiding a downstream
+geometry-destruction regression.
+
 ### Acceptance and limitations
 
 Unit checks now require **lower river centerlines relative to banks**,
