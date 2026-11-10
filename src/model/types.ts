@@ -102,6 +102,16 @@ export interface ViewSettings {
   contours: boolean;
   wireframe: boolean;
   autoRotate: boolean;
+  /** Preview-only environment controls. Never affect heightmap data or exports. */
+  skyEnabled: boolean;
+  skyTurbidity: number;
+  skyRayleigh: number;
+  skyExposure: number;
+  cloudCoverage: number;
+  cloudSpeed: number;
+  expandGround: boolean;
+  groundReach: number;
+  grassDensity: number;
 }
 export interface ParamDefinition {
   key: string;
