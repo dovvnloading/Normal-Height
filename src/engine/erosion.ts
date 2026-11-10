@@ -1,6 +1,7 @@
 import { clamp, randomGenerator } from './noise';
 import { watershedErosion } from './watershed';
 import { landscapeErosion } from './landscape';
+import { fluidGridErosion } from './fluid';
 
 export interface ErosionSettings {
   droplets: number;
@@ -15,7 +16,7 @@ export interface ErosionSettings {
   seed: number;
   multiscale: boolean;
   /** Landscape evolution is the default; prior watershed and droplet modes remain available. */
-  method?: 'landscape' | 'watershed' | 'droplet';
+  method?: 'landscape' | 'watershed' | 'droplet' | 'fluid';
   /** Long-term landscape evolution iteration count, independent of grid resolution. */
   cycles?: number;
   /** Physical scale of broad river/valley processes, in meters. */
@@ -221,6 +222,8 @@ export function hydraulicErosion(
   mask?: Float32Array,
   progress?: (fraction: number) => void,
 ): ErosionResult {
+  if (settings.method === 'fluid')
+    return fluidGridErosion(input, n, settings, mask, progress);
   if (settings.method === 'droplet')
     return dropletErosion(input, n, settings, mask, progress);
   if (settings.method === 'watershed')
