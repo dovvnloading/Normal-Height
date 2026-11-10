@@ -184,7 +184,9 @@ export class TerrainScene {
           float edgeDistance = 1.3 - max(abs(vNHPosition.x), abs(vNHPosition.z));
           float grassFraction = 1.0 - smoothstep(0.0, 0.32, edgeDistance);
           if (grassFraction > 0.001) {
-            vec2 meadowUv = vec2(vNHPosition.x * 0.8 + 0.6, 0.6 - vNHPosition.z * 0.8);
+            // Match the apron texture mapping exactly: its UV origin is 0.5
+            // and the shared grass texture is repeated at 0.8 cycles/unit.
+            vec2 meadowUv = vec2(vNHPosition.x * 0.8 + 0.5, 0.5 - vNHPosition.z * 0.8);
             vec3 meadowAlbedo = texture2D(nhMeadowMap, meadowUv).rgb;
             diffuseColor.rgb = mix(diffuseColor.rgb, meadowAlbedo, grassFraction);
           }
