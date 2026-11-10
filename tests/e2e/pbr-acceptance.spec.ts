@@ -89,12 +89,14 @@ function decodePNG(bytes: Uint8Array) {
   const rowBytes = width * pixelBytes;
   expect(inflated.length).toBe(height * (rowBytes + 1));
   const pixels = new Uint8Array(height * rowBytes);
+  let invalidFilters = 0;
   for (let row = 0; row < height; row++) {
-    // Normal Height intentionally emits filter-0 scanlines; this also
-    // verifies each row boundary and north-first orientation is preserved.
-    expect(inflated[row * (rowBytes + 1)]).toBe(0);
+    // Validate every north-first PNG scanline without constructing more than
+    // 12,000 individual Playwright assertion reports for a 1K material ZIP.
+    if (inflated[row * (rowBytes + 1)] !== 0) invalidFilters++;
     pixels.set(inflated.subarray(row * (rowBytes + 1) + 1, (row + 1) * (rowBytes + 1)), row * rowBytes);
   }
+  expect(invalidFilters, 'All PNG scanlines use filter 0').toBe(0);
   return { width, height, depth, type, pixels };
 }
 
@@ -216,21 +218,31 @@ test('1K browser export decodes every PBR PNG and aligns with the visible 2D map
   const gl = pixels('normal-gl'), dx = pixels('normal-dx'), detail = pixels('detailnormal-gl');
   const rough = pixels('roughness'), ao = pixels('ao'), orm = pixels('orm');
   const mask = pixels('unity-hdrp-mask'), splat = pixels('splat-rgba');
+  // Test every channel against 28,340 distributed samples, but aggregate
+  // inexpensive comparisons before reporting failures. Playwright's expect()
+  // is instrumented and 340,000 per-pixel expect calls can stall the Node
+  // test runner for longer than the entire 25-minute job budget.
+  const mismatches: Record<string, number> = {};
+  const audit = (name: string, okay: boolean) => {
+    if (!okay) mismatches[name] = (mismatches[name] ?? 0) + 1;
+  };
   for (let i = 0; i < 1024 * 1024; i += 37) {
     const p = i * 4;
-    expect(dx[p]).toBe(gl[p]);
-    expect(dx[p + 1] + gl[p + 1]).toBe(255);
-    expect(dx[p + 2]).toBe(gl[p + 2]);
-    expect(detail[p + 3]).toBe(255);
-    expect(orm[p]).toBe(ao[p]);
-    expect(orm[p + 1]).toBe(rough[p]);
-    expect(orm[p + 2]).toBe(0);
-    expect(mask[p]).toBe(0);
-    expect(mask[p + 1]).toBe(ao[p]);
-    expect(mask[p + 2]).toBe(255);
-    expect(mask[p + 3]).toBe(255 - rough[p]);
-    expect(splat[p] + splat[p + 1] + splat[p + 2] + splat[p + 3]).toBe(255);
+    audit('normal R', dx[p] === gl[p]);
+    audit('normal G', dx[p + 1] + gl[p + 1] === 255);
+    audit('normal B', dx[p + 2] === gl[p + 2]);
+    audit('detail alpha', detail[p + 3] === 255);
+    audit('ORM R', orm[p] === ao[p]);
+    audit('ORM G', orm[p + 1] === rough[p]);
+    audit('ORM B', orm[p + 2] === 0);
+    audit('HDRP metallic', mask[p] === 0);
+    audit('HDRP occlusion', mask[p + 1] === ao[p]);
+    audit('HDRP detail mask', mask[p + 2] === 255);
+    audit('HDRP smoothness', mask[p + 3] === 255 - rough[p]);
+    audit('splat normalization',
+      splat[p] + splat[p + 1] + splat[p + 2] + splat[p + 3] === 255);
   }
+  expect(mismatches, 'Export channel packing and GL/DX conventions').toEqual({});
   const albedo = pixels('basecolor');
   for (const { u, v, rgb } of previews) {
     const x = Math.floor(u * 1023), y = Math.floor(v * 1023);
