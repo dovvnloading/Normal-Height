@@ -402,7 +402,7 @@ export class TerrainScene {
     this.updateSupport();
     if (settings.expandGround) {
       this.groundExtension ??= new GroundExtension(this.scene, this.renderer);
-      this.groundExtension.update(this.field, this.project, settings, this.minimumElevation);
+      this.groundExtension.update(this.field, this.project, settings, this.minimumElevation, this.terrain);
     } else if (this.groundExtension) {
       this.groundExtension.dispose();
       this.groundExtension = null;
@@ -534,7 +534,7 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
-    this.groundExtension?.update(this.field, this.project, this.settings, this.minimumElevation);
+    this.groundExtension?.update(this.field, this.project, this.settings, this.minimumElevation, this.terrain);
   }
 
   private updateColors() {
@@ -583,6 +583,7 @@ export class TerrainScene {
       colors.setXYZ(i, color.r, color.g, color.b);
     }
     colors.needsUpdate = true;
+    if (this.groundExtension) this.groundExtension.syncBoundary(this.terrain, this.settings.exaggeration);
   }
 
   /** Off-thread material synthesis is shared with 2D and never reruns erosion. */
@@ -659,6 +660,7 @@ export class TerrainScene {
       this.material.roughness = 1;
       this.material.metalness = 0;
       this.material.needsUpdate = true;
+      this.groundExtension?.syncBoundary(this.terrain!, this.settings.exaggeration);
       this.renderer.domElement.dataset.materialStatus = 'ready';
       this.needsRender = true;
     }).catch((error: Error) => {
