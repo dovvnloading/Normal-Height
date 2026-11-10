@@ -55,6 +55,29 @@ describe('the non-destructive landscape extension', () => {
     }
   });
 
+  it('matches every vertex of a non-flat tile border with no geometric cracks', () => {
+    const n = 65;
+    const values = new Float32Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+      values[y * n + x] = Math.sin(x * 0.21) * 0.17 + Math.cos(y * 0.16) * 0.26;
+    const field: HeightField = { resolution: n, height: values,
+      flow: values.slice(), wear: values.slice(), deposition: values.slice() };
+    const geo = buildGroundApron(field, project, 2, -0.3, 13);
+    const positions = geo.getAttribute('position');
+    const scale = TERRAIN_SIZE * project.heightScale / project.worldSize * 2;
+    const segments = n - 1;
+    for (let step = 0; step < segments; step++) {
+      expect(positions.getY(step)).toBeCloseTo(values[step] * scale, 5);
+      expect(positions.getY(segments + step))
+        .toBeCloseTo(values[step * n + segments] * scale, 5);
+      expect(positions.getY(segments * 2 + step))
+        .toBeCloseTo(values[(n - 1) * n + (segments - step)] * scale, 5);
+      expect(positions.getY(segments * 3 + step))
+        .toBeCloseTo(values[(segments - step) * n] * scale, 5);
+    }
+    geo.dispose();
+  });
+
   it('does not change the generated Float32 heights', () => {
     const field = flatField(0.42);
     const before = field.height.slice();
