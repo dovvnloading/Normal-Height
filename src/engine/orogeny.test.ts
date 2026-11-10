@@ -7,7 +7,7 @@ const terrain = (n: number) => {
   const values = new Float32Array(n * n);
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const u = x / (n - 1), v = y / (n - 1);
-    const envelope = Math.exp(-((v - 0.49 + Math.sin(u * 7) * 0.07) / 0.34) ** 2);
+    const envelope = Math.exp(-Math.pow((v - 0.49 + Math.sin(u * 7) * 0.07) / 0.34, 2));
     values[y * n + x] = 0.06 + 0.74 * envelope *
       (0.8 + 0.20 * Math.cos(u * 15) * Math.cos(v * 11));
   }
