@@ -69,6 +69,7 @@ export class TerrainScene {
   private contextLost = false;
   private needsRender = true;
   private lastWeatherFrame = 0;
+  private weatherInterval = 1 / 24;
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
   private meadowBlendUniform = { value: 0 };
@@ -261,15 +262,19 @@ export class TerrainScene {
       (this.settings.skyEnabled && this.settings.cloudCoverage > 0) ||
       (this.settings.expandGround && this.settings.grassDensity > 0)
     );
-    // Clouds drift slowly, so sampling them at 6 Hz is enough for a fluid
-    // apparent motion without monopolizing a software WebGL backend. Camera
-    // and UI edits still trigger immediate unthrottled frames.
-    const weatherFrame = weatherMoves && seconds - this.lastWeatherFrame >= 1 / 6;
+    // Smooth 24 Hz weather on capable hardware; adapt toward 6 Hz on slow
+    // software devices. User actions are never throttled.
+    const weatherFrame = weatherMoves &&
+      seconds - this.lastWeatherFrame >= this.weatherInterval;
     if (this.needsRender || this.controls.autoRotate || weatherFrame) {
+      const started = performance.now();
       this.renderer.render(this.scene, this.camera);
-      // Account for render time too: slow software GPUs must get a chance to
-      // process pointer events, map uploads, and Web Worker messages.
-      if (weatherFrame) this.lastWeatherFrame = performance.now() / 1000;
+      if (weatherFrame) {
+        const finished = performance.now();
+        this.lastWeatherFrame = finished / 1000;
+        const budget = THREE.MathUtils.clamp((finished - started) / 1000 * 5, 1 / 24, 1 / 6);
+        this.weatherInterval = THREE.MathUtils.lerp(this.weatherInterval, budget, 0.25);
+      }
       this.needsRender = false;
     }
   };
