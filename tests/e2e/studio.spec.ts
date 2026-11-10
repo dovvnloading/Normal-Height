@@ -797,6 +797,35 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await page.getByRole('button', { name: 'Split', exact: true }).click();
   await expect(page.getByRole('img', { name: /^Height map\./ })).toBeVisible();
   await expect.poll(() => mapColors(page), { timeout: 30_000 }).toBeGreaterThan(12);
+
+  // These conditions also exercise actual cloud shadows without moving the
+  // camera: turning off the direct-light attenuation must change terrain pixels.
+  await page.getByRole('button', { name: '3D terrain', exact: true }).click();
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const weather = page.getByRole('dialog', { name: 'Display settings' });
+  const shadows = weather.getByRole('slider', { name: 'Cloud shadow strength' });
+  await shadows.focus();
+  await shadows.press('Home');
+  const shadowsOff = await fingerprint();
+  await shadows.press('End');
+  await expect.poll(fingerprint, { timeout: 30_000 }).not.toBe(shadowsOff);
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+
+  // Lower the camera to inspect clouds near the horizon rather than checking
+  // only the top-down terrain tile.
+  const bounds = await canvas.boundingBox();
+  expect(bounds).not.toBeNull();
+  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.48);
+  await page.mouse.down();
+  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.72, { steps: 9 });
+  await page.mouse.up();
+  await capture(page, testInfo, 'atmosphere-overcast-horizon.png');
+
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  await page.getByRole('dialog', { name: 'Display settings' })
+    .getByRole('button', { name: 'Golden hour sky preset' }).click();
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+  await capture(page, testInfo, 'atmosphere-golden-horizon.png');
 });
 
 test('export resolution and mandatory PBR bundle controls match their actual state', async ({ page }) => {
