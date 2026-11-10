@@ -191,8 +191,10 @@ export function watershedErosion(
         // Prefer physically convergent valleys, not the parallel raster
         // drainage lines that exist even on an exactly tilted plane.
         const x = i % n, y = Math.floor(i / n);
-        const norm = Math.hypot(dx, dy);
-        const tx = -dy / norm, ty = dx / norm;
+        const stepX = downstream % n - x;
+        const stepY = Math.floor(downstream / n) - y;
+        const norm = Math.hypot(stepX, stepY);
+        const tx = -stepY / norm, ty = stepX / norm;
         const bankRadius = Math.min(6, Math.max(1.5, 90 / cell));
         const bankAX = x + tx * bankRadius, bankAY = y + ty * bankRadius;
         const bankBX = x - tx * bankRadius, bankBY = y - ty * bankRadius;
