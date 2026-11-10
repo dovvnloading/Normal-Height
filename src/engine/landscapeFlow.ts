@@ -28,6 +28,8 @@ export function accumulateMultiFlow(
   const loss = Math.max(0, transmissionLoss) / 400;
   const dxs = [-1, 0, 1, -1, 1, -1, 0, 1];
   const dys = [-1, -1, -1, 0, 0, 1, 1, 1];
+  const weights = new Float64Array(8);
+  const neighbors = new Int32Array(8);
   // Iterate upstream -> downstream. Every accepted receiver has a lower rank;
   // therefore every cell receives all incoming water before its own discharge.
   for (let k = order.length - 1; k >= 0; k--) {
@@ -36,8 +38,7 @@ export function accumulateMultiFlow(
     if (fallback < 0 || area[cell] <= 0) continue;
     const x = cell % n, y = (cell / n) | 0;
     const z = height[cell];
-    const weights = new Float64Array(8);
-    const neighbors = new Int32Array(8);
+    weights.fill(0);
     let total = 0;
     for (let d = 0; d < 8; d++) {
       const xx = x + dxs[d], yy = y + dys[d];
