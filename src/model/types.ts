@@ -109,6 +109,7 @@ export interface ViewSettings {
   skyExposure: number;
   cloudCoverage: number;
   cloudSpeed: number;
+  cloudShadowStrength: number;
   expandGround: boolean;
   groundReach: number;
   grassDensity: number;
