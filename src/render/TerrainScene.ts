@@ -66,6 +66,7 @@ export class TerrainScene {
   private cameraView: 'perspective' | 'top' = 'perspective';
   private contextLost = false;
   private needsRender = true;
+  private lastWeatherFrame = 0;
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
   private splinePath: readonly SplinePoint[] | null = null;
@@ -241,7 +242,11 @@ export class TerrainScene {
       (this.settings.skyEnabled && this.settings.cloudCoverage > 0) ||
       (this.settings.expandGround && this.settings.grassDensity > 0)
     );
-    if (this.needsRender || this.controls.autoRotate || weatherMoves) {
+    // Weather runs at 24 FPS; the camera, UI edits and snapshots still render
+    // immediately. Avoid saturating the GPU for a slowly drifting cloud deck.
+    const weatherFrame = weatherMoves && seconds - this.lastWeatherFrame >= 1 / 24;
+    if (this.needsRender || this.controls.autoRotate || weatherFrame) {
+      if (weatherFrame) this.lastWeatherFrame = seconds;
       this.renderer.render(this.scene, this.camera);
       this.needsRender = false;
     }
