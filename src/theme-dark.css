@@ -1365,6 +1365,16 @@
 :root[data-theme="dark"] .nh-display-label {
   color: #b0b7b0;
 }
+:root[data-theme="dark"] .nh-sky-preset {
+  background: #303c3b;
+  border-color: #526761;
+  color: #d7dfd7;
+}
+:root[data-theme="dark"] .nh-sky-preset:hover {
+  background: #3a5148;
+  border-color: #809e86;
+}
+
 :root[data-theme="dark"] .nh-display-section-heading {
   color: #bbcebd;
 }
