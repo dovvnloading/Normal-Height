@@ -75,7 +75,7 @@ Run \`npm test\`, \`npm run build\` and \`npm run test:e2e\`. PBR-specific unit 
 
 ### Live 3D near-field surface detail (display-only)
 
-The Scene inspector offers **Live close-up microdetail** (on by default). It has a
+The Scene inspector offers **Live close-up microdetail** (on by default). **Double-click any visible terrain surface in 3D** to refocus orbit controls on that point, then scroll closer; the camera has a 6 m-equivalent near plane (on a nominal 8 km tile) and permits ~138 m targeting distance to actually resolve fine detail. This is a
 different job from the downloadable PBR maps: the Worker computes material
 coverage, rock exposure, snow, soil, slope and macroscopic texture at the exact
 heightfield grid resolution. The **fragment shader** then adds finer shading
