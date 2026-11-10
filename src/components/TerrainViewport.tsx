@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Camera,
+  CloudSun,
+  Sprout,
+  Wind,
   Check,
   ChevronDown,
   Columns2,
@@ -832,6 +835,19 @@ export function TerrainViewport({
               ))}
             </div>
             <div className="nh-display-divider" />
+            <div className="nh-display-section-heading"><CloudSun size={13} /> Atmosphere & lighting</div>
+            <label className="nh-display-check">
+              <input
+                type="checkbox"
+                aria-label="Enable sky dome"
+                checked={settings.skyEnabled}
+                onChange={(e) => change({ skyEnabled: e.target.checked })}
+              />
+              <span>Enable sky dome</span>
+            </label>
+            <p className="nh-display-help">
+              Physical sky light, sun color, atmosphere and PBR reflections respond to these controls.
+            </p>
             <label className="nh-display-range">
               <span>
                 <Sun size={13} />
@@ -854,13 +870,70 @@ export function TerrainViewport({
               <input
                 aria-label="Sun elevation"
                 type="range"
-                min="10"
+                min="2"
                 max="85"
                 step="1"
                 value={settings.sunElevation}
                 onChange={(e) => change({ sunElevation: Number(e.target.value) })}
               />
             </label>
+            {settings.skyEnabled && (
+              <div className="nh-display-subsection">
+                <label className="nh-display-range">
+                  <span>Atmospheric haze<b>{settings.skyTurbidity.toFixed(1)}</b></span>
+                  <input aria-label="Atmospheric haze" type="range" min="1" max="16" step="0.5"
+                    value={settings.skyTurbidity} onChange={(e) => change({ skyTurbidity: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Rayleigh scattering<b>{settings.skyRayleigh.toFixed(1)}</b></span>
+                  <input aria-label="Rayleigh scattering" type="range" min="0.2" max="4" step="0.1"
+                    value={settings.skyRayleigh} onChange={(e) => change({ skyRayleigh: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Sky exposure<b>{settings.skyExposure.toFixed(2)}×</b></span>
+                  <input aria-label="Sky exposure" type="range" min="0.6" max="1.5" step="0.05"
+                    value={settings.skyExposure} onChange={(e) => change({ skyExposure: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span><CloudSun size={13} /> Cloud cover<b>{Math.round(settings.cloudCoverage * 100)}%</b></span>
+                  <input aria-label="Cloud cover" type="range" min="0" max="1" step="0.01"
+                    value={settings.cloudCoverage} onChange={(e) => change({ cloudCoverage: Number(e.target.value) })} />
+                </label>
+              </div>
+            )}
+            <label className="nh-display-range">
+              <span><Wind size={13} /> Wind speed<b>{settings.cloudSpeed.toFixed(2)}×</b></span>
+              <input aria-label="Wind speed" type="range" min="0" max="2" step="0.05"
+                value={settings.cloudSpeed} onChange={(e) => change({ cloudSpeed: Number(e.target.value) })} />
+            </label>
+            <div className="nh-display-divider" />
+            <div className="nh-display-section-heading"><Sprout size={13} /> Landscape context</div>
+            <label className="nh-display-check">
+              <input
+                type="checkbox"
+                aria-label="Expand ground"
+                checked={settings.expandGround}
+                onChange={(e) => change({ expandGround: e.target.checked })}
+              />
+              <span>Expand ground · grassy meadow</span>
+            </label>
+            {settings.expandGround && (
+              <div className="nh-display-subsection">
+                <label className="nh-display-range">
+                  <span>Ground reach<b>{settings.groundReach.toFixed(1)}×</b></span>
+                  <input aria-label="Ground reach" type="range" min="3" max="8" step="0.5"
+                    value={settings.groundReach} onChange={(e) => change({ groundReach: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Grass density<b>{Math.round(settings.grassDensity * 100)}%</b></span>
+                  <input aria-label="Grass density" type="range" min="0.2" max="1.5" step="0.05"
+                    value={settings.grassDensity} onChange={(e) => change({ grassDensity: Number(e.target.value) })} />
+                </label>
+                <p className="nh-display-help">The meadow flattens beyond the heightmap boundary.
+                  Your generated terrain and exported maps stay untouched.</p>
+              </div>
+            )}
+            <div className="nh-display-divider" />
             <label className="nh-display-range">
               <span>
                 Vertical scale<b>{settings.exaggeration.toFixed(1)}×</b>
@@ -915,6 +988,15 @@ export function TerrainViewport({
                   contours: false,
                   wireframe: false,
                   autoRotate: false,
+                  skyEnabled: true,
+                  skyTurbidity: 4.5,
+                  skyRayleigh: 2.2,
+                  skyExposure: 1,
+                  cloudCoverage: 0.42,
+                  cloudSpeed: 0.35,
+                  expandGround: false,
+                  groundReach: 5,
+                  grassDensity: 0.75,
                 });
                 sceneRef.current?.resetCamera();
               }}
