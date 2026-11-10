@@ -63,39 +63,52 @@ export function watershedErosion(
 
   // Raster integration uses equal-area cells; each sample-height unit is the
   // same volume divided by the constant physical cell area.
+  /**
+   * Amount means the desired channel-center depth, NOT a fixed volume divided
+   * among all bank cells. A normalized brush made wide rivers paradoxically
+   * shallower and nearly invisible at preview resolution. The lateral kernel
+   * is a tapered valley cross-section, and every actual removal contributes
+   * to carried sediment rather than disappearing into a texture overlay.
+   */
   const takeAt = (center: number, amount: number, radius: number) => {
     if (amount <= 0) return 0;
     const x = center % n, y = Math.floor(center / n);
-    let availableWeight = 0;
-    for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
-      const px = x + dx, py = y + dy;
-      if (px < 0 || py < 0 || px >= n || py >= n) continue;
-      const i = py * n + px;
-      if (height[i] <= bedrock) continue;
-      const distance = Math.hypot(dx, dy);
-      if (distance > radius + 0.1) continue;
-      const weight = 1 / (1 + distance * distance * 1.6);
-      availableWeight += weight * (mask ? clamp(mask[i]) : 1);
-    }
-    if (availableWeight <= 0) return 0;
     let actual = 0;
     for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
       const px = x + dx, py = y + dy;
       if (px < 0 || py < 0 || px >= n || py >= n) continue;
-      const i = py * n + px, distance = Math.hypot(dx, dy);
-      if (distance > radius + 0.1) continue;
-      const resistance = mask ? clamp(mask[i]) : 1;
-      if (resistance <= 0) continue;
-      const take = Math.min(Math.max(0, height[i] - bedrock),
-        amount * resistance / ((1 + distance * distance * 1.6) * availableWeight));
+      const dist = Math.hypot(dx, dy);
+      if (dist > radius + 0.1) continue;
+      const index = py * n + px;
+      const permission = mask ? clamp(mask[index]) : 1;
+      if (permission <= 0) continue;
+      const before = height[index];
+      const take = Math.min(Math.max(0, before - bedrock),
+        amount * permission / (1 + dist * dist * 1.6));
       if (take <= 0) continue;
-      const before = height[i];
-      height[i] -= take;
-      const moved = before - height[i];
-      actual += moved;
-      wear[i] += moved;
+      height[index] -= take;
+      const removed = before - height[index];
+      actual += removed;
+      wear[index] += removed;
     }
     return actual;
+  };
+
+  // Fractional bilinear sampling in grid coordinates, used only at active
+  // channels to estimate cross-slope valley confinement. A uniformly tilted
+  // plane has zero bank rise and cannot spontaneously acquire regularly
+  // spaced, parallel erosion grooves from D8 raster routing alone.
+  const elevationAt = (x: number, y: number) => {
+    x = clamp(x, 0, n - 1);
+    y = clamp(y, 0, n - 1);
+    const ix = Math.min(n - 2, Math.floor(x));
+    const iy = Math.min(n - 2, Math.floor(y));
+    const fx = x - ix, fy = y - iy;
+    const i = iy * n + ix;
+    return height[i] * (1 - fx) * (1 - fy) +
+      height[i + 1] * fx * (1 - fy) +
+      height[i + n] * (1 - fx) * fy +
+      height[i + n + 1] * fx * fy;
   };
 
   // Spread depositional load into a short, low-slope fan; preserve the exact
@@ -169,25 +182,42 @@ export function watershedErosion(
         Math.pow(Math.min(3, slope), 0.9) * rainfall * gravity;
       // Capacity grows with discharge as well as gradient; sediment cover
       // naturally suppresses incision while excess load is deposited.
-      const capacity = relief * 0.13 * capacityFactor * rainfall *
+      const capacity = relief * 0.25 * capacityFactor * rainfall *
         Math.pow(relativeArea, 0.32) *
         Math.pow(waterArea, 0.24) * Math.max(0.005, slope);
       const coverage = mask ? clamp(mask[i]) : 1;
       if (coverage > 0 && wetDepression < 0.2 * spacing &&
         waterArea >= minimumCatchment && slope > 0.002 && erosion > 0) {
-        const requested = relief * 0.12 * erosion * duration * passStrength *
-          power * Math.max(0, 1 - carried / Math.max(capacity, 1e-8));
-        // Restrict each explicit step to a fraction of the actual downstream
-        // head difference. Never create an inverse-gradient cut in one pass.
-        const safe = Math.min(requested,
-          Math.max(0, height[i] - height[downstream]) * 0.38, relief * 0.035);
-        const contributingKm2 = waterArea * cell * cell / 1_000_000;
-        const widthMeters = Math.min(85, 5 + 12 * contributingKm2 ** 0.35) *
-          channelWidth * passRadius;
-        const radius = Math.min(5, Math.max(0, Math.ceil(widthMeters / cell) - 1));
-        const removed = takeAt(i, safe, radius);
-        carried += removed;
-        eroded += removed;
+        // Prefer physically convergent valleys, not the parallel raster
+        // drainage lines that exist even on an exactly tilted plane.
+        const x = i % n, y = Math.floor(i / n);
+        const norm = Math.hypot(dx, dy);
+        const tx = -dy / norm, ty = dx / norm;
+        const bankRadius = Math.min(6, Math.max(1.5, 90 / cell));
+        const across = (
+          elevationAt(x + tx * bankRadius, y + ty * bankRadius) +
+          elevationAt(x - tx * bankRadius, y - ty * bankRadius)
+        ) * 0.5 - height[i];
+        const valley = clamp((across / relief - 0.0006) / 0.008);
+        const catchment = clamp((relativeArea - 0.006) / 0.024) * 0.7;
+        const convergence = Math.max(valley * valley * (3 - 2 * valley), catchment);
+        if (convergence > 0.001) {
+          const requested = relief * 0.55 * erosion * duration * passStrength *
+            power * convergence *
+            Math.max(0, 1 - carried / Math.max(capacity, 1e-8));
+          // Limit an explicit incision step relative to the existing head so
+          // the river does not instantly reverse the downstream gradient.
+          const safe = Math.min(requested,
+            Math.max(0, height[i] - height[downstream]) * 0.78, relief * 0.06);
+          const contributingKm2 = waterArea * cell * cell / 1_000_000;
+          const valleyWidthMeters = Math.min(170,
+            35 + 36 * contributingKm2 ** 0.32) * channelWidth * passRadius;
+          const radius = Math.min(6,
+            Math.max(1, Math.round(valleyWidthMeters / (2 * cell))));
+          const removed = takeAt(i, safe, radius);
+          carried += removed;
+          eroded += removed;
+        }
       }
 
       if (coverage > 0 && depositionRate > 0 && carried > 0) {
