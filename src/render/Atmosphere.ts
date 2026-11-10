@@ -74,10 +74,12 @@ export function skyLighting(settings: ViewSettings): SkyLighting {
       .lerp(new THREE.Color('#b8c0c5'), overcast * 0.48),
     ambientGround: new THREE.Color('#636b56').lerp(new THREE.Color('#665046'), sunset * 0.55),
     ambientIntensity: (0.42 + 0.64 * daylight) * (1 - haze * 0.12) * (1 + overcast * 0.12),
-    fogColor: new THREE.Color('#b4cad9').lerp(new THREE.Color('#d6a787'), sunset * 0.64)
-      .lerp(new THREE.Color('#c3c5bf'), haze * 0.34)
-      .lerp(new THREE.Color('#b7c2c3'), overcast * 0.35),
-    fogFar: settings.expandGround ? 23 : 17,
+    // Match the bright physical sky near the horizon. A dark, unrelated fog
+    // color makes an otherwise infinite meadow end in a hard green stripe.
+    fogColor: new THREE.Color('#dce6eb').lerp(new THREE.Color('#e8c2ad'), sunset * 0.73)
+      .lerp(new THREE.Color('#ced8dc'), overcast * 0.58)
+      .lerp(new THREE.Color('#cbd2d2'), haze * 0.15),
+    fogFar: settings.expandGround ? 21 : 17,
   };
 }
 
