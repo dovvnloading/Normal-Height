@@ -401,6 +401,10 @@ export class TerrainScene {
   applySettings(settings: ViewSettings) {
     const paletteChanged = this.settings.material !== settings.material;
     const scaleChanged = this.settings.exaggeration !== settings.exaggeration;
+    const shadowGeometryChanged = scaleChanged ||
+      this.settings.sunAzimuth !== settings.sunAzimuth ||
+      this.settings.sunElevation !== settings.sunElevation ||
+      this.settings.expandGround !== settings.expandGround;
     this.settings = settings;
     const azimuth = (settings.sunAzimuth * Math.PI) / 180;
     const elevation = (settings.sunElevation * Math.PI) / 180;
@@ -449,7 +453,10 @@ export class TerrainScene {
     }
     if (scaleChanged && this.terrain) this.rebuildSplineGuide();
     if (scaleChanged && this.terrain && !this.cameraAdjusted) this.fitCamera();
-    this.renderer.shadowMap.needsUpdate = true;
+    // Changing haze, exposure, cloud shadows, grass density or materials must
+    // not trigger a costly 2048² sun-shadow regeneration. Only the actual
+    // shadow-caster geometry or light direction requires it.
+    if (shadowGeometryChanged) this.renderer.shadowMap.needsUpdate = true;
     this.needsRender = true;
   }
 
