@@ -29,6 +29,7 @@ import type {
   ViewSettings,
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
+import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
 import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
 import { pbrPixels } from '../materials/pbr';
@@ -836,6 +837,30 @@ export function TerrainViewport({
             </div>
             <div className="nh-display-divider" />
             <div className="nh-display-section-heading"><CloudSun size={13} /> Atmosphere & lighting</div>
+            <div className="nh-sky-presets" role="group" aria-label="Sky lighting presets">
+              {([
+                { key: 'clear', label: 'Clear day', sunAzimuth: 265, sunElevation: 57,
+                  skyTurbidity: 2.5, skyRayleigh: 2.2, skyExposure: 0.96,
+                  cloudCoverage: 0.12, cloudSpeed: 0.25 },
+                { key: 'golden', label: 'Golden hour', sunAzimuth: 252, sunElevation: 11,
+                  skyTurbidity: 5.5, skyRayleigh: 2.9, skyExposure: 1.04,
+                  cloudCoverage: 0.29, cloudSpeed: 0.34 },
+                { key: 'overcast', label: 'Overcast', sunAzimuth: 315, sunElevation: 36,
+                  skyTurbidity: 7.5, skyRayleigh: 1.8, skyExposure: 0.92,
+                  cloudCoverage: 0.88, cloudSpeed: 0.62 },
+              ] as const).map(({ key, label, ...preset }) => (
+                <button
+                  key={key}
+                  className="nh-sky-preset"
+                  type="button"
+                  aria-label={`${label} sky preset`}
+                  onClick={() => change({ ...preset, skyEnabled: true })}
+                >
+                  <span className={`nh-sky-preset-swatch nh-sky-preset-${key}`} aria-hidden="true" />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
             <label className="nh-display-check">
               <input
                 type="checkbox"
@@ -898,6 +923,12 @@ export function TerrainViewport({
                   <span><CloudSun size={13} /> Cloud cover<b>{Math.round(settings.cloudCoverage * 100)}%</b></span>
                   <input aria-label="Cloud cover" type="range" min="0" max="1" step="0.01"
                     value={settings.cloudCoverage} onChange={(e) => change({ cloudCoverage: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Cloud shadow strength<b>{Math.round(settings.cloudShadowStrength * 100)}%</b></span>
+                  <input aria-label="Cloud shadow strength" type="range" min="0" max="1" step="0.05"
+                    value={settings.cloudShadowStrength}
+                    onChange={(e) => change({ cloudShadowStrength: Number(e.target.value) })} />
                 </label>
               </div>
             )}
@@ -980,24 +1011,7 @@ export function TerrainViewport({
               type="button"
               className="nh-display-reset"
               onClick={() => {
-                change({
-                  material: 'pbr',
-                  sunAzimuth: 315,
-                  sunElevation: 38,
-                  exaggeration: 1,
-                  contours: false,
-                  wireframe: false,
-                  autoRotate: false,
-                  skyEnabled: false,
-                  skyTurbidity: 4.5,
-                  skyRayleigh: 2.2,
-                  skyExposure: 1,
-                  cloudCoverage: 0.42,
-                  cloudSpeed: 0.35,
-                  expandGround: false,
-                  groundReach: 5,
-                  grassDensity: 0.75,
-                });
+                onSettingsChange({ ...DEFAULT_VIEW_SETTINGS });
                 sceneRef.current?.resetCamera();
               }}
             >
