@@ -729,12 +729,16 @@ test('the sky and expanded meadow change rendered pixels without rebuilding the 
   await wind.press('Home');
   await expect(wind).toHaveValue('0');
 
-  const withSky = await fingerprint();
-  await panel.getByRole('checkbox', { name: 'Enable sky dome' }).uncheck();
-  await expect.poll(fingerprint).not.toBe(withSky);
+  // The expensive environment is opt-in; existing editor work stays light.
+  const skyToggle = panel.getByRole('checkbox', { name: 'Enable sky dome' });
+  await expect(skyToggle).not.toBeChecked();
   const studioLight = await fingerprint();
-  await panel.getByRole('checkbox', { name: 'Enable sky dome' }).check();
+  await skyToggle.check();
   await expect.poll(fingerprint).not.toBe(studioLight);
+  const withSky = await fingerprint();
+  await skyToggle.uncheck();
+  await expect.poll(fingerprint).not.toBe(withSky);
+  await skyToggle.check();
 
   const withoutGround = await fingerprint();
   await panel.getByRole('checkbox', { name: 'Expand ground' }).check();
