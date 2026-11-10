@@ -347,7 +347,7 @@ export class GroundExtension {
       // Density changes only update the active instance count; no expensive
       // blade geometry or GPU buffers are recreated while dragging the slider.
       this.tufts.count = Math.min(this.tufts.instanceMatrix.count,
-        Math.round(area * 21 * settings.grassDensity));
+        Math.round(area * 15 * settings.grassDensity));
       this.tufts.position.y = base + 0.001;
       this.tufts.visible = true;
     }
@@ -444,11 +444,13 @@ export class GroundExtension {
     const half = extent * 0.5;
     const edge = HALF + APRON_WIDTH + 0.08;
     const availableArea = Math.max(0, extent * extent - (2 * edge) ** 2);
-    const count = Math.min(8000, Math.round(availableArea * 21 * 1.5));
+    const count = Math.min(5000, Math.round(availableArea * 15 * 1.5));
     const mesh = new THREE.InstancedMesh(bladeGeometry(), this.bladeMaterial, count);
     mesh.name = 'Instanced meadow grass';
     mesh.castShadow = false;
-    mesh.receiveShadow = true;
+    // Lighting includes shared moving cloud shadows; per-blade 2048² PCF
+    // terrain shadow sampling is too expensive at grazing camera angles.
+    mesh.receiveShadow = false;
     const random = seededRandom(seed ^ 0x759ef20a);
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
