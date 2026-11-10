@@ -44,7 +44,7 @@ describe('shared cloud-field quality and rendering performance', () => {
       vertexShader: '#include <begin_vertex>\n#include <worldpos_vertex>',
       fragmentShader: '#include <lights_fragment_end>',
     };
-    material.onBeforeCompile(shader as unknown as THREE.WebGLProgramParametersWithUniforms,
+    material.onBeforeCompile(shader as unknown as Parameters<typeof material.onBeforeCompile>[0],
       {} as THREE.WebGLRenderer);
     expect(shader.vertexShader).toContain('vNHCloudWorld');
     expect(shader.fragmentShader).toContain('reflectedLight.directDiffuse *= brightness');
