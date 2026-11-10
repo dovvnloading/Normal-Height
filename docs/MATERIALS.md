@@ -7,7 +7,7 @@ Normal Height can turn a single evaluated terrain graph into a coordinated set o
 1. Build a terrain in the normal graph.
 2. Open **Scene** in the right inspector. Under **PBR material studio**, choose a biome (Alpine/temperate, Arid/desert, or Volcanic) and adjust the snow-line (fraction of local height range), exposed-rock slope, moisture, detail scale in meters, microdetail depth, and cavity AO strength.
 3. Select **PBR** in the 3D Display panel. The mesh uses sRGB base color and separate linear roughness, occlusion and micro-normal maps. Clay, alpine vertex colors, and height previews remain available.
-4. Switch to **2D map** and select Base color, Roughness, Occlusion, Material weights, Curvature, or ORM to inspect actual export data.
+4. Switch to **2D map** and select Base color, Roughness, Occlusion, Material weights, **Rock coverage, Soil coverage, Vegetation coverage, Snow coverage**, Curvature, or ORM to inspect the exact worker-produced channels. Individual coverage views are opaque grayscale (black 0%, white 100%) with an exact percentage on pixel hover; all four are derived directly from the exported RGBA splat.
 5. Choose **Export maps → Complete PBR material set (ZIP)** and a resolution.
 
 Existing \`.nhterrain.json\` files remain valid. The optional \`surface\` project property uses the original v1 project format and is validated on import.
