@@ -89,3 +89,32 @@ jobs:
           name: pbr-real-2gib-memory-qa
           path: test-results/
           retention-days: 30
+
+  hardware-accelerated-pbr:
+    # The standard Apple Silicon macOS runner exposes a Metal-backed virtual
+    # GPU. Renderer detection in the test prevents accidental software results.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium
+      - name: Benchmark rapid 512/1024 terrain material edits on Metal
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep 'rapid material edits' --retries=0
+        env:
+          PBR_BROWSER_BENCH: '1'
+          PBR_REAL_GPU: '1'
+      - name: Preserve actual GPU name and frame-time measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbr-macos-metal-frame-metrics
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30

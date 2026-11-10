@@ -153,12 +153,18 @@ for (const resolution of [512, 1024] as const) {
         p99FrameGapMs: percentile(0.99),
       };
     });
-    const pipeline = await gl.evaluate((element: HTMLCanvasElement) => ({
-      textureCount: Number(element.dataset.pbrTextureCount),
-      workerMs: Number(element.dataset.pbrWorkerMs),
-      packMs: Number(element.dataset.pbrPackMs),
-      firstRenderMs: Number(element.dataset.pbrFirstRenderMs ?? 0),
-    }));
+    const pipeline = await gl.evaluate((element: HTMLCanvasElement) => {
+      const context = element.getContext('webgl2');
+      const debug = context?.getExtension('WEBGL_debug_renderer_info');
+      return {
+        textureCount: Number(element.dataset.pbrTextureCount),
+        workerMs: Number(element.dataset.pbrWorkerMs),
+        packMs: Number(element.dataset.pbrPackMs),
+        firstRenderMs: Number(element.dataset.pbrFirstRenderMs ?? 0),
+        webglRenderer: context ? String(context.getParameter(
+          debug ? debug.UNMASKED_RENDERER_WEBGL : context.RENDERER)) : 'WebGL unavailable',
+      };
+    });
     await testInfo.attach(`pbr-latency-${resolution}.json`, {
       body: JSON.stringify({ ...stats, pipeline }, null, 2),
       contentType: 'application/json',
@@ -166,6 +172,14 @@ for (const resolution of [512, 1024] as const) {
     expect(pipeline.textureCount).toBe(3);
     expect(Number.isFinite(pipeline.packMs)).toBe(true);
     expect(pipeline.packMs).toBeGreaterThanOrEqual(0);
+    if (process.env.PBR_REAL_GPU) {
+      // Fail loudly if an ostensibly accelerated CI runner silently falls
+      // back to SwiftShader. This makes the latency budget hardware-backed.
+      expect(pipeline.webglRenderer).toMatch(/Apple|Metal|Paravirtual/i);
+      expect(pipeline.webglRenderer).not.toMatch(/SwiftShader|llvmpipe|Software/i);
+      expect(stats.p95FrameGapMs).toBeLessThan(120);
+      expect(stats.maxFrameGapMs).toBeLessThan(1000);
+    }
     expect(stats.frames).toBeGreaterThan(8);
     // A single cold SwiftShader texture upload or headless scheduling pause
     // can take >1.5 s, so the maximum is recorded rather than misrepresented
@@ -466,5 +480,25 @@ test('fixed-light 3D PBR material captures a reproducible visual baseline (#17)'
     contentType: 'image/png',
   });
   expect(data.cells).toHaveLength(48);
-  expect(data.contrast).toBeGreaterThan(12);
+  expect(data.contrast).toBeGreaterThan(20);
+  // Version-controlled golden from a real seeded Chromium/SwiftShader capture.
+  // Compare a 160x120 downsample in 8x6 blocks to avoid antialiasing noise,
+  // while keeping the alpine relief, UV orientation, and color balance fixed.
+  const golden = JSON.parse(await readFile(
+    new URL('./fixtures/pbr-fixed-light-swiftshader.json', import.meta.url), 'utf8',
+  )) as { width: number; height: number; cells: number[][]; contrast: number };
+  expect([data.width, data.height]).toEqual([golden.width, golden.height]);
+  const errors = data.cells.flatMap((rgb, i) =>
+    rgb.map((color, channel) => Math.abs(color - golden.cells[i][channel])));
+  const meanError = errors.reduce((sum, error) => sum + error, 0) / errors.length;
+  const sorted = errors.sort((a, b) => a - b);
+  const p95Error = sorted[Math.floor(sorted.length * 0.95)];
+  await testInfo.attach('pbr-3d-golden-delta.json', {
+    body: JSON.stringify({ meanError, p95Error, maxError: sorted.at(-1),
+      referenceContrast: golden.contrast, actualContrast: data.contrast }, null, 2),
+    contentType: 'application/json',
+  });
+  expect(meanError).toBeLessThanOrEqual(8);
+  expect(p95Error).toBeLessThanOrEqual(20);
+  expect(Math.abs(data.contrast - golden.contrast)).toBeLessThanOrEqual(12);
 });
