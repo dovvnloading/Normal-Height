@@ -32,30 +32,28 @@ For the browser tests, run `npx playwright install chromium` once. CI installs i
 
 ### Terrain construction
 
-**New: Dissected orogenic range.** The Alpine watershed and Folded highlands
-presets now start from a mountain **source** constructed through regional
-uplift and an outlet-connected, multi-directional stream graph. A steady-state
-stream-power relation (U = K A^m S) builds elevated watershed divides and
-connected valleys into the actual Float32 heightfield rather than drawing
-flow color on a smooth mountain. Irregularized graph sample positions and
-weighted downhill routing reduce the repeated cardinal/diagonal cut patterns
-seen in earlier prototypes. The existing Hydraulic erosion node then acts
-on this generated geometry.
+**Dissected orogenic range** uses the existing editable mountain uplift
+profile but adds actual **incised tributary valleys and interfluve ridges**
+to the exported heightfield. The source builds an outlet-connected,
+seeded stream tree and carves continuous, catchment-scaled riverbed and
+valley-bank feature kernels. The shallow-routing diagnostic does not
+become a raised white river line: every cut is a negative elevation
+change relative to the original source.
 
-Select a Mountain range node, set **Landform → Dissected orogenic range**,
-and adjust **Stream-network dissection** from zero (bit-identical Classic
-alpine range) to one. **Classic alpine range** remains available for older
-projects. Saved graphs with an explicit classic profile are preserved.
-Use the untextured 2D Height map to judge the geometry: materials and near-
-camera shading are not a substitute for actual drainage relief.
+To compare, select a Mountain range node and use
+**Landform → Dissected orogenic range** and its
+**Stream-network dissection** control. Strength zero returns the previous
+Classic alpine range exactly; explicit older profiles remain selectable.
+The Alpine watershed and Folded highlands presets use the new source,
+which can continue through existing hydraulic and thermal erosion stages.
 
-Research grounding: [Cordonnier et al. (2016), uplift + fluvial erosion](https://doi.org/10.1111/cgf.12820),
-[Braun & Willett (2013), stream-power landscape evolution](https://doi.org/10.1016/j.geomorph.2012.10.008),
-and [Landlab's documented Fastscape component](https://landlab.csdms.io/generated/api/landlab.components.stream_power.fastscape_stream_power.html).
-This is an independent, stylized equilibrium approximation, **not** Terragen's
-proprietary implementation, real topographic ground truth, a fluid solver,
-or a guarantee that every terrain will resemble a specific reference image.
-See [research notes](docs/RESEARCH.md) for limitations and quantitative QA.
+This approach is an independently written, art-directed reconstruction
+informed by published hydrology-guided terrain-feature methods
+([Génevaux et al. 2013](https://doi.org/10.1145/2461912.2461996),
+[Cordonnier et al. 2016](https://doi.org/10.1111/cgf.12820)).
+It is not a commercial Terragen/Gaea clone or a validated physical
+fluid simulation. Judge its actual grayscale Height map and terrain
+relief against the reference, not its Flow mask or material textures.
 
 
 - **Mountain range generator:** direction, width, relief, sharpness, fractal detail, and distortion. Profiles include connected alpine ranges, broad massifs, volcanic calderas, and badlands.
