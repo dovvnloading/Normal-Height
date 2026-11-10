@@ -21,6 +21,7 @@ export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   skyExposure: 1,
   cloudCoverage: 0.42,
   cloudSpeed: 0.35,
+  cloudShadowStrength: 0.72,
   expandGround: false,
   groundReach: 5,
   grassDensity: 0.75,
@@ -35,6 +36,7 @@ const ranges: Partial<Record<keyof ViewSettings, [number, number]>> = {
   skyExposure: [0.6, 1.5],
   cloudCoverage: [0, 1],
   cloudSpeed: [0, 2],
+  cloudShadowStrength: [0, 1],
   groundReach: [3, 8],
   grassDensity: [0.2, 1.5],
 };
