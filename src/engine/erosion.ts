@@ -25,6 +25,8 @@ export interface ErosionSettings {
   hillslope?: number;
   /** Riverbank / repose angle, in degrees. */
   bankAngle?: number;
+  /** Separate persistent bedrock channels from mobile fine-scale sediment. */
+  bedrockPreserve?: boolean;
   /** Physical dimensions for grid-independent stream-power and discharge scales. */
   worldSize?: number;
   heightScale?: number;

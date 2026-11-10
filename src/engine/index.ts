@@ -430,6 +430,7 @@ export function evaluateGraph(
               featureMeters: number(node, 'featureMeters', 140, 24, 600),
               hillslope: number(node, 'hillslope', 0.38, 0, 1),
               bankAngle: number(node, 'bankAngle', 38, 18, 80),
+              bedrockPreserve: node.params.bedrockPreserve === true,
               worldSize: project.worldSize,
               heightScale: project.heightScale,
             },

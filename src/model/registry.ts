@@ -494,6 +494,14 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         'Sediment',
         '°',
       ),
+      {
+        key: 'bedrockPreserve',
+        label: 'Preserve incised bedrock',
+        type: 'toggle',
+        default: false,
+        description: 'Landscape evolution only: retain existing narrow hard-rock gullies while applying simulated broad-scale fluvial and sediment changes. A source with no bedrock detail does not gain any. Helps avoid smoothing mature mountain drainage into a blurred ridge.',
+        section: 'Sediment',
+      },
       range(
         'inertia',
         'Flow inertia',

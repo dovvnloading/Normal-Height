@@ -175,6 +175,33 @@ source's measured fine relief**, alongside the same signed riverbed tests.
 This prevents a green unit-test suite from hiding a downstream
 geometry-destruction regression.
 
+### Bedrock-safe sediment filtering
+
+The full-graph acceptance audit showed that lowering talus transport and
+turning off the redundant post-source warp was not sufficient: Highland
+source gullies retained only **49%** of fine relief after the landscape
+hydraulic stage. The `Landscape evolution` algorithm was simulating
+large-scale sediment exchange directly on the fine original DEM and
+therefore also smoothing mature hard-rock gullies.
+
+An explicit opt-in **Preserve incised bedrock** switch now operates at the
+*final displacement-composition* step of landscape evolution.
+The hydraulic transport simulation still runs normally, with physical
+runoff, sediment capacity and valley-scale height changes. Only the
+simulated *net displacement* is spatially filtered over roughly several
+raster cells before adding it to the **unmodified original high-frequency
+bedrock field**. This is a two-pass separable Gaussian; it does not
+stamp extra noise or claim to create new sediment. The final actual
+height differences continue to determine the reported wear/deposition
+buffers. Saved projects without this flag retain their previous
+behavior; it is enabled for the newly dissected Alpine and Highlands
+presets, and users can turn it off to study fully mobile loose material.
+
+This is an artistic two-material approximation. A fully physical model
+would explicitly transport regolith and bedrock with separate erodibility
+and armoring parameters. The user-facing choice makes that limitation
+inspectable rather than hiding it behind a cosmetic map.
+
 ### Acceptance and limitations
 
 Unit checks now require **lower river centerlines relative to banks**,

@@ -32,6 +32,45 @@ function resample(values: Float32Array, n: number, m: number): Float32Array {
 }
 
 /**
+ * A lightweight separable Gaussian of *simulation displacement*, not of the
+ * source terrain. The source bedrock is never blurred. This lets long-period
+ * valley evolution change regional geometry without depositing a smoothing
+ * blanket over hard-rock gullies finer than the simulated sediment scale.
+ */
+function smoothDisplacement(source: Float32Array, n: number): Float32Array {
+  const weights = [1, 4, 6, 4, 1];
+  let current = source;
+  for (let pass = 0; pass < 2; pass++) {
+    const across = new Float32Array(n * n);
+    const down = new Float32Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      let sum = 0, denom = 0;
+      for (let d = -2; d <= 2; d++) {
+        const xx = x + d;
+        if (xx < 0 || xx >= n) continue;
+        const weight = weights[d + 2];
+        sum += current[y * n + xx] * weight;
+        denom += weight;
+      }
+      across[y * n + x] = sum / denom;
+    }
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      let sum = 0, denom = 0;
+      for (let d = -2; d <= 2; d++) {
+        const yy = y + d;
+        if (yy < 0 || yy >= n) continue;
+        const weight = weights[d + 2];
+        sum += across[yy * n + x] * weight;
+        denom += weight;
+      }
+      down[y * n + x] = sum / denom;
+    }
+    current = down;
+  }
+  return current;
+}
+
+/**
  * A bounded, multi-resolution landscape-evolution model.
  *
  * Scientific basis:
@@ -351,12 +390,25 @@ export function landscapeErosion(
   const deposition = new Float32Array(count);
   const flow = new Float32Array(count);
   if (previous) {
+    let protectedChanges: Float32Array | null = null;
+    if (settings.bedrockPreserve) {
+      const resolution = previous.resolution;
+      const changes = new Float32Array(resolution * resolution);
+      for (let i = 0; i < changes.length; i++)
+        changes[i] = previous.height[i] - previous.original[i];
+      // Only the simulated loose-material / regional change is filtered;
+      // the input's fine-scale pre-incised bedrock is retained bit-for-bit
+      // in the final re-composition rather than being flattened by creep.
+      protectedChanges = smoothDisplacement(changes, resolution);
+    }
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
       const i = y * n + x;
       const sx = x * (previous.resolution - 1) / (n - 1);
       const sy = y * (previous.resolution - 1) / (n - 1);
-      const net = sample(previous.height, previous.resolution, sx, sy) -
-        sample(previous.original, previous.resolution, sx, sy);
+      const net = protectedChanges
+        ? sample(protectedChanges, previous.resolution, sx, sy)
+        : sample(previous.height, previous.resolution, sx, sy) -
+          sample(previous.original, previous.resolution, sx, sy);
       const permission = mask ? clamp(mask[i]) : 1;
       result[i] += net * permission;
       flow[i] = latestFlow

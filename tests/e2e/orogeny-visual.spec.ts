@@ -80,8 +80,9 @@ for (const [preset, mountainId] of [
       expect(meanDelta).toBeGreaterThan(0.008);
       expect(evolvedFine).toBeGreaterThan(classicFine * 1.2);
       // An exported heightmap must retain the newly formed bedrock
-      // tributaries. Heavy thermal smoothing used to erase over 75%.
-      expect(finalFine).toBeGreaterThan(evolvedFine * 0.55);
+      // tributaries. Unrestricted landscape sediment exchange was
+      // still erasing half the source's bedrock signal in Highlands.
+      expect(finalFine).toBeGreaterThan(evolvedFine * 0.70);
       expect(evolved.height.every(Number.isFinite)).toBe(true);
       expect(finalTerrain.height.every(Number.isFinite)).toBe(true);
     });

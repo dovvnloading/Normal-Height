@@ -63,7 +63,7 @@ export const PRESETS: Preset[] = [
     build: () => [
       node('range', 'mountain', 0, { profile: 'orogenic', dissection: 0.86 }, 'Alpine spine'),
       node('warp', 'warp', 270, { strength: 0, scale: 2.8 }, 'Break the symmetry'),
-      node('erosion', 'hydraulic', 540, { hillslope: 0.03, cycles: 24 }, 'Carve the watershed'),
+      node('erosion', 'hydraulic', 540, { hillslope: 0.03, cycles: 24, bedrockPreserve: true }, 'Carve the watershed'),
       node('thermal', 'thermal', 810, { iterations: 3, talus: 0.03, strength: 0.18 }, 'Settle the scree'),
       node('output', 'output', 1080, {}, 'Terrain output'),
     ],
@@ -209,7 +209,7 @@ export const PRESETS: Preset[] = [
         'erosion',
         'hydraulic',
         540,
-        { droplets: 110000, erosion: 0.22, deposition: 0.3, radius: 3, hillslope: 0.03, cycles: 24 },
+        { droplets: 110000, erosion: 0.22, deposition: 0.3, radius: 3, hillslope: 0.03, cycles: 24, bedrockPreserve: true },
         'Mature drainage',
       ),
       node(
