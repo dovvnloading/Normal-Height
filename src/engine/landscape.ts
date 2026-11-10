@@ -119,6 +119,8 @@ export function landscapeErosion(
     const sediment = new Float32Array(size);
     const localSediment = new Float32Array(size);
     const creepChanges = new Float64Array(size);
+    const fanIndices = new Int32Array(5);
+    const fanWeights = [0.55, 0.1125, 0.1125, 0.1125, 0.1125];
     const stageCycles = Math.max(1, Math.round(cycles * weights[stageIndex]));
     const dt = duration * 28 / Math.max(1, cycles);
     const stageFeature = featureMeters *
@@ -268,19 +270,20 @@ export function landscapeErosion(
             let settled = 0;
             // Deposit a shallow alluvial fan instead of a single spike.
             const xx = i % m, yy = (i / m) | 0;
-            const points = [i, xx > 0 ? i - 1 : -1,
-              xx < m - 1 ? i + 1 : -1, yy > 0 ? i - m : -1,
-              yy < m - 1 ? i + m : -1];
-            const fractions = [0.55, 0.1125, 0.1125, 0.1125, 0.1125];
+            fanIndices[0] = i;
+            fanIndices[1] = xx > 0 ? i - 1 : -1;
+            fanIndices[2] = xx < m - 1 ? i + 1 : -1;
+            fanIndices[3] = yy > 0 ? i - m : -1;
+            fanIndices[4] = yy < m - 1 ? i + m : -1;
             let weightSum = 0;
-            for (let p = 0; p < 5; p++) if (points[p] >= 0) {
-              const q = stageMask ? clamp(stageMask[points[p]]) : 1;
-              weightSum += fractions[p] * q;
+            for (let p = 0; p < 5; p++) if (fanIndices[p] >= 0) {
+              const q = stageMask ? clamp(stageMask[fanIndices[p]]) : 1;
+              weightSum += fanWeights[p] * q;
             }
             if (weightSum > 0) for (let p = 0; p < 5; p++) {
-              const target = points[p];
+              const target = fanIndices[p];
               if (target >= 0) settled += deposit(target,
-                toSettle * fractions[p] / weightSum);
+                toSettle * fanWeights[p] / weightSum);
             }
             carried -= settled;
           }
