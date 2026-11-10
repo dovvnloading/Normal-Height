@@ -6,8 +6,9 @@ import { pbrPixels } from '../materials/pbr';
 import { requestPBR } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
+import { Atmosphere, skyLighting } from './Atmosphere';
+import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
 
-const TERRAIN_SIZE = 2.6;
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
 function bilinear(values: Float32Array, n: number, u: number, v: number) {
@@ -34,6 +35,10 @@ export class TerrainScene {
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly sun: THREE.DirectionalLight;
+  private readonly hemisphere: THREE.HemisphereLight;
+  private readonly atmosphere: Atmosphere;
+  private readonly groundExtension: GroundExtension;
+  private theme: 'light' | 'dark' = 'light';
   private readonly floor: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
   private readonly grid: THREE.GridHelper;
   private readonly plinth: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
@@ -101,8 +106,8 @@ export class TerrainScene {
     this.scene.background = new THREE.Color('#cbd2cf');
     this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
 
-    const hemisphere = new THREE.HemisphereLight('#dbe7ee', '#777b6f', 2.35);
-    this.scene.add(hemisphere);
+    this.hemisphere = new THREE.HemisphereLight('#dbe7ee', '#777b6f', 2.35);
+    this.scene.add(this.hemisphere);
     this.sun = new THREE.DirectionalLight('#fff7e9', 2.55);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -120,6 +125,8 @@ export class TerrainScene {
     this.sun.shadow.intensity = 0.68;
     this.sun.target.position.set(0, 0.15, 0);
     this.scene.add(this.sun, this.sun.target);
+    this.atmosphere = new Atmosphere(this.scene, this.renderer, () => { this.needsRender = true; });
+    this.groundExtension = new GroundExtension(this.scene, this.renderer);
 
     this.floor = new THREE.Mesh(
       new THREE.PlaneGeometry(30, 30),
@@ -226,7 +233,15 @@ export class TerrainScene {
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
-    if (this.needsRender || this.controls.autoRotate) {
+    const seconds = performance.now() / 1000;
+    this.atmosphere.follow(this.camera);
+    this.atmosphere.tick(seconds, this.settings);
+    this.groundExtension.tick(seconds, this.settings.cloudSpeed);
+    const weatherMoves = this.settings.cloudSpeed > 0 && (
+      (this.settings.skyEnabled && this.settings.cloudCoverage > 0) ||
+      (this.settings.expandGround && this.settings.grassDensity > 0)
+    );
+    if (this.needsRender || this.controls.autoRotate || weatherMoves) {
       this.renderer.render(this.scene, this.camera);
       this.needsRender = false;
     }
@@ -315,14 +330,39 @@ export class TerrainScene {
   applyTheme(theme: 'light' | 'dark') {
     const background = theme === 'dark' ? '#292e30' : '#cbd2cf';
     this.renderer.setClearColor(background);
-    (this.scene.background as THREE.Color).set(background);
-    if (this.scene.fog instanceof THREE.Fog) this.scene.fog.color.set(background);
+    this.theme = theme;
+    this.updateEnvironmentLighting();
     this.floor.material.color.set(theme === 'dark' ? '#303839' : '#b3bdb7');
     this.plinth.material.color.set(theme === 'dark' ? '#414944' : '#8f9b92');
     this.skirtMaterial.color.set(theme === 'dark' ? '#515b52' : '#5b6054');
     // GridHelper uses vertex colors in this Three.js version. Dim the grid's
     // shared material instead of trying to call a non-existent setColors API.
     (this.grid.material as THREE.LineBasicMaterial).opacity = theme === 'dark' ? 0.24 : 0.42;
+    this.needsRender = true;
+  }
+
+  private updateEnvironmentLighting() {
+    const background = this.theme === 'dark' ? '#292e30' : '#cbd2cf';
+    if (this.settings.skyEnabled) {
+      const lighting = skyLighting(this.settings);
+      this.sun.color.copy(lighting.sunColor);
+      this.sun.intensity = lighting.sunIntensity;
+      this.hemisphere.color.copy(lighting.ambientSky);
+      this.hemisphere.groundColor.copy(lighting.ambientGround);
+      this.hemisphere.intensity = lighting.ambientIntensity;
+      this.scene.background = null; // let the physical dome fill the sky
+      this.scene.fog = new THREE.Fog(lighting.fogColor, 6, lighting.fogFar);
+      this.renderer.toneMappingExposure = 1.08 * this.settings.skyExposure;
+    } else {
+      this.sun.color.set('#fff7e9');
+      this.sun.intensity = 2.55;
+      this.hemisphere.color.set('#dbe7ee');
+      this.hemisphere.groundColor.set('#777b6f');
+      this.hemisphere.intensity = 2.35;
+      this.scene.background = new THREE.Color(background);
+      this.scene.fog = new THREE.Fog(background, 7, 15);
+      this.renderer.toneMappingExposure = 1.08;
+    }
     this.needsRender = true;
   }
 
@@ -340,9 +380,12 @@ export class TerrainScene {
     this.contourUniform.value = settings.contours;
     this.material.wireframe = settings.wireframe;
     this.controls.autoRotate = settings.autoRotate;
+    this.atmosphere.apply(settings);
+    this.updateEnvironmentLighting();
     if (this.terrain) this.terrain.scale.y = settings.exaggeration;
     if (this.skirt) this.skirt.scale.y = settings.exaggeration;
     this.updateSupport();
+    this.groundExtension.update(this.field, this.project, settings, this.minimumElevation);
     if (paletteChanged && this.terrain) {
       this.updateColors();
       this.updatePBRTextures();
@@ -361,6 +404,10 @@ export class TerrainScene {
     this.floor.position.y = base - 0.048;
     this.grid.position.y = base - 0.045;
     this.plinth.position.y = base - 0.019;
+    this.floor.visible = !this.settings.expandGround;
+    this.grid.visible = !this.settings.expandGround;
+    this.plinth.visible = !this.settings.expandGround;
+    if (this.skirt) this.skirt.visible = !this.settings.expandGround;
     this.sun.target.position.y = base + 0.15;
     this.sun.position.y = Math.sin(THREE.MathUtils.degToRad(this.settings.sunElevation)) * 5 + base;
     if (this.skirt) {
@@ -466,6 +513,7 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
+    this.groundExtension.update(this.field, this.project, this.settings, this.minimumElevation);
   }
 
   private updateColors() {
@@ -691,6 +739,8 @@ export class TerrainScene {
     cancelAnimationFrame(this.animation);
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    this.atmosphere.dispose();
+    this.groundExtension.dispose();
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost);
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
