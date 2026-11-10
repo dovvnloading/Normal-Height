@@ -289,6 +289,68 @@ test('1K browser export decodes every PBR PNG and aligns with the visible 2D map
   }
 });
 
+test('2K full PBR export produces decoded, aligned channels when device budget permits (#17)', async ({ page }, testInfo) => {
+  test.skip(!process.env.PBR_BROWSER_BENCH,
+    'The full 2K export uses significant CPU/RAM and runs only in opt-in PBR QA.');
+  test.setTimeout(420_000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  // Start from a cheap 512² graph; the export Worker independently regenerates
+  // the complete connected graph at 2048². A valid 8 GiB device-memory hint
+  // passes the PBR preflight, complementing the low-memory rejection test.
+  await loadFastProject(page, 512);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'deviceMemory', { value: 8, configurable: true });
+  });
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('pbr');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('2048');
+  const began = Date.now();
+  const downloading = page.waitForEvent('download', { timeout: 360_000 });
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  const download = await downloading;
+  const path = testInfo.outputPath('pbr-2048-verified.zip');
+  await download.saveAs(path);
+  const durationMs = Date.now() - began;
+  await testInfo.attach('pbr-2048-elapsed.json', {
+    body: JSON.stringify({ durationMs, resolution: 2048 }, null, 2),
+    contentType: 'application/json',
+  });
+  const prefix = 'pbr-acceptance-512-2048-';
+  const zip = new Uint8Array(await readFile(path));
+  // Avoid expanding every already-compressed PNG into Node memory at once.
+  // Still decode the physical height, albedo, GL/DX normals and ORM payload.
+  const selected = unzipSync(zip, { filter: file =>
+    ['height16', 'basecolor', 'normal-gl', 'normal-dx', 'orm']
+      .some(channel => file.name === prefix + channel + '.png') });
+  const height = decodePNG(selected[prefix + 'height16.png']);
+  const base = decodePNG(selected[prefix + 'basecolor.png']);
+  const gl = decodePNG(selected[prefix + 'normal-gl.png']);
+  const dx = decodePNG(selected[prefix + 'normal-dx.png']);
+  const orm = decodePNG(selected[prefix + 'orm.png']);
+  expect([height.width, height.height, height.depth, height.type]).toEqual([2048, 2048, 16, 0]);
+  for (const image of [base, gl, dx, orm]) {
+    expect([image.width, image.height, image.depth, image.type]).toEqual([2048, 2048, 8, 6]);
+  }
+  const errorsByChannel: Record<string, number> = {};
+  const audit = (name: string, okay: boolean) => {
+    if (!okay) errorsByChannel[name] = (errorsByChannel[name] ?? 0) + 1;
+  };
+  for (let i = 0; i < 2048 * 2048; i += 4099) {
+    const p = i * 4;
+    audit('normal GL/DX R', gl.pixels[p] === dx.pixels[p]);
+    audit('normal GL/DX G', gl.pixels[p + 1] + dx.pixels[p + 1] === 255);
+    audit('normal GL/DX B', gl.pixels[p + 2] === dx.pixels[p + 2]);
+    audit('normal alpha', gl.pixels[p + 3] === 255);
+    audit('PBR base alpha', base.pixels[p + 3] === 255);
+    audit('ORM metallic', orm.pixels[p + 2] === 0);
+    audit('ORM alpha', orm.pixels[p + 3] === 255);
+  }
+  expect(errorsByChannel).toEqual({});
+  expect(errors).toEqual([]);
+});
+
 test('PBR bundle exports a source-only graph with shared diagnostic buffers (#11)', async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   const errors: string[] = [];
