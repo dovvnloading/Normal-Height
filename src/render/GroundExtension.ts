@@ -53,17 +53,24 @@ export function buildGroundApron(
       if (side === 2) { x = HALF - s * TERRAIN_SIZE; z = HALF; }
       if (side === 3) { x = -HALF; z = HALF - s * TERRAIN_SIZE; }
       const height = bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5);
-      // Start with the actual outward terrain slope before easing into flat
-      // ground. This preserves the silhouette and normal transition at the tile.
-      const step = TERRAIN_SIZE / Math.max(1, field.resolution - 1);
-      const insideX = x + (side === 1 ? -step : side === 3 ? step : 0);
-      const insideZ = z + (side === 0 ? step : side === 2 ? -step : 0);
-      const innerHeight = bilinear(field, insideX / TERRAIN_SIZE + 0.5, insideZ / TERRAIN_SIZE + 0.5);
-      const edgeSlope = THREE.MathUtils.clamp((height - innerHeight) * heightScale / step, -1.5, 1.5);
+      // The terrain edge is exact at t=0. Moving outward, progressively
+      // low-pass the edge heights before relaxing into the flat meadow. This
+      // avoids radial spikes from tessellated, high-frequency erosion detail.
+      let blurred = height;
+      if (t > 0) {
+        let sum = height * 3;
+        const radius = TERRAIN_SIZE * 0.025;
+        for (const offset of [-2, -1, 1, 2]) {
+          const step = offset * radius;
+          const sx = THREE.MathUtils.clamp(x + (side % 2 === 0 ? step : 0), -HALF, HALF);
+          const sz = THREE.MathUtils.clamp(z + (side % 2 === 1 ? step : 0), -HALF, HALF);
+          sum += bilinear(field, sx / TERRAIN_SIZE + 0.5, sz / TERRAIN_SIZE + 0.5);
+        }
+        blurred = THREE.MathUtils.lerp(height, sum / 7, THREE.MathUtils.smoothstep(t, 0, 0.5));
+      }
       const scale = 1 + (APRON_WIDTH / HALF) * t;
       const px = x * scale, pz = z * scale;
-      const projected = height * heightScale + edgeSlope * APRON_WIDTH * t;
-      vertices.push(px, THREE.MathUtils.lerp(projected, flatY, eased), pz);
+      vertices.push(px, THREE.MathUtils.lerp(blurred * heightScale, flatY, eased), pz);
       uvs.push(0.5 + px / extent, 0.5 - pz / extent);
     }
   }
