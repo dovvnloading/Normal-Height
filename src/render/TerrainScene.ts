@@ -35,7 +35,7 @@ function bilinear(values: Float32Array, n: number, u: number, v: number) {
 export class TerrainScene {
   readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(36, 1, 0.025, 40);
+  private readonly camera = new THREE.PerspectiveCamera(36, 1, 0.002, 40);
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly sun: THREE.DirectionalLight;
@@ -86,6 +86,29 @@ export class TerrainScene {
   private splineMode: 'river' | 'ridge' = 'river';
   private splineGuide: THREE.Group | null = null;
   private readonly onContextLost: (event: Event) => void;
+  private readonly raycaster = new THREE.Raycaster();
+  private readonly rayPointer = new THREE.Vector2();
+  private readonly onFocusTerrain = (event: MouseEvent) => {
+    if (!this.terrain) return;
+    const bounds = this.renderer.domElement.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    this.rayPointer.set(
+      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+      1 - ((event.clientY - bounds.top) / bounds.height) * 2,
+    );
+    this.raycaster.setFromCamera(this.rayPointer, this.camera);
+    const hit = this.raycaster.intersectObject(this.terrain, false)[0];
+    if (!hit) return;
+    // Move the orbit target to the actual mesh point while preserving the
+    // current view direction/distance. This makes 1–5 m microstructure
+    // inspectable on any cliff, not only at the tile's default center.
+    const delta = hit.point.clone().sub(this.controls.target);
+    this.controls.target.copy(hit.point);
+    this.camera.position.add(delta);
+    this.cameraAdjusted = true;
+    this.controls.update();
+    this.needsRender = true;
+  };
 
   constructor(
     private readonly host: HTMLDivElement,
@@ -219,7 +242,11 @@ export class TerrainScene {
     this.controls.target.set(0, 0.2, 0);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.minDistance = 0.55;
+    // At 8 km tile width the old 0.55-unit minimum stayed >1.6 km from
+    // the orbit target, hiding all centimeter/meter shader detail.
+    // 0.045 units is ~138 m on that tile; the matching near plane prevents
+    // 3D clipping while retaining useful depth precision at the scene far plane.
+    this.controls.minDistance = 0.045;
     this.controls.maxDistance = 12;
     this.controls.maxPolarAngle = Math.PI * 0.485;
     this.controls.autoRotateSpeed = 0.65;
@@ -232,6 +259,7 @@ export class TerrainScene {
     this.controls.addEventListener('start', () => {
       this.cameraAdjusted = true;
     });
+    this.renderer.domElement.addEventListener('dblclick', this.onFocusTerrain);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
@@ -840,6 +868,7 @@ export class TerrainScene {
     this.atmosphere?.dispose();
     this.groundExtension?.dispose();
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost);
+    this.renderer.domElement.removeEventListener('dblclick', this.onFocusTerrain);
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
       mesh.geometry?.dispose();
