@@ -464,11 +464,11 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
       range(
         'hillslope',
         'Hillslope transport',
-        0.38,
+        0.12,
         0,
         1,
         0.02,
-        'Landscape evolution: conservative material movement on over-steepened ridges and eroded riverbanks; creates deposits rather than pure smoothing.',
+        'Landscape evolution: modest conservative material exchange on slopes steeper than the repose angle. Use Thermal weathering downstream for additional scree; high values can erase river geometry.',
         'Sediment',
       ),
       range(
