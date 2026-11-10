@@ -49,6 +49,20 @@ For the browser tests, run `npx playwright install chromium` once. CI installs i
 
 Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automated basin routing, groundwater and GPU fluid solvers remain future work.
 
+### Experimental conservative fluid-grid erosion
+
+An opt-in **Hydraulic fluid grid · experimental** option is available inside
+the Hydraulic erosion node's **Erosion model** selector. It simulates water
+surface height and directional flux on an eight-neighbor cell grid; suspended
+sediment moves with the water, and bed erosion/deposition and bank slippage
+change the actual terrain height. The coarse-to-fine stages run up to 512²
+fluid cells, preserving the requested output-resolution source detail.
+
+This is an early virtual-pipe hydraulic simulator based on published
+research, not a Terragen/Gaea proprietary erosion algorithm. Compare its
+**heightmap and shaded relief**, not merely Flow, against the current default.
+No change to existing saved projects' erosion model is required.
+
 ### Multi-scale landscape evolution (experimental)
 
 New Hydraulic erosion nodes default to **Landscape evolution · multi-scale**.
