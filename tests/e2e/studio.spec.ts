@@ -708,6 +708,46 @@ test('PBR 3D material visibly updates after worker completion without moving the
     .toEqual(heightsBefore.map((h) => h.sha256));
 });
 
+
+test('the sky and expanded meadow change rendered pixels without rebuilding the terrain', async ({ page }, testInfo) => {
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  const heightsBefore = (await heightAudits(page)).map((h) => h.sha256);
+  const fingerprint = () => canvas.evaluate((element: HTMLCanvasElement) => {
+    const image = element.toDataURL('image/png');
+    let hash = 2166136261;
+    for (let i = 0; i < image.length; i += 41)
+      hash = Math.imul(hash ^ image.charCodeAt(i), 16777619);
+    return hash >>> 0;
+  });
+
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const panel = page.getByRole('dialog', { name: 'Display settings' });
+  // Freeze procedural drift while comparing the actual WebGL framebuffers.
+  const wind = panel.getByRole('slider', { name: 'Wind speed' });
+  await wind.focus();
+  await wind.press('Home');
+  await expect(wind).toHaveValue('0');
+
+  const withSky = await fingerprint();
+  await panel.getByRole('checkbox', { name: 'Enable sky dome' }).uncheck();
+  await expect.poll(fingerprint).not.toBe(withSky);
+  const studioLight = await fingerprint();
+  await panel.getByRole('checkbox', { name: 'Enable sky dome' }).check();
+  await expect.poll(fingerprint).not.toBe(studioLight);
+
+  const withoutGround = await fingerprint();
+  await panel.getByRole('checkbox', { name: 'Expand ground' }).check();
+  await expect(panel.getByRole('slider', { name: 'Ground reach' })).toBeVisible();
+  await expect(panel.getByRole('slider', { name: 'Grass density' })).toBeVisible();
+  await expect.poll(fingerprint).not.toBe(withoutGround);
+  await capture(page, testInfo, 'sky-and-expanded-grass.png');
+
+  await panel.getByRole('checkbox', { name: 'Expand ground' }).uncheck();
+  expect((await heightAudits(page)).map((h) => h.sha256)).toEqual(heightsBefore);
+  await expect(page.locator('.nh-render-progress')).toHaveCount(0);
+});
+
 test('export resolution and mandatory PBR bundle controls match their actual state', async ({ page }) => {
   // Do not run an unrelated, expensive 768-grid erosion simulation.
   await page.locator('.auto-build input').uncheck();
