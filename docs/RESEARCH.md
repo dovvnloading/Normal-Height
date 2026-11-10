@@ -70,15 +70,16 @@ acceptance criterion, not merely a pretty flow mask.
    cells where source resolution supports them). The coarse delta is
    transferred between stages while retaining the original high-frequency
    source relief; extra export pixels are not claimed to be physical erosion.
-4. Recompute drainage each evolution step. Incise channel beds and retreat
+4. Begin channel formation only where upstream contributing area exceeds a physical threshold tied to the active valley scale. Large trunk drainage develops at coarse resolution; tributaries emerge at smaller physical scales. Eroding every small accumulated flow would produce false raster grooves.
+5. Recompute drainage each evolution step. Incise channel beds and retreat
    banks using contributing drainage area, slope, width in meters, and an
    explicit bank angle. Cap individual downcutting steps to preserve the
    downstream gradient and a bounded bedrock base level.
-5. Transport eroded material downstream; low-capacity areas deposit shallow
+6. Transport eroded material downstream; low-capacity areas deposit shallow
    alluvial fans. Weather oversteepened hillslopes through paired conservative
    transfers, resulting in wear and deposition that modify actual height
    samples, not a color mask.
-6. Return the original-grid elevation with signed landscape-evolution delta,
+7. Return the original-grid elevation with signed landscape-evolution delta,
    and derive final net wear/deposition from the actual resulting grid.
    Exports and viewport continue to use the same computed field.
 
