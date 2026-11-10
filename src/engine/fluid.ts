@@ -80,7 +80,7 @@ export function fluidGridErosion(
   const reposeAngle = clamp(settings.bankAngle ?? 42, 18, 80) * Math.PI / 180;
   const evaporation = clamp(settings.evaporation, 0, 0.5);
   const gravity = Math.sqrt(clamp(settings.gravity, 0.01, 20) / 4);
-  const steps = Math.round(clamp(settings.cycles ?? 110, 20, 240));
+  const steps = Math.round(clamp(settings.cycles ?? 28, 4, 72)) * 4;
   const maxSimulation = Math.min(n, 512);
   const candidate = settings.multiscale
     ? [Math.min(128, n), Math.min(256, n), maxSimulation]
