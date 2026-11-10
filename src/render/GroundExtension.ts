@@ -81,9 +81,9 @@ export function buildGroundApron(
       const px = x * scale, pz = z * scale;
       vertices.push(px, shapeY, pz);
       uvs.push(0.5 + px / extent, 0.5 - pz / extent);
-      // The artist's existing material remains visible at the tile boundary,
-      // then crossfades to grass in linear color space.
-      blends.push(THREE.MathUtils.smoothstep(t, 0.045, 0.78));
+      // The tile now fades its own exterior into the exact same grass map.
+      // Use grass right up to the edge, so the boundary is color-continuous.
+      blends.push(1);
       boundaryColors.push(0.38, 0.45, 0.32);
     }
   }
@@ -413,6 +413,11 @@ export class GroundExtension {
     }
     edgeColors.needsUpdate = true;
     normalColors.needsUpdate = true;
+  }
+
+  /** Shared color map lets the tile's perimeter seamlessly fade to meadow. */
+  get grassMap(): THREE.Texture {
+    return this.texture;
   }
 
   /** The physically lit meadow and foliage share the sky's cloud shadows. */
