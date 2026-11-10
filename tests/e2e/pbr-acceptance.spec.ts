@@ -567,3 +567,30 @@ test('2K cancellation terminates workers and a smaller PBR export recovers under
   expect(downloads).toEqual(['pbr-acceptance-512-256-pbr.zip']);
   expect(errors).toEqual([]);
 });
+
+test('near-field material shader compiles, activates at close zoom, and toggles without rerunning PBR', async ({ page }) => {
+  test.setTimeout(120_000);
+  const shaderErrors: string[] = [];
+  page.on('console', message => {
+    if (message.type() === 'error' && /WebGLProgram|shader|GLSL|VALIDATE_STATUS/i.test(message.text()))
+      shaderErrors.push(message.text());
+  });
+  page.on('pageerror', error => shaderErrors.push(error.message));
+  await loadFastProject(page, 512);
+  const viewport = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(viewport).toHaveAttribute('data-material-status', 'ready', { timeout: 60_000 });
+  await expect(viewport).toHaveAttribute('data-pbr-texture-count', '3');
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  const toggle = page.getByRole('checkbox', { name: /Live close-up microdetail/ });
+  await expect(toggle).toBeChecked();
+  const initialWorkerMs = await viewport.getAttribute('data-pbr-worker-ms');
+  await viewport.hover();
+  await page.mouse.wheel(0, -4000);
+  await expect(viewport).toHaveAttribute('data-near-field-detail', 'active', { timeout: 15_000 });
+  await toggle.uncheck();
+  await expect(viewport).toHaveAttribute('data-near-field-detail', 'inactive', { timeout: 15_000 });
+  await toggle.check();
+  await expect(viewport).toHaveAttribute('data-near-field-detail', 'active', { timeout: 15_000 });
+  expect(await viewport.getAttribute('data-pbr-worker-ms')).toBe(initialWorkerMs);
+  expect(shaderErrors).toEqual([]);
+});
