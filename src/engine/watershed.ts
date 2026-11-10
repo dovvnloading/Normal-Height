@@ -199,8 +199,11 @@ export function watershedErosion(
           elevationAt(x - tx * bankRadius, y - ty * bankRadius)
         ) * 0.5 - height[i];
         const valley = clamp((across / relief - 0.0006) / 0.008);
-        const catchment = clamp((relativeArea - 0.012) / 0.025) * 0.7;
-        const convergence = Math.max(valley * valley * (3 - 2 * valley), catchment);
+        // Area alone is insufficient: finite-resolution D8 can converge even
+        // on a mathematically planar surface. Insist on measured cross-bank
+        // concavity; increasing catchment then strengthens an actual valley.
+        const concentration = 0.35 + 0.65 * clamp(relativeArea / 0.008);
+        const convergence = valley * valley * (3 - 2 * valley) * concentration;
         if (convergence > 0.001) {
           const requested = relief * 0.55 * erosion * duration * passStrength *
             power * convergence *
