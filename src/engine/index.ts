@@ -408,7 +408,8 @@ export function evaluateGraph(
               gravity: number(node, 'gravity', 4, 0.01, 20),
               seed,
               multiscale: node.params.multiscale !== false,
-              method: text(node, 'method', 'landscape') === 'droplet' ? 'droplet' :
+              method: text(node, 'method', 'landscape') === 'fluid' ? 'fluid' :
+                text(node, 'method', 'landscape') === 'droplet' ? 'droplet' :
                 text(node, 'method', 'landscape') === 'watershed' ? 'watershed' : 'landscape',
               cycles: number(node, 'cycles', 28, 4, 72),
               featureMeters: number(node, 'featureMeters', 140, 24, 600),
