@@ -60,8 +60,8 @@ The solver is an artistic particle model, not a calibrated watershed or geologic
 ### Procedural PBR material studio (feature branch)
 
 - **Physical texture sets:** export coordinated base color, combined GL/DX normal, microdetail-only normal, roughness, ambient occlusion, metallic, packed ORM, curvature, and RGBA material weights alongside 16-bit height.
-- **Ground-aware layering:** seeded rock/soil/vegetation/snow weights respond to elevation, real slope, erosion wear, deposition and flow. Choose alpine, arid, or volcanic biomes.
-- **Artist controls:** set snow line, exposed-rock slope, moisture, microdetail physical scale/depth, and AO in **Scene → PBR material studio**; settings autosave with the project.
+- **Geomorphology-aware layering:** seeded rock/soil/vegetation/snow weights respond to physical slope and aspect, signed 50/150/425 m landform curvature, relative erosion/deposition and flow. Snow prefers stable shaded shelves; rock and transported sediments occupy different terrain positions. Choose alpine, arid, or volcanic biomes.
+- **Artist controls:** set snow line, exposed-rock slope, moisture, microdetail physical scale/depth, rock bedding thickness, fracture spacing, and AO in **Scene → PBR material studio**; settings autosave with the project.
 - **3D and 2D:** live PBR shading uses proper sRGB albedo, independent roughness/AO, and **detail-only** normals on the displaced mesh. Inspect all material outputs in the 2D channel selector.
 - **Complete PBR ZIP:** GL/DX normal variants, packed glTF-style ORM and Unity HDRP masks, physical dimensions, channel metadata, and reproducible project in one file. Export encoding runs in a cancellable Web Worker.
 
