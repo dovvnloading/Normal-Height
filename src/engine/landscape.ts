@@ -123,7 +123,7 @@ export function landscapeErosion(
     const dt = duration * 28 / Math.max(1, cycles);
     const stageFeature = featureMeters *
       (stageIndex === 0 && stages.length > 1 ? 1.65 : 1);
-    const dx = cell, windX = Math.cos(settings.seed * 0.00017);
+    const windX = Math.cos(settings.seed * 0.00017);
     const windY = Math.sin(settings.seed * 0.00017);
 
     // Gentle, low-frequency orographic variations in rainfall are fixed in
@@ -296,10 +296,9 @@ export function landscapeErosion(
         const repose = Math.tan(bankAngle * 0.70);
         for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
           const i = y * m + x;
-          for (const j of [
-            x < m - 1 ? i + 1 : -1,
-            y < m - 1 ? i + m : -1,
-          ]) {
+          for (let direction = 0; direction < 2; direction++) {
+            const j = direction === 0 ? (x < m - 1 ? i + 1 : -1)
+              : (y < m - 1 ? i + m : -1);
             if (j < 0) continue;
             const difference = height[i] - height[j];
             const slope = Math.abs(difference) * heightScale / cell;
