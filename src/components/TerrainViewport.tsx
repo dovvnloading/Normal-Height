@@ -34,7 +34,7 @@ import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
 import { pbrPixels } from '../materials/pbr';
 import { requestPBR } from '../materials/pbrClient';
-import type { PBRChannel } from '../materials/pbr';
+import type { PBRChannel, PBRMaps } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import type { TerrainNode } from '../model/types';
@@ -73,9 +73,17 @@ const CHANNELS: { value: MapChannel; label: string }[] = [
   { value: 'roughness', label: 'PBR roughness' },
   { value: 'ao', label: 'PBR occlusion' },
   { value: 'splat', label: 'Material weights' },
+  { value: 'rockWeight', label: 'Rock coverage' },
+  { value: 'soilWeight', label: 'Soil coverage' },
+  { value: 'vegetationWeight', label: 'Vegetation coverage' },
+  { value: 'snowWeight', label: 'Snow coverage' },
   { value: 'curvature', label: 'PBR curvature' },
   { value: 'orm', label: 'Packed ORM' },
 ];
+
+const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
+  rockWeight: 0, soilWeight: 1, vegetationWeight: 2, snowWeight: 3,
+};
 
 function MapCanvas({
   field,
@@ -95,6 +103,7 @@ function MapCanvas({
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLCanvasElement | null>(null);
+  const materialMapsRef = useRef<PBRMaps | null>(null);
   const [rasterVersion, setRasterVersion] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -141,6 +150,7 @@ function MapCanvas({
 
   useEffect(() => {
     let active = true;
+    materialMapsRef.current = null;
     if (!field) {
       imageRef.current = null;
       setRasterVersion((version) => version + 1);
@@ -172,12 +182,17 @@ function MapCanvas({
       // surface settings/seed does not necessarily change field or view state.
       setRasterVersion((version) => version + 1);
     };
-    const material = ['basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm'].includes(channel);
+    const material = [
+      'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
+      'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
+    ].includes(channel);
     if (material) {
       const request = requestPBR(field, project);
-      request.promise.then((maps) =>
-        paintPixels(pbrPixels(maps, field, project, channel as PBRChannel))
-      ).catch(() => {
+      request.promise.then((maps) => {
+        if (!active) return;
+        materialMapsRef.current = maps;
+        paintPixels(pbrPixels(maps, field, project, channel as PBRChannel));
+      }).catch(() => {
         // A replaced or unmounted request is expected; the next edit queues
         // the correct version without showing a stale worker result.
       });
@@ -270,6 +285,11 @@ function MapCanvas({
       value = `${CHANNELS.find((c) => c.value === channel)?.label}: ${field[channel][index].toPrecision(3)}`;
     if (channel === 'slope')
       value = `${sampleSlope(field, x, y, project.worldSize, project.heightScale).degrees.toFixed(1)}° slope`;
+    const weightChannel = MATERIAL_WEIGHT_INDEX[channel];
+    if (weightChannel !== undefined && materialMapsRef.current)
+      value = `${CHANNELS.find(c => c.value === channel)?.label}: ${(
+        materialMapsRef.current.splat[index * 4 + weightChannel] / 255 * 100
+      ).toFixed(1)}%`;
     setSample({ x, y, elevation: field.height[index] * project.heightScale, value });
   }
 
@@ -504,12 +524,17 @@ function MapLegend({
         empty: false,
       };
     }
-    if (['basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm'].includes(channel)) {
+    if ([
+      'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
+      'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
+    ].includes(channel)) {
       return { label: channel === 'splat' ? 'R rock · G soil · B vegetation · A snow'
         : channel === 'orm' ? 'R occlusion · G roughness · B metallic'
           : CHANNELS.find(c => c.value === channel)?.label ?? 'PBR map',
-        start: channel === 'curvature' ? 'Concave' : '0',
-        end: channel === 'curvature' ? 'Convex' : '1',
+        start: channel === 'curvature' ? 'Concave' :
+          MATERIAL_WEIGHT_INDEX[channel] !== undefined ? '0%' : '0',
+        end: channel === 'curvature' ? 'Convex' :
+          MATERIAL_WEIGHT_INDEX[channel] !== undefined ? '100%' : '1',
         empty: false };
     }
     let max = 0;
