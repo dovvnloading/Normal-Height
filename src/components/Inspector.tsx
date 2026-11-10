@@ -437,9 +437,15 @@ export function Inspector({
                 { key: 'detailMeters', label: 'Surface detail scale', min: 4, max: 200, step: 1, unit: 'm',
                   description: 'Approximate spatial wavelength of generated microstructure.' },
                 { key: 'detailStrength', label: 'Microdetail depth', min: 0, max: 2, step: 0.05,
-                  description: 'Scales micro-normal relief without changing macro terrain elevation.' },
+                  description: 'Physical micro-normal height, without modifying terrain displacement.' },
+                { key: 'strataMeters', label: 'Rock bedding separation', min: 12, max: 500,
+                  step: 2, unit: 'm',
+                  description: 'Geological stratum thickness in elevation meters; bands follow actual rock heights and fade if unresolved.' },
+                { key: 'fractureMeters', label: 'Rock fracture spacing', min: 12, max: 320,
+                  step: 2, unit: 'm',
+                  description: 'Physical spacing of seeded rock joints; one pattern drives color, roughness and micro-relief.' },
                 { key: 'aoStrength', label: 'Terrain occlusion', min: 0, max: 1, step: 0.05,
-                  description: 'Strength of multi-scale terrain cavity AO.' },
+                  description: 'Physical 50/150/425 m, plane-corrected terrain horizon occlusion.' },
               ] as const).map(control => (
                 <ParamControl
                   key={control.key}
