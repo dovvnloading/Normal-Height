@@ -26,6 +26,7 @@ import type {
   ViewSettings,
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
+import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
 import { pbrPixels } from '../materials/pbr';
 import { requestPBR } from '../materials/pbrClient';
@@ -648,6 +649,7 @@ export function TerrainViewport({
         <div className="nh-viewport-toolbar-right">
           {effectiveMode !== '3d' && (
             <label className="nh-channel-select">
+              <TerrainIcon name={MAP_ICON_NAMES[channel]} height={16} />
               <select
                 aria-label="Map channel"
                 value={channel}

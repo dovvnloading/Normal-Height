@@ -8,7 +8,6 @@ import {
   ChevronDown,
   ArrowUpRight,
   MountainSnow,
-  Route,
   RotateCcw,
   Plus,
   ArrowDownUp,
@@ -18,6 +17,7 @@ import { resolveSurface } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { NumberField, ParamControl } from './Controls';
+import { TerrainIcon } from './TerrainIcon';
 import type { TerrainNode, TerrainProject, ParamValue, ViewSettings } from '../model/types';
 
 interface Props {
@@ -155,7 +155,7 @@ export function Inspector({
                 return (
                   <section className="spline-editor" aria-label="Spline path editor">
                     <div className="spline-editor-heading">
-                      <Route size={15} />
+                      <TerrainIcon name="river-ridge-spline" height={15} />
                       <strong>Path designer</strong>
                       <span>{points.length} points</span>
                     </div>
@@ -165,7 +165,7 @@ export function Inspector({
                       aria-pressed={splineEditing}
                       onClick={onSplineEdit}
                     >
-                      <Route size={14} />
+                      <TerrainIcon name="river-ridge-spline" height={14} />
                       {splineEditing ? 'Finish editing' : 'Edit path on 2D map'}
                     </button>
                     <p className="spline-help">

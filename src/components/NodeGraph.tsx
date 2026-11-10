@@ -16,31 +16,23 @@ import {
 } from '@xyflow/react';
 import type { Connection, Edge, Node, NodeProps, OnSelectionChangeParams } from '@xyflow/react';
 import {
-  Combine,
   Copy,
-  Droplets,
   Eye,
   Folder,
   Frame,
-  Layers3,
   LayoutGrid,
   Map as MapIcon,
   Minus,
   Mountain,
   Plus,
   Power,
-  Scan,
-  SlidersHorizontal,
   StickyNote,
   Ungroup,
-  Waves,
-  Wind,
-  Route,
   Workflow,
 } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { TerrainIcon, NODE_ICON_NAMES } from './TerrainIcon';
 import { createNode, NODE_DEFINITIONS } from '../model/registry';
-import type { NodeKind, TerrainGraph, TerrainNode } from '../model/types';
+import type { TerrainGraph, TerrainNode } from '../model/types';
 import '@xyflow/react/dist/style.css';
 import './NodeGraph.css';
 
@@ -59,21 +51,6 @@ export interface NodeGraphProps {
 }
 
 const NODE_WIDTH = 188;
-const ICONS: Record<NodeKind, LucideIcon> = {
-  mountain: Mountain,
-  noise: Waves,
-  warp: Wind,
-  spline: Route,
-  hydraulic: Droplets,
-  thermal: Mountain,
-  terrace: Layers3,
-  remap: SlidersHorizontal,
-  blend: Combine,
-  mask: Scan,
-  output: Layers3,
-  note: StickyNote,
-  group: Folder,
-};
 
 type EditorNodeData = {
   model: TerrainNode;
@@ -175,7 +152,7 @@ const TerrainGraphNode = memo(function TerrainGraphNode({
 }: NodeProps<EditorNode>) {
   const { model, timing } = data;
   const definition = NODE_DEFINITIONS[model.kind];
-  const Icon = ICONS[model.kind];
+  const iconName = NODE_ICON_NAMES[model.kind];
   const portCount = Math.max(definition.inputs.length, definition.outputs.length);
   return (
     <div
@@ -183,7 +160,11 @@ const TerrainGraphNode = memo(function TerrainGraphNode({
       style={{ '--node-color': definition.color } as CSSProperties}
     >
       <div className="ng-node-title">
-        <Icon size={14} className="ng-node-icon" aria-hidden="true" />
+        {iconName ? (
+          <TerrainIcon name={iconName} height={14} className="ng-node-icon" />
+        ) : (
+          <Folder size={14} className="ng-node-icon" aria-hidden="true" />
+        )}
         <span title={model.label}>{model.label}</span>
         <button
           type="button"

@@ -1,0 +1,31 @@
+.terrain-icon {
+  display: inline-block;
+  flex: 0 0 auto;
+  background-repeat: no-repeat;
+  font-style: normal;
+  vertical-align: middle;
+  pointer-events: none;
+}
+.app-header .brand-mark { width: 40px; }
+.ng-node-title .terrain-icon { flex: 0 0 auto; }
+.preset-visual .terrain-icon.preset-artwork {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.nh-channel-select .terrain-icon {
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+}
+.nh-channel-select select {
+  padding-left: 36px;
+  min-width: 154px;
+}
+:root[data-theme='dark'] .terrain-icon { filter: brightness(1.09) contrast(1.03); }
+@media (max-width: 900px) {
+  .nh-channel-select select { min-width: 130px; }
+}

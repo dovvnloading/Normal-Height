@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Download, FileImage, Package, Check, LoaderCircle, ArrowUpRight } from 'lucide-react';
+import { Download, Package, Check, LoaderCircle, ArrowUpRight } from 'lucide-react';
 import { Modal } from './Modal';
+import { TerrainIcon, EXPORT_ICON_NAMES } from './TerrainIcon';
 import { createTerrainWorker } from '../hooks/useTerrainEngine';
 import type { ExportFormat } from '../export/heightmap';
 import { pbrBudgetMiB, checkPBRExportBudget } from '../export/budget';
@@ -139,7 +140,7 @@ export function ExportDialog({
       <div className="modal-body">
         <div className="export-project">
           <span>
-            <FileImage size={23} />
+            <TerrainIcon name={EXPORT_ICON_NAMES[format]} height={28} />
           </span>
           <div>
             <strong>{project.name}</strong>

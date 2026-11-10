@@ -1,46 +1,15 @@
 import { useState } from 'react';
-import {
-  Search,
-  MountainSnow,
-  Waves,
-  Wind,
-  Route,
-  Droplets,
-  Layers3,
-  Combine,
-  SlidersHorizontal,
-  ScanLine,
-  StickyNote,
-  ArrowUpRight,
-  Dices,
-  ChevronRight,
-  Sparkles,
-  Plus,
-  X,
-} from 'lucide-react';
+import { Search, Layers3, StickyNote, Dices, ChevronRight, Sparkles, Plus, X } from 'lucide-react';
+import { TerrainIcon, NODE_ICON_NAMES, PRESET_ICON_NAMES } from './TerrainIcon';
 import { NODE_DEFINITIONS, NOISE_MODES } from '../model/registry';
 import { PRESETS } from '../model/presets';
 import { NumberField } from './Controls';
 import type { NodeKind, ParamValue } from '../model/types';
 
-const icons = {
-  mountain: MountainSnow,
-  noise: Waves,
-  warp: Wind,
-  spline: Route,
-  hydraulic: Droplets,
-  thermal: Layers3,
-  terrace: Layers3,
-  remap: SlidersHorizontal,
-  blend: Combine,
-  mask: ScanLine,
-  output: ArrowUpRight,
-  note: StickyNote,
-  group: Layers3,
-};
 export function NodeIcon({ kind, size = 17 }: { kind: NodeKind; size?: number }) {
-  const Icon = icons[kind];
-  return <Icon size={size} />;
+  const name = NODE_ICON_NAMES[kind];
+  if (name) return <TerrainIcon name={name} height={size} />;
+  return kind === 'note' ? <StickyNote size={size} /> : <Layers3 size={size} />;
 }
 interface Props {
   seed: number;
@@ -68,7 +37,7 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
           Nodes
         </button>
         <button className={tab === 'presets' ? 'active' : ''} onClick={() => setTab('presets')}>
-          <MountainSnow size={14} />
+          <TerrainIcon name="alpine-watershed" height={15} />
           Landscapes
         </button>
       </div>
@@ -158,7 +127,7 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
             })}
             <details className="noise-library" open={query.length > 0 || undefined}>
               <summary>
-                <Waves size={14} />
+                <TerrainIcon name="procedural-noise" height={15} />
                 Noise families<span>12</span>
                 <ChevronRight size={13} />
               </summary>
@@ -201,22 +170,7 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
                   className="preset-visual"
                   style={{ '--preset-color': p.color } as React.CSSProperties}
                 >
-                  <svg viewBox="0 0 200 70" aria-hidden="true">
-                    {[0, 1, 2, 3, 4].map((j) => (
-                      <path
-                        key={j}
-                        d={
-                          i === 3
-                            ? `M-10 ${68 + j * 8} Q40 ${62 + j * 4} 70 ${20 + j * 7} L88 ${28 + j * 6} L108 ${18 + j * 7} Q145 ${65 + j * 5} 215 ${70 + j * 6}`
-                            : `M-10 ${56 + j * 8} Q20 ${70 + j * 3} 45 ${28 + j * 7} Q65 ${j * 8} 85 ${34 + j * 5} Q105 ${60 + j * 5} 128 ${14 + j * 7} Q148 ${-4 + j * 7} 175 ${40 + j * 5} L215 ${60 + j * 5}`
-                        }
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth={j === 0 ? 1.5 : 1}
-                        opacity={0.8 - j * 0.12}
-                      />
-                    ))}
-                  </svg>
+                  <TerrainIcon name={PRESET_ICON_NAMES[p.id] ?? 'mountain-range'} height={60} className="preset-artwork" />
                   <span>{String(i + 1).padStart(2, '0')}</span>
                   {activePreset === p.id && <span className="preset-loaded">LOADED</span>}
                 </div>
