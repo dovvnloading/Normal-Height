@@ -231,6 +231,27 @@ test('1K browser export decodes every PBR PNG and aligns with the visible 2D map
   }
 });
 
+test('PBR bundle exports a source-only graph with shared diagnostic buffers (#11)', async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await loadFastProject(page, 512);
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('pbr');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
+  const downloading = page.waitForEvent('download', { timeout: 60_000 });
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('pbr-acceptance-512-256-pbr.zip');
+  const target = testInfo.outputPath('pbr-source-only-shared-buffers.zip');
+  await download.saveAs(target);
+  const files = unzipSync(new Uint8Array(await readFile(target)));
+  expect(files['pbr-acceptance-512-256-basecolor.png']).toBeDefined();
+  expect(files['pbr-acceptance-512-256-height16.png']).toBeDefined();
+  expect(errors).toEqual([]);
+});
+
 test('2K PBR preflight fails gracefully on constrained devices before starting a Worker (#11)', async ({ page }) => {
   await loadFastProject(page, 512);
   await page.evaluate(() => {
