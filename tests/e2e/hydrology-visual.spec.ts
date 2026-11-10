@@ -23,6 +23,13 @@ for (const [preset, source, erosionNode] of [
       project.resolution = resolution;
       const before = evaluateGraph(project, { resolution, previewNodeId: source }).field;
       const after = evaluateGraph(project, { resolution, previewNodeId: erosionNode }).field;
+      // Keep an apples-to-apples view of the immediately preceding watershed
+      // algorithm. Both results receive the same source terrain and settings.
+      const erosion = project.graph.nodes.find(node => node.id === erosionNode)!;
+      const method = erosion.params.method;
+      erosion.params.method = 'watershed';
+      const earlier = evaluateGraph(project, { resolution, previewNodeId: erosionNode }).field;
+      erosion.params.method = method;
       const attach = async (name: string, pixels: Uint8ClampedArray) => {
         await testInfo.attach(`${preset}-${name}.png`, {
           body: Buffer.from(encodeRGBA(pixels, resolution)),
@@ -31,7 +38,9 @@ for (const [preset, source, erosionNode] of [
       };
       await attach('source-shaded', colorizeMap(before, 'terrain',
         project.worldSize, project.heightScale));
-      await attach('watershed-shaded', colorizeMap(after, 'terrain',
+      await attach('landscape-evolution-shaded', colorizeMap(after, 'terrain',
+        project.worldSize, project.heightScale));
+      await attach('previous-watershed-shaded', colorizeMap(earlier, 'terrain',
         project.worldSize, project.heightScale));
       await attach('runoff-flow', colorizeMap(after, 'flow',
         project.worldSize, project.heightScale));
@@ -41,6 +50,9 @@ for (const [preset, source, erosionNode] of [
         project.worldSize, project.heightScale));
 
       const changed = new Uint8ClampedArray(resolution * resolution * 4);
+      let totalDifferenceFromPrevious = 0;
+      for (let i = 0; i < after.height.length; i++)
+        totalDifferenceFromPrevious += Math.abs(after.height[i] - earlier.height[i]);
       let incised = 0, deposited = 0, largest = 0;
       for (let i = 0; i < before.height.length; i++) {
         const d = before.height[i] - after.height[i];
@@ -61,12 +73,16 @@ for (const [preset, source, erosionNode] of [
       await attach('difference-red-incision-green-deposition', changed);
       await testInfo.attach(`${preset}-watershed-metrics.json`, {
         body: Buffer.from(JSON.stringify({
-          preset, resolution, incised, deposited, maximumAbsoluteHeightChange: largest,
+          preset, resolution, incised, deposited,
+          meanAbsoluteDifferenceFromPreviousWatershed:
+            totalDifferenceFromPrevious / after.height.length,
+          maximumAbsoluteHeightChange: largest,
           note: 'Positive-red is erosion; green is deposition; colors scaled by the largest delta for visual review',
         }, null, 2)),
         contentType: 'application/json',
       });
       expect(incised).toBeGreaterThan(10);
+      expect(totalDifferenceFromPrevious / after.height.length).toBeGreaterThan(0.000001);
       expect(largest).toBeGreaterThan(0.00001);
       expect(after.flow.some(v => v > 0.5)).toBe(true);
       expect(after.wear.some(v => v > 0)).toBe(true);
