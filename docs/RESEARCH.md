@@ -97,6 +97,75 @@ not realistic geomorphology or matching a user-provided visual reference.
 
 ---
 
+## Orogenic mountain source: stream graph and uplift (new)
+
+**Problem addressed.** Previous normal-height mountains begin as a broad
+Gaussian ridge envelope multiplied by fractal noise. Repeating stream-power
+erosion or a simple fluid-grid filter on such a source made grooves without
+producing a coherent hierarchy of *ridges between connected valleys*.
+The provided real-terrain reference instead shows basin-scale organization
+and multiple generations of tributaries and interfluves.
+
+**Scientific approach.** [Cordonnier et al. (2016)](https://doi.org/10.1111/cgf.12820)
+demonstrated constructing visually plausible large-scale landscapes by
+coupling tectonic uplift and fluvial incision along a stream graph.
+[Braun & Willett (2013)](https://doi.org/10.1016/j.geomorph.2012.10.008)
+derive an efficient implicit method for stream-power landscape evolution.
+[Landlab Fastscape](https://landlab.csdms.io/generated/api/landlab.components.stream_power.fastscape_stream_power.html)
+documents the n=1 numerical stream-power component.
+
+This repository now has an independently written *equilibrium source model*
+in `src/engine/orogeny.ts`. It does not copy the above implementations.
+It uses the existing classic mountain envelope as a **regional uplift
+constraint**, but recomputes the actual mountain relief as follows:
+
+1. Calculate smoothed uplift and a second, finer routing surface at physically
+   relative tile scales. Small deterministic heterogeneity influences runoff
+   routing, never a pasted-on albedo/noise pattern in the output elevations.
+2. Use **priority flood** to ensure outlet-connected, acyclic drainage through
+   closed basins; do not fill/raise the output DEM.
+3. Perturb each graph node's *sampling coordinates* by a bounded, smooth,
+   seeded field (sub-cell). Unlike an eight-direction texture raster,
+   local physical distances can vary continuously and runoff can split between
+   several strictly downhill neighbors in proportion to slope^3.5.
+4. Accumulate upstream contributing area, then integrate the **n=1 steady
+   stream-power relationship `U = K A^m S`** from outlets upstream with
+   `m = 0.5`, using local uplift, contributing area and physical sample
+   spacing. This produces relief *between* tributaries and a descending
+   outlet-connected stream network from the same graph.
+5. Reproject the irregular graph's elevation onto the output raster, apply
+   only a subpixel filter for raster artifacts, robustly normalize its
+   regional relief back into the authored mountain range, and blend it by the
+   **Stream-network dissection** control. Zero returns the classic source
+   *exactly*. The standard hydraulic node can subsequently weather or
+   deposit sediment onto this source, as before.
+
+The source is deterministic, has O(n²) scratch memory, retains physical
+source detail for exports larger than the currently bounded 1024² graph,
+and does not spawn more workers or introduce new GPU textures.
+
+**Caveats.** This source is an artistic equilibrium construction, not a
+geologic time integration, real tectonic crust mechanics, weather forecast,
+deposition budget, or complete fluid simulation. Its stream graph retains
+a square-grid neighborhood and an outlet-boundary assumption; jitter and
+multi-flow reduce visible alignment but do not remove all raster bias.
+A 1024² bounded graph cannot directly simulate 2K-scale microchannels;
+those would need adaptive or tiled high-resolution erosion. The user-provided
+reference image remains a **visual quality target**, not a training set or
+mathematically exact pixel template. A green test suite is not proof of
+commercial-software realism.
+
+**Acceptance evidence.** `src/engine/orogeny.test.ts` checks determinism,
+nonmutating source inputs, flat-land invariance, valid runoff, seed behavior,
+and exact zero-strength compatibility. Chromium
+`tests/e2e/orogeny-visual.spec.ts` saves actual native Float32 field
+heightmaps and shaded relief for classic/orogenic sources and the full graph.
+It measures a local fine-relief metric and requires an actual geometric
+improvement over the classic source before the feature can be accepted.
+Visual inspection of the generated PNGs is still required.
+
+---
+
 ## Multi-resolution landscape evolution (experimental)
 
 Normal Height's **Landscape evolution · multi-scale** is a new *research-backed,
