@@ -12,16 +12,16 @@ describe('PBR display texture recycling (#10)', () => {
     expect(a.flipY).toBe(true);
     expect(a.colorSpace).toBe(THREE.SRGBColorSpace);
     const revision = a.version;
-    const firstPixels = a.image.data;
+    const firstPixels = a.image.data!;
     expect(firstPixels.buffer).toBe(original.buffer);
 
     const next = pixels(4, 164);
     const b = updatePreviewTexture(a, next, 4, true, 4);
     expect(b).toBe(a);
     expect(b.version).toBeGreaterThan(revision);
-    expect(b.image.data.buffer).toBe(next.buffer);
+    expect(b.image.data!.buffer).toBe(next.buffer);
     expect(b.image.data).not.toBe(firstPixels);
-    expect(b.image.data[0]).toBe(164);
+    expect(b.image.data![0]).toBe(164);
     b.dispose();
   });
 
