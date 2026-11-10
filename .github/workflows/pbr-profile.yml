@@ -1,0 +1,41 @@
+name: Profile PBR ZIP allocation (manual / profiling branches)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['perf/pbr-memory-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pbr-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        resolution: [512, 1024, 2048]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Profile full procedural PBR ZIP peak process RSS
+        run: npx vitest run --config vitest.profile.config.ts
+        env:
+          PBR_BENCH_SIZE: ${{ matrix.resolution }}
+      - name: Preserve machine-readable memory and timing results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbr-memory-${{ matrix.resolution }}
+          path: ${{ runner.temp }}/pbr-memory-${{ matrix.resolution }}.json
+          if-no-files-found: warn
+          retention-days: 30
