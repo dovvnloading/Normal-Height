@@ -764,7 +764,8 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   });
   await page.getByRole('button', { name: 'Display settings' }).click();
   const dialog = page.getByRole('dialog', { name: 'Display settings' });
-  await dialog.getByRole('slider', { name: 'Wind speed' }).fill('0');
+  await dialog.getByRole('slider', { name: 'Wind speed' }).focus();
+  await dialog.getByRole('slider', { name: 'Wind speed' }).press('Home');
   await dialog.getByRole('button', { name: 'Clear day sky preset' }).click();
   await expect(dialog.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
   const clear = await fingerprint();
@@ -778,19 +779,20 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await dialog.getByRole('button', { name: 'Overcast sky preset' }).click();
   await expect.poll(fingerprint).not.toBe(golden);
   await dialog.getByRole('checkbox', { name: 'Expand ground' }).check();
-  await dialog.getByRole('slider', { name: 'Grass density' }).fill('1');
+  await dialog.getByRole('slider', { name: 'Grass density' }).focus();
+  await dialog.getByRole('slider', { name: 'Grass density' }).press('End');
   await capture(page, testInfo, 'atmosphere-overcast-meadow.png');
 
   // Reload preserves artist controls; 2D inspection still repaints accurately
   // while the physical sky and grass are enabled.
-  await page.reload();
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
   await ready(page);
   await page.getByRole('button', { name: 'Display settings' }).click();
   const restored = page.getByRole('dialog', { name: 'Display settings' });
   await expect(restored.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
   await expect(restored.getByRole('checkbox', { name: 'Expand ground' })).toBeChecked();
   await expect(restored.getByRole('slider', { name: 'Cloud cover' })).toHaveValue('0.88');
-  await expect(restored.getByRole('slider', { name: 'Grass density' })).toHaveValue('1');
+  await expect(restored.getByRole('slider', { name: 'Grass density' })).toHaveValue('1.5');
   await page.getByRole('button', { name: 'Close display settings' }).click();
   await page.getByRole('button', { name: 'Split', exact: true }).click();
   await expect(page.getByRole('img', { name: /^Height map\./ })).toBeVisible();
