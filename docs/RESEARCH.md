@@ -97,72 +97,77 @@ not realistic geomorphology or matching a user-provided visual reference.
 
 ---
 
-## Orogenic mountain source: stream graph and uplift (new)
+## Orogenic mountain source: connected, incised valley geometry
 
-**Problem addressed.** Previous normal-height mountains begin as a broad
-Gaussian ridge envelope multiplied by fractal noise. Repeating stream-power
-erosion or a simple fluid-grid filter on such a source made grooves without
-producing a coherent hierarchy of *ridges between connected valleys*.
-The provided real-terrain reference instead shows basin-scale organization
-and multiple generations of tributaries and interfluves.
+The user-supplied real topography reference has densely branching **dark
+drainage valleys** with bright high interfluves. The original Normal Height
+source generated broad uplift envelopes and the early stream-power
+equilibrium prototype in PR #31 produced light, raised channel-like patterns.
+Simply accumulating discharge or integrating downstream stream elevation
+directly into a grid did **not** construct the correct valley cross-sections.
 
-**Scientific approach.** [Cordonnier et al. (2016)](https://doi.org/10.1111/cgf.12820)
-demonstrated constructing visually plausible large-scale landscapes by
-coupling tectonic uplift and fluvial incision along a stream graph.
-[Braun & Willett (2013)](https://doi.org/10.1016/j.geomorph.2012.10.008)
-derive an efficient implicit method for stream-power landscape evolution.
-[Landlab Fastscape](https://landlab.csdms.io/generated/api/landlab.components.stream_power.fastscape_stream_power.html)
-documents the n=1 numerical stream-power component.
+### Method and research
 
-This repository now has an independently written *equilibrium source model*
-in `src/engine/orogeny.ts`. It does not copy the above implementations.
-It uses the existing classic mountain envelope as a **regional uplift
-constraint**, but recomputes the actual mountain relief as follows:
+- Cordonnier et al. (2016), [Large Scale Terrain Generation from Tectonic
+  Uplift and Fluvial Erosion](https://doi.org/10.1111/cgf.12820), couple
+  a drainage graph with uplift and construct the digital terrain via
+  landform-feature kernels.
+- Génevaux et al. (2013), [Terrain generation using procedural models
+  based on hydrology](https://doi.org/10.1145/2461912.2461996),
+  construct networks before blending and carving terrain patches.
+- Braun & Willett (2013), [Fastscape erosion methods](https://doi.org/10.1016/j.geomorph.2012.10.008),
+  provide a reference for upstream contributing area, flow connectivity,
+  and stream-power-driven geomorphology.
 
-1. Calculate smoothed uplift and a second, finer routing surface at physically
-   relative tile scales. Small deterministic heterogeneity influences runoff
-   routing, never a pasted-on albedo/noise pattern in the output elevations.
-2. Use **priority flood** to ensure outlet-connected, acyclic drainage through
-   closed basins; do not fill/raise the output DEM.
-3. Perturb each graph node's *sampling coordinates* by a bounded, smooth,
-   seeded field (sub-cell). Unlike an eight-direction texture raster,
-   local physical distances can vary continuously and runoff can split between
-   several strictly downhill neighbors in proportion to slope^3.5.
-4. Accumulate upstream contributing area, then integrate the **n=1 steady
-   stream-power relationship `U = K A^m S`** from outlets upstream with
-   `m = 0.5`, using local uplift, contributing area and physical sample
-   spacing. This produces relief *between* tributaries and a descending
-   outlet-connected stream network from the same graph.
-5. Reproject the irregular graph's elevation onto the output raster, apply
-   only a subpixel filter for raster artifacts, robustly normalize its
-   regional relief back into the authored mountain range, and blend it by the
-   **Stream-network dissection** control. Zero returns the classic source
-   *exactly*. The standard hydraulic node can subsequently weather or
-   deposit sediment onto this source, as before.
+`src/engine/streamCarving.ts` is our independent **procedural
+feature-kernel reconstruction**, not the proprietary or exact algorithms
+described above. It corrects the earlier inverted appearance by:
 
-The source is deterministic, has O(n²) scratch memory, retains physical
-source detail for exports larger than the currently bounded 1024² graph,
-and does not spawn more workers or introduce new GPU textures.
+1. Starting from the artist's classic mountain envelope as uplift/relief
+   context, while constructing a separate *routing-only* DEM with
+   low-amplitude, smooth, seed-stable geological heterogeneity at
+   four physical-relative wavelengths.
+2. Applying the existing outlet-connected priority-flood routing,
+   followed by strict downhill receiver selection where possible.
+   Accumulating area **upstream to downstream** provides continuous,
+   branching catchments, not disconnected droplet visitation dots.
+3. Sampling subcell-jittered centerline locations to avoid uniformly
+   repeating eight-way pixel angles. Every segment is connected to its
+   actual downstream receiver, including through depression spill paths.
+4. Carving **negative elevation** along those connected line segments.
+   A narrow high-contrast riverbed and a separately tapered broad valley
+   cross-section are both functions of contributing area. Overlap uses
+   maximum incision, avoiding unbounded pit depth at confluences.
+5. Attenuating cuts in effectively flat lowlands and at map boundaries,
+   preserving the authored source for unaffected slopes. Strength zero
+   reproduces the original mountain samples *bit-for-bit*.
+6. Returning one physical Float32 source DEM for viewport, export, and
+   subsequent sediment/fluid nodes. The dissection source does not
+   fabricate material mass conservation: the standard hydraulic node
+   remains a separate process for sediment removal and deposition.
 
-**Caveats.** This source is an artistic equilibrium construction, not a
-geologic time integration, real tectonic crust mechanics, weather forecast,
-deposition budget, or complete fluid simulation. Its stream graph retains
-a square-grid neighborhood and an outlet-boundary assumption; jitter and
-multi-flow reduce visible alignment but do not remove all raster bias.
-A 1024² bounded graph cannot directly simulate 2K-scale microchannels;
-those would need adaptive or tiled high-resolution erosion. The user-provided
-reference image remains a **visual quality target**, not a training set or
-mathematically exact pixel template. A green test suite is not proof of
-commercial-software realism.
+This improves the valley/ridge relationship while keeping `O(n²)`
+buffers; the reconstruction works up to 1024² and applies its continuous
+incision delta to the original height samples at larger export sizes.
 
-**Acceptance evidence.** `src/engine/orogeny.test.ts` checks determinism,
-nonmutating source inputs, flat-land invariance, valid runoff, seed behavior,
-and exact zero-strength compatibility. Chromium
-`tests/e2e/orogeny-visual.spec.ts` saves actual native Float32 field
-heightmaps and shaded relief for classic/orogenic sources and the full graph.
-It measures a local fine-relief metric and requires an actual geometric
-improvement over the classic source before the feature can be accepted.
-Visual inspection of the generated PNGs is still required.
+### Acceptance and limitations
+
+Unit checks now require **lower river centerlines relative to banks**,
+outlet-connected flow paths, deterministic seeds, non-mutating source
+inputs, and stronger fine-scale relief without elevated white river
+artifacts. Chromium attaches *untextured* old/new heightfields and
+shaded-relief evidence; the real reference is compared at the same
+resolution using multi-scale local-height statistics.
+
+A branched river network and good frequency statistics do not prove
+accurate geological formation, sediment physics or commercial-grade
+quality. This is still a raster graph with subcell jitter; it is not
+continuous D-infinity flow, tracked strata, groundwater or calibrated
+climate/geologic time. Dense gullies in the actual source reference
+may remain finer than the 1024² bounded computation. More broad uplift
+variety and reference-calibrated valley depth/width distributions can
+be developed without replacing this corrected valley geometry with
+another arbitrary random texture.
 
 ---
 
