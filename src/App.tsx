@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  MountainSnow,
   ChevronDown,
   Download,
   FolderOpen,
@@ -29,9 +28,11 @@ import { TerrainViewport } from './components/TerrainViewport';
 import { ExportDialog } from './components/ExportDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
+import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
+import { loadViewSettings, saveViewSettings } from './model/viewSettings';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
@@ -55,15 +56,6 @@ function savedTheme(): ThemeMode | null {
   }
 }
 
-const DEFAULT_SETTINGS: ViewSettings = {
-  material: 'pbr',
-  sunAzimuth: 315,
-  sunElevation: 38,
-  exaggeration: 1,
-  contours: false,
-  wireframe: false,
-  autoRotate: false,
-};
 function initialProject() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -91,7 +83,7 @@ export default function App() {
   const [editingSplineId, setEditingSplineId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [channel, setChannel] = useState<MapChannel>('height');
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<ViewSettings>(loadViewSettings);
   const [automatic, setAutomatic] = useState(true);
   // No saved choice means follow the OS; a manual toggle becomes persistent.
   const [themeChoice, setThemeChoice] = useState<ThemeMode | null>(savedTheme);
@@ -135,6 +127,7 @@ export default function App() {
       theme === 'dark' ? '#292e30' : '#e9ebe7',
     );
   }, [theme]);
+  useEffect(() => saveViewSettings(settings), [settings]);
   const toggleTheme = () => {
     const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
     setThemeChoice(next);
@@ -496,7 +489,7 @@ export default function App() {
           aria-label="Normal Height field guide"
         >
           <span className="brand-mark">
-            <MountainSnow size={24} strokeWidth={1.6} />
+            <TerrainIcon name="normal-height-logo" height={24} />
           </span>
           <span>
             NORMAL<span className="brand-divider">/</span>HEIGHT
@@ -883,7 +876,7 @@ export default function App() {
             <div className="preset-dialog-list">
               {PRESETS.map((p) => (
                 <button key={p.id} onClick={() => loadPreset(p.id)}>
-                  <MountainSnow size={24} style={{ color: p.color }} />
+                  <TerrainIcon name={PRESET_ICON_NAMES[p.id] ?? "mountain-range"} height={32} />
                   <span>
                     <strong>{p.name}</strong>
                     <small>{p.description}</small>

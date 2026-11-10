@@ -6,8 +6,9 @@ import { pbrPixels } from '../materials/pbr';
 import { requestPBR } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
+import { Atmosphere, skyLighting } from './Atmosphere';
+import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
 
-const TERRAIN_SIZE = 2.6;
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
 function bilinear(values: Float32Array, n: number, u: number, v: number) {
@@ -34,6 +35,12 @@ export class TerrainScene {
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly sun: THREE.DirectionalLight;
+  private readonly hemisphere: THREE.HemisphereLight;
+  // Allocate optional atmosphere and foliage resources only while enabled.
+  // Software WebGL and 2D-only sessions should pay no GPU setup cost.
+  private atmosphere: Atmosphere | null = null;
+  private groundExtension: GroundExtension | null = null;
+  private theme: 'light' | 'dark' = 'light';
   private readonly floor: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
   private readonly grid: THREE.GridHelper;
   private readonly plinth: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
@@ -61,8 +68,12 @@ export class TerrainScene {
   private cameraView: 'perspective' | 'top' = 'perspective';
   private contextLost = false;
   private needsRender = true;
+  private lastWeatherFrame = 0;
+  private weatherInterval = 1 / 24;
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
+  private meadowBlendUniform = { value: 0 };
+  private meadowTextureUniform: { value: THREE.Texture | null } = { value: null };
   private splinePath: readonly SplinePoint[] | null = null;
   private splineMode: 'river' | 'ridge' = 'river';
   private splineGuide: THREE.Group | null = null;
@@ -101,8 +112,8 @@ export class TerrainScene {
     this.scene.background = new THREE.Color('#cbd2cf');
     this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
 
-    const hemisphere = new THREE.HemisphereLight('#dbe7ee', '#777b6f', 2.35);
-    this.scene.add(hemisphere);
+    this.hemisphere = new THREE.HemisphereLight('#dbe7ee', '#777b6f', 2.35);
+    this.scene.add(this.hemisphere);
     this.sun = new THREE.DirectionalLight('#fff7e9', 2.55);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -120,7 +131,6 @@ export class TerrainScene {
     this.sun.shadow.intensity = 0.68;
     this.sun.target.position.set(0, 0.15, 0);
     this.scene.add(this.sun, this.sun.target);
-
     this.floor = new THREE.Mesh(
       new THREE.PlaneGeometry(30, 30),
       new THREE.MeshStandardMaterial({ color: '#b3bdb7', roughness: 1 }),
@@ -154,14 +164,34 @@ export class TerrainScene {
     this.material.onBeforeCompile = (shader) => {
       shader.uniforms.nhContours = this.contourUniform;
       shader.uniforms.nhSpacing = this.spacingUniform;
+      shader.uniforms.nhMeadowBlend = this.meadowBlendUniform;
+      shader.uniforms.nhMeadowMap = this.meadowTextureUniform;
       shader.vertexShader = 'varying vec3 vNHPosition;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         '#include <begin_vertex>\nvNHPosition = position;',
       );
       shader.fragmentShader =
-        'varying vec3 vNHPosition;\nuniform bool nhContours;\nuniform float nhSpacing;\n' +
+        'varying vec3 vNHPosition;\nuniform bool nhContours;\nuniform float nhSpacing;\nuniform float nhMeadowBlend;\nuniform sampler2D nhMeadowMap;\n' +
         shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        if (nhMeadowBlend > 0.5) {
+          // Blend the outer 12% of the displayed terrain into the adjacent
+          // meadow. The generated PBR textures and actual elevations stay
+          // completely unchanged; this affects the studio preview only.
+          float edgeDistance = 1.3 - max(abs(vNHPosition.x), abs(vNHPosition.z));
+          float grassFraction = 1.0 - smoothstep(0.0, 0.32, edgeDistance);
+          if (grassFraction > 0.001) {
+            // Match the apron texture mapping exactly: its UV origin is 0.5
+            // and the shared grass texture is repeated at 0.8 cycles/unit.
+            vec2 meadowUv = vec2(vNHPosition.x * 0.8 + 0.5, 0.5 - vNHPosition.z * 0.8);
+            vec3 meadowAlbedo = texture2D(nhMeadowMap, meadowUv).rgb;
+            diffuseColor.rgb = mix(diffuseColor.rgb, meadowAlbedo, grassFraction);
+          }
+        }`,
+      );
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
         `#include <color_fragment>
@@ -226,8 +256,27 @@ export class TerrainScene {
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
-    if (this.needsRender || this.controls.autoRotate) {
+    const seconds = performance.now() / 1000;
+    this.atmosphere?.follow(this.camera);
+    this.atmosphere?.tick(seconds, this.settings);
+    this.groundExtension?.tick(seconds, this.settings.cloudSpeed);
+    const weatherMoves = this.settings.cloudSpeed > 0 && (
+      (this.settings.skyEnabled && this.settings.cloudCoverage > 0) ||
+      (this.settings.expandGround && this.settings.grassDensity > 0)
+    );
+    // Smooth 24 Hz weather on capable hardware; adapt toward 6 Hz on slow
+    // software devices. User actions are never throttled.
+    const weatherFrame = weatherMoves &&
+      seconds - this.lastWeatherFrame >= this.weatherInterval;
+    if (this.needsRender || this.controls.autoRotate || weatherFrame) {
+      const started = performance.now();
       this.renderer.render(this.scene, this.camera);
+      if (weatherFrame) {
+        const finished = performance.now();
+        this.lastWeatherFrame = finished / 1000;
+        const budget = THREE.MathUtils.clamp((finished - started) / 1000 * 5, 1 / 24, 1 / 6);
+        this.weatherInterval = THREE.MathUtils.lerp(this.weatherInterval, budget, 0.25);
+      }
       this.needsRender = false;
     }
   };
@@ -315,8 +364,8 @@ export class TerrainScene {
   applyTheme(theme: 'light' | 'dark') {
     const background = theme === 'dark' ? '#292e30' : '#cbd2cf';
     this.renderer.setClearColor(background);
-    (this.scene.background as THREE.Color).set(background);
-    if (this.scene.fog instanceof THREE.Fog) this.scene.fog.color.set(background);
+    this.theme = theme;
+    this.updateEnvironmentLighting();
     this.floor.material.color.set(theme === 'dark' ? '#303839' : '#b3bdb7');
     this.plinth.material.color.set(theme === 'dark' ? '#414944' : '#8f9b92');
     this.skirtMaterial.color.set(theme === 'dark' ? '#515b52' : '#5b6054');
@@ -326,9 +375,38 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
+  private updateEnvironmentLighting() {
+    const background = this.theme === 'dark' ? '#292e30' : '#cbd2cf';
+    if (this.settings.skyEnabled) {
+      const lighting = skyLighting(this.settings);
+      this.sun.color.copy(lighting.sunColor);
+      this.sun.intensity = lighting.sunIntensity;
+      this.hemisphere.color.copy(lighting.ambientSky);
+      this.hemisphere.groundColor.copy(lighting.ambientGround);
+      this.hemisphere.intensity = lighting.ambientIntensity;
+      this.scene.background = null; // let the physical dome fill the sky
+      this.scene.fog = new THREE.Fog(lighting.fogColor, 6, lighting.fogFar);
+      this.renderer.toneMappingExposure = 0.97 * this.settings.skyExposure;
+    } else {
+      this.sun.color.set('#fff7e9');
+      this.sun.intensity = 2.55;
+      this.hemisphere.color.set('#dbe7ee');
+      this.hemisphere.groundColor.set('#777b6f');
+      this.hemisphere.intensity = 2.35;
+      this.scene.background = new THREE.Color(background);
+      this.scene.fog = new THREE.Fog(background, 7, 15);
+      this.renderer.toneMappingExposure = 1.08;
+    }
+    this.needsRender = true;
+  }
+
   applySettings(settings: ViewSettings) {
     const paletteChanged = this.settings.material !== settings.material;
     const scaleChanged = this.settings.exaggeration !== settings.exaggeration;
+    const shadowGeometryChanged = scaleChanged ||
+      this.settings.sunAzimuth !== settings.sunAzimuth ||
+      this.settings.sunElevation !== settings.sunElevation ||
+      this.settings.expandGround !== settings.expandGround;
     this.settings = settings;
     const azimuth = (settings.sunAzimuth * Math.PI) / 180;
     const elevation = (settings.sunElevation * Math.PI) / 180;
@@ -340,16 +418,47 @@ export class TerrainScene {
     this.contourUniform.value = settings.contours;
     this.material.wireframe = settings.wireframe;
     this.controls.autoRotate = settings.autoRotate;
+    if (settings.skyEnabled) {
+      this.atmosphere ??= new Atmosphere(this.scene, this.renderer, () => {
+        this.needsRender = true;
+      });
+      this.atmosphere.apply(settings);
+      this.atmosphere.attach(this.material);
+    } else if (this.atmosphere) {
+      this.atmosphere.dispose();
+      this.atmosphere = null;
+    }
+    this.updateEnvironmentLighting();
     if (this.terrain) this.terrain.scale.y = settings.exaggeration;
     if (this.skirt) this.skirt.scale.y = settings.exaggeration;
     this.updateSupport();
+    if (settings.expandGround) {
+      this.groundExtension ??= new GroundExtension(this.scene, this.renderer);
+      this.groundExtension.update(this.field, this.project, settings, this.minimumElevation, this.terrain);
+      this.meadowBlendUniform.value = 1;
+      this.meadowTextureUniform.value = this.groundExtension.grassMap;
+      if (this.atmosphere) for (const material of this.groundExtension.materials)
+        this.atmosphere.attach(material);
+    } else {
+      this.meadowBlendUniform.value = 0;
+      this.meadowTextureUniform.value = null;
+      if (this.groundExtension) {
+        if (this.atmosphere) for (const material of this.groundExtension.materials)
+          this.atmosphere.detach(material);
+        this.groundExtension.dispose();
+        this.groundExtension = null;
+      }
+    }
     if (paletteChanged && this.terrain) {
       this.updateColors();
       this.updatePBRTextures();
     }
     if (scaleChanged && this.terrain) this.rebuildSplineGuide();
     if (scaleChanged && this.terrain && !this.cameraAdjusted) this.fitCamera();
-    this.renderer.shadowMap.needsUpdate = true;
+    // Changing haze, exposure, cloud shadows, grass density or materials must
+    // not trigger a costly 2048² sun-shadow regeneration. Only the actual
+    // shadow-caster geometry or light direction requires it.
+    if (shadowGeometryChanged) this.renderer.shadowMap.needsUpdate = true;
     this.needsRender = true;
   }
 
@@ -361,6 +470,10 @@ export class TerrainScene {
     this.floor.position.y = base - 0.048;
     this.grid.position.y = base - 0.045;
     this.plinth.position.y = base - 0.019;
+    this.floor.visible = !this.settings.expandGround;
+    this.grid.visible = !this.settings.expandGround;
+    this.plinth.visible = !this.settings.expandGround;
+    if (this.skirt) this.skirt.visible = !this.settings.expandGround;
     this.sun.target.position.y = base + 0.15;
     this.sun.position.y = Math.sin(THREE.MathUtils.degToRad(this.settings.sunElevation)) * 5 + base;
     if (this.skirt) {
@@ -466,6 +579,7 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
+    this.groundExtension?.update(this.field, this.project, this.settings, this.minimumElevation, this.terrain);
   }
 
   private updateColors() {
@@ -514,6 +628,7 @@ export class TerrainScene {
       colors.setXYZ(i, color.r, color.g, color.b);
     }
     colors.needsUpdate = true;
+    if (this.groundExtension) this.groundExtension.syncBoundary(this.terrain, this.settings.exaggeration);
   }
 
   /** Off-thread material synthesis is shared with 2D and never reruns erosion. */
@@ -590,6 +705,7 @@ export class TerrainScene {
       this.material.roughness = 1;
       this.material.metalness = 0;
       this.material.needsUpdate = true;
+      this.groundExtension?.syncBoundary(this.terrain!, this.settings.exaggeration);
       this.renderer.domElement.dataset.materialStatus = 'ready';
       this.needsRender = true;
     }).catch((error: Error) => {
@@ -691,6 +807,8 @@ export class TerrainScene {
     cancelAnimationFrame(this.animation);
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    this.atmosphere?.dispose();
+    this.groundExtension?.dispose();
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost);
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;

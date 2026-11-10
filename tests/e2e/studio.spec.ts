@@ -150,6 +150,18 @@ async function capture(page: Page, testInfo: TestInfo, filename: string) {
   await testInfo.attach(filename, { path, contentType: 'image/png' });
 }
 
+/** Preserve the actual WebGL drawing buffer without a costly full-window
+ * compositor readback during grazing-angle scenes in software Chromium.
+ */
+async function captureTerrain(canvas: Locator, testInfo: TestInfo, filename: string) {
+  const png = await canvas.evaluate((element: HTMLCanvasElement) => element.toDataURL('image/png'));
+  expect(png).toMatch(/^data:image\/png;base64,/);
+  await testInfo.attach(filename, {
+    body: Buffer.from(png.slice('data:image/png;base64,'.length), 'base64'),
+    contentType: 'image/png',
+  });
+}
+
 async function downloadProject(page: Page, testInfo: TestInfo, filename: string) {
   const downloading = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Save project', exact: true }).click();
@@ -706,6 +718,156 @@ test('PBR 3D material visibly updates after worker completion without moving the
   await expect.poll(fingerprint, { timeout: 30_000 }).not.toBe(before);
   expect((await heightAudits(page)).map((h) => h.sha256))
     .toEqual(heightsBefore.map((h) => h.sha256));
+});
+
+
+test('the sky and expanded meadow change rendered pixels without rebuilding the terrain', async ({ page }, testInfo) => {
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  const heightsBefore = (await heightAudits(page)).map((h) => h.sha256);
+  const fingerprint = () => canvas.evaluate((element: HTMLCanvasElement) => {
+    const image = element.toDataURL('image/png');
+    let hash = 2166136261;
+    for (let i = 0; i < image.length; i += 41)
+      hash = Math.imul(hash ^ image.charCodeAt(i), 16777619);
+    return hash >>> 0;
+  });
+
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const panel = page.getByRole('dialog', { name: 'Display settings' });
+  // Freeze procedural drift while comparing the actual WebGL framebuffers.
+  const wind = panel.getByRole('slider', { name: 'Wind speed' });
+  await wind.focus();
+  await wind.press('Home');
+  await expect(wind).toHaveValue('0');
+
+  // The expensive environment is opt-in; existing editor work stays light.
+  const skyToggle = panel.getByRole('checkbox', { name: 'Enable sky dome' });
+  await expect(skyToggle).not.toBeChecked();
+  const studioLight = await fingerprint();
+  await skyToggle.check();
+  await expect.poll(fingerprint).not.toBe(studioLight);
+  const withSky = await fingerprint();
+  await skyToggle.uncheck();
+  await expect.poll(fingerprint).not.toBe(withSky);
+  await skyToggle.check();
+
+  const withoutGround = await fingerprint();
+  await panel.getByRole('checkbox', { name: 'Expand ground' }).check();
+  await expect(panel.getByRole('slider', { name: 'Ground reach' })).toBeVisible();
+  await expect(panel.getByRole('slider', { name: 'Grass density' })).toBeVisible();
+  await expect.poll(fingerprint).not.toBe(withoutGround);
+  await capture(page, testInfo, 'sky-and-expanded-grass.png');
+
+  await panel.getByRole('checkbox', { name: 'Expand ground' }).uncheck();
+  expect((await heightAudits(page)).map((h) => h.sha256)).toEqual(heightsBefore);
+  await expect(page.locator('.nh-render-progress')).toHaveCount(0);
+});
+
+test('sky look presets survive a reload and keep the split map responsive', async ({ page }, testInfo) => {
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
+  const fingerprint = () => canvas.evaluate((element: HTMLCanvasElement) => {
+    const png = element.toDataURL('image/png');
+    let hash = 2166136261;
+    for (let i = 0; i < png.length; i += 43)
+      hash = Math.imul(hash ^ png.charCodeAt(i), 16777619);
+    return hash >>> 0;
+  });
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Display settings' });
+  await dialog.getByRole('slider', { name: 'Wind speed' }).focus();
+  await dialog.getByRole('slider', { name: 'Wind speed' }).press('Home');
+  await dialog.getByRole('button', { name: 'Clear day sky preset' }).click();
+  await expect(dialog.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
+  const clear = await fingerprint();
+  // A sky can technically render while washing out every terrain material.
+  // Sample the actual WebGL framebuffer's center relief and require useful
+  // highlight headroom and tonal variation in the clear-day preset.
+  const daylightTones = await canvas.evaluate((element: HTMLCanvasElement) => {
+    const sample = document.createElement('canvas');
+    sample.width = 200;
+    sample.height = 120;
+    const ctx = sample.getContext('2d')!;
+    ctx.drawImage(element, element.width * 0.24, element.height * 0.36,
+      element.width * 0.40, element.height * 0.44, 0, 0, sample.width, sample.height);
+    const rgba = ctx.getImageData(0, 0, sample.width, sample.height).data;
+    let sum = 0, squareSum = 0, clipped = 0;
+    const count = rgba.length / 4;
+    for (let i = 0; i < rgba.length; i += 4) {
+      const mean = (rgba[i] + rgba[i + 1] + rgba[i + 2]) / 3;
+      sum += mean;
+      squareSum += mean * mean;
+      if (rgba[i] > 225 && rgba[i + 1] > 225 && rgba[i + 2] > 225) clipped++;
+    }
+    return {
+      mean: sum / count,
+      deviation: Math.sqrt(Math.max(0, squareSum / count - (sum / count) ** 2)),
+      nearlyWhite: clipped / count,
+    };
+  });
+  expect(daylightTones.mean).toBeLessThan(208);
+  expect(daylightTones.deviation).toBeGreaterThan(22);
+  expect(daylightTones.nearlyWhite).toBeLessThan(0.27);
+  await capture(page, testInfo, 'atmosphere-clear-day.png');
+
+  await dialog.getByRole('button', { name: 'Golden hour sky preset' }).click();
+  await expect.poll(fingerprint).not.toBe(clear);
+  const golden = await fingerprint();
+  await capture(page, testInfo, 'atmosphere-golden-hour.png');
+
+  await dialog.getByRole('button', { name: 'Overcast sky preset' }).click();
+  await expect.poll(fingerprint).not.toBe(golden);
+  await dialog.getByRole('checkbox', { name: 'Expand ground' }).check();
+  await dialog.getByRole('slider', { name: 'Grass density' }).focus();
+  await dialog.getByRole('slider', { name: 'Grass density' }).press('End');
+  await capture(page, testInfo, 'atmosphere-overcast-meadow.png');
+
+  // Reload preserves artist controls; 2D inspection still repaints accurately
+  // while the physical sky and grass are enabled.
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await ready(page);
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const restored = page.getByRole('dialog', { name: 'Display settings' });
+  await expect(restored.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
+  await expect(restored.getByRole('checkbox', { name: 'Expand ground' })).toBeChecked();
+  await expect(restored.getByRole('slider', { name: 'Cloud cover' })).toHaveValue('0.88');
+  await expect(restored.getByRole('slider', { name: 'Grass density' })).toHaveValue('1.5');
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+  await page.getByRole('button', { name: 'Split', exact: true }).click();
+  await expect(page.getByRole('img', { name: /^Height map\./ })).toBeVisible();
+  await expect.poll(() => mapColors(page), { timeout: 30_000 }).toBeGreaterThan(12);
+
+  // These conditions also exercise actual cloud shadows without moving the
+  // camera: turning off the direct-light attenuation must change terrain pixels.
+  await page.getByRole('button', { name: '3D terrain', exact: true }).click();
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const weather = page.getByRole('dialog', { name: 'Display settings' });
+  const shadows = weather.getByRole('slider', { name: 'Cloud shadow strength' });
+  await shadows.focus();
+  await shadows.press('Home');
+  const shadowsOff = await fingerprint();
+  await shadows.press('End');
+  await expect.poll(fingerprint, { timeout: 30_000 }).not.toBe(shadowsOff);
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+
+  // Lower the camera to inspect clouds near the horizon rather than checking
+  // only the top-down terrain tile.
+  const bounds = await canvas.boundingBox();
+  expect(bounds).not.toBeNull();
+  // OrbitControls increases its polar angle toward the horizon when the
+  // pointer moves UP. Dragging downward accidentally produced a top view.
+  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.56);
+  await page.mouse.down();
+  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.46, { steps: 10 });
+  await page.mouse.up();
+  await captureTerrain(canvas, testInfo, 'atmosphere-overcast-horizon.png');
+
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  await page.getByRole('dialog', { name: 'Display settings' })
+    .getByRole('button', { name: 'Golden hour sky preset' }).click();
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+  await captureTerrain(canvas, testInfo, 'atmosphere-golden-horizon.png');
 });
 
 test('export resolution and mandatory PBR bundle controls match their actual state', async ({ page }) => {
