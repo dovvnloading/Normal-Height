@@ -28,6 +28,75 @@ The mountain generator separates the elevation of the broad spine or massif from
 
 The default 3D view uses physical horizontal and vertical scale. Adjustable vertical exaggeration affects only the display; it never changes simulation heights, normals exported from physical dimensions, or elevation files.
 
+## Conservative virtual-pipe hydraulic grid (experimental)
+
+**Motivation.** The preceding particle, D8 watershed and MFD landscape-evolution
+solvers still do not reproduce the deep, feathered dendritic incision and
+sediment-filled banks visible in professional heightfield erosion outputs.
+The issue is partly structural: they infer rivers directly from a static
+flow network and then modify height by scalar stream power, instead of
+simulating moving water *and sediment* as interacting spatial fields.
+
+**Research basis.** Unlike the earlier heuristics, this module follows the
+well-described column/virtual-pipe families in
+[Mei, Decaudin & Hu (2007), Fast Hydraulic Erosion Simulation and Visualization
+on GPU](https://doi.org/10.1109/PG.2007.15) and
+[Šťava et al. (2008), Interactive Terrain Modeling Using Hydraulic Erosion]
+(https://diglib.eg.org/items/60afda0c-a666-4df8-90dd-9b80afc554c2).
+Houdini [Erode 3.0](https://www.sidefx.com/docs/houdini/nodes/sop/heightfield_erode)
+and Gaea [Erosion2](https://docs.gaea.app/using/using-gaea/understanding-erosion/erosion_2/)
+independently corroborate the importance of *iterating fluid transport and
+bed exchange at several physically defined feature sizes*. Those products'
+internal algorithms are not represented as available or reproduced.
+
+**Implementation.** `src/engine/fluid.ts` supplies an opt-in **Hydraulic
+fluid grid · experimental** erosion mode, leaving `Landscape evolution` as
+the untouched default. Four persistent signed link-flux fields connect each
+raster cell to eight neighbors (cardinal and diagonal). Each step:
+
+1. Adds deterministic, spatially coherent rainfall.
+2. Computes pressure gradients from **terrain plus water surface** and
+   integrates prior-flow inertia to predict link discharge.
+3. Normalizes outgoing link discharge **by the water actually available** in
+   each source cell, then performs paired water and suspended-sediment exchange
+   using pre-transport concentrations. This is a true advection step; it is
+   not random stamped gully noise.
+4. Evaluates sediment transport capacity from local water flux and physical
+   slope. Transport deficits erode solid height; overload deposits existing
+   suspended material onto the same elevation grid.
+5. Runs conservative, simultaneous bank slippage for slopes exceeding a
+   physical repose angle.
+6. Drains surface water and suspended sediment at open tile boundaries;
+   evaporates remaining water, and repeats.
+
+Coarse-to-fine 128/256/512-cell stages share actual *net terrain displacement*
+while retaining original source high-frequency relief. 4 fluid steps per
+existing evolution-step control are used to reduce interface clutter.
+At output, height, wear, deposition and flow are resampled consistently and
+net eroded/deposited heights are computed from actual Float32 differences.
+
+**Important limitations.** This is a CPU-limited shallow-water-inspired
+virtual-pipe approximation. It is neither a full Navier–Stokes solver nor
+equivalent to commercial Gaea/Terragen. The fluid model does not infer true
+groundwater, grainsize, lithology or geologic time. Its sediment flux is
+tracked at the simulation resolution, while output terrain maps may be
+upscaled; the final `exportedSediment` is a reconciliation of net solid
+height differences, not an independent measurement of waterborne mass.
+Temporal steps are artistic and spatial rain is statistical. A 512-cell grid
+cannot produce centimeter-scale ground-truth gully geometry, and a poor input
+mountain remains a poor input mountain. No visual fidelity claim should be
+accepted from passing tests without inspecting the actual heightfield.
+
+**Validation criteria.** Unit tests check that a flat surface does not
+manufacture channels, zero erodibility masks preserve elevations, material
+changes are deterministic and statistically significant, and net solid
+changes agree with signed wear/deposition. Browser QA attaches comparable
+source/previous/fluid **height**, shaded relief, runoff, wear and deposition
+PNGs for three terrain profiles. Tests demonstrate functional invariants,
+not realistic geomorphology or matching a user-provided visual reference.
+
+---
+
 ## Multi-resolution landscape evolution (experimental)
 
 Normal Height's **Landscape evolution · multi-scale** is a new *research-backed,
