@@ -92,7 +92,8 @@ export type WorkerResponse =
   | { type: 'result'; id: number; result: EvaluationResult }
   | { type: 'error'; id: number; message: string };
 export type MapChannel = 'height' | 'terrain' | 'normal' | 'slope' | 'flow' | 'wear' | 'deposition'
-  | 'basecolor' | 'roughness' | 'ao' | 'splat' | 'curvature' | 'orm';
+  | 'basecolor' | 'roughness' | 'ao' | 'splat' | 'curvature' | 'orm'
+  | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
 export type ViewMode = '3d' | '2d' | 'split';
 export interface ViewSettings {
   material: 'alpine' | 'clay' | 'height' | 'pbr';
