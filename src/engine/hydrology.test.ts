@@ -95,9 +95,10 @@ describe('sediment-conserving connected watershed erosion', () => {
 
   it('changes the river network with runoff forcing but never paints noise onto flat land', () => {
     const n = 64;
-    const plane = fixture(n, (u, v) => 0.9 - 0.7 * v + 0.05 * u);
-    const weak = hydraulicErosion(plane, n, { ...parameters, droplets: 4000 });
-    const strong = hydraulicErosion(plane, n, { ...parameters, droplets: 180000 });
+    const trough = fixture(n, (u, v) =>
+      0.9 - 0.7 * v + 0.5 * (u - 0.5) ** 2);
+    const weak = hydraulicErosion(trough, n, { ...parameters, droplets: 4000 });
+    const strong = hydraulicErosion(trough, n, { ...parameters, droplets: 180000 });
     expect(strong.eroded).toBeGreaterThan(weak.eroded);
     const flat = fixture(n, () => 0.4);
     const after = hydraulicErosion(flat, n, parameters);
