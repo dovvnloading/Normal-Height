@@ -85,14 +85,18 @@ export function skyLighting(settings: ViewSettings): SkyLighting {
   const daylight = THREE.MathUtils.smoothstep(elevation, 1, 55);
   const sunset = 1 - THREE.MathUtils.smoothstep(elevation, 5, 30);
   const haze = THREE.MathUtils.clamp((settings.skyTurbidity - 2) / 14, 0, 1);
+  const overcast = THREE.MathUtils.clamp(settings.cloudCoverage, 0, 1);
   return {
     sunColor: new THREE.Color('#fff8ea').lerp(new THREE.Color('#ff965c'), sunset * 0.83),
-    sunIntensity: (1.0 + 2.3 * daylight) * (1 - haze * 0.25),
-    ambientSky: new THREE.Color('#c5daef').lerp(new THREE.Color('#e7a98a'), sunset * 0.67),
+    // Thick cloud cover dims direct sunlight while maintaining diffuse fill.
+    sunIntensity: (1.0 + 2.3 * daylight) * (1 - haze * 0.25) * (1 - overcast * 0.5),
+    ambientSky: new THREE.Color('#c5daef').lerp(new THREE.Color('#e7a98a'), sunset * 0.67)
+      .lerp(new THREE.Color('#b8c0c5'), overcast * 0.48),
     ambientGround: new THREE.Color('#636b56').lerp(new THREE.Color('#665046'), sunset * 0.55),
-    ambientIntensity: (0.75 + 1.5 * daylight) * (1 - haze * 0.17),
+    ambientIntensity: (0.75 + 1.5 * daylight) * (1 - haze * 0.17) * (1 + overcast * 0.08),
     fogColor: new THREE.Color('#b4cad9').lerp(new THREE.Color('#d6a787'), sunset * 0.64)
-      .lerp(new THREE.Color('#c3c5bf'), haze * 0.34),
+      .lerp(new THREE.Color('#c3c5bf'), haze * 0.34)
+      .lerp(new THREE.Color('#b7c2c3'), overcast * 0.35),
     fogFar: settings.expandGround ? 23 : 17,
   };
 }
