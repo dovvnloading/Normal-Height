@@ -47,7 +47,6 @@ export function buildGroundApron(
   const heightScale = (TERRAIN_SIZE * project.heightScale / project.worldSize) * exaggeration;
 
   for (const t of levels) {
-    const eased = t * t * (3 - 2 * t);
     for (let i = 0; i < count; i++) {
       const side = Math.floor(i / segments);
       const s = (i % segments) / segments;
@@ -213,6 +212,9 @@ export class GroundExtension {
   private readonly meadowMaterial = new THREE.MeshStandardMaterial({
     map: this.texture, color: '#f4f3e5', roughness: 0.96, metalness: 0, side: THREE.DoubleSide,
   });
+  private readonly apronMaterial = new THREE.MeshStandardMaterial({
+    map: this.texture, color: '#ffffff', roughness: 0.94, metalness: 0, side: THREE.DoubleSide,
+  });
   private readonly bladeTime = { value: 0 };
   private readonly bladeMaterial = new THREE.MeshStandardMaterial({
     color: '#ffffff', vertexColors: true, roughness: 1, side: THREE.DoubleSide,
@@ -225,6 +227,18 @@ export class GroundExtension {
 
   constructor(private readonly scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    this.apronMaterial.onBeforeCompile = (shader) => {
+      shader.vertexShader =
+        'attribute vec3 nhEdgeAlbedo; attribute float nhGrassBlend; varying vec3 vNHEdgeAlbedo; varying float vNHGrassBlend;\n' +
+        shader.vertexShader;
+      shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>',
+        '#include <begin_vertex>\nvNHEdgeAlbedo = nhEdgeAlbedo; vNHGrassBlend = nhGrassBlend;');
+      shader.fragmentShader =
+        'varying vec3 vNHEdgeAlbedo; varying float vNHGrassBlend;\n' +
+        shader.fragmentShader;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>',
+        '#include <map_fragment>\ndiffuseColor.rgb = mix(vNHEdgeAlbedo, diffuseColor.rgb, vNHGrassBlend);');
+    };
     this.bladeMaterial.onBeforeCompile = (shader) => {
       shader.uniforms.nhWindTime = this.bladeTime;
       shader.vertexShader = 'uniform float nhWindTime;\n' + shader.vertexShader;
@@ -240,7 +254,13 @@ export class GroundExtension {
     };
   }
 
-  update(field: HeightField | null, project: TerrainProject | null, settings: ViewSettings, minimum: number) {
+  update(
+    field: HeightField | null,
+    project: TerrainProject | null,
+    settings: ViewSettings,
+    minimum: number,
+    terrain?: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null,
+  ) {
     if (!settings.expandGround) {
       if (this.meadow) this.meadow.visible = false;
       if (this.apron) this.apron.visible = false;
@@ -280,7 +300,7 @@ export class GroundExtension {
       if (field && project) {
         this.apron = new THREE.Mesh(
           buildGroundApron(field, project, settings.exaggeration, base, horizonExtent),
-          this.meadowMaterial,
+          this.apronMaterial,
         );
         this.apron.name = 'Terrain to meadow transition';
         this.apron.receiveShadow = true;
@@ -296,31 +316,111 @@ export class GroundExtension {
       this.meadow.visible = true;
     }
     if (this.apron) this.apron.visible = true;
-    this.texture.repeat.set(horizonExtent * 1.7, horizonExtent * 1.7);
-    const foliageKey = [extent, project?.seed ?? 1, settings.grassDensity].join('/');
+    this.texture.repeat.set(horizonExtent * 0.8, horizonExtent * 0.8);
+    if (terrain) this.syncBoundary(terrain, settings.exaggeration);
+    const foliageKey = [extent, project?.seed ?? 1].join('/');
     if (this.foliageKey !== foliageKey) {
       this.foliageKey = foliageKey;
       if (this.tufts) {
         this.scene.remove(this.tufts);
         this.tufts.geometry.dispose();
       }
-      this.tufts = this.createTufts(extent, project?.seed ?? 1, settings.grassDensity);
+      this.tufts = this.createTufts(extent, project?.seed ?? 1);
       this.scene.add(this.tufts);
     }
     if (this.tufts) {
+      const edge = HALF + APRON_WIDTH + 0.08;
+      const area = Math.max(0, extent * extent - (2 * edge) ** 2);
+      // Density changes only update the active instance count; no expensive
+      // blade geometry or GPU buffers are recreated while dragging the slider.
+      this.tufts.count = Math.min(this.tufts.instanceMatrix.count,
+        Math.round(area * 21 * settings.grassDensity));
       this.tufts.position.y = base + 0.001;
       this.tufts.visible = true;
     }
   }
 
+
+  /**
+   * Match the terrain albedo and smoothed normals at the shared inner edge.
+   * The continuation changes appearance only; terrain and PBR export buffers
+   * remain byte-for-byte identical.
+   */
+  syncBoundary(
+    terrain: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>,
+    exaggeration: number,
+  ) {
+    if (!this.apron) return;
+    const destination = this.apron.geometry;
+    const edgeCount = destination.userData.edgeVertexCount as number;
+    const levels = destination.userData.edgeLevels as number[];
+    if (!edgeCount || !levels) return;
+    const segments = edgeCount / 4;
+    const sourcePositions = terrain.geometry.getAttribute('position');
+    const sourceNormals = terrain.geometry.getAttribute('normal');
+    const sourceColors = terrain.geometry.getAttribute('color');
+    const sourceSegments = Math.round(Math.sqrt(sourcePositions.count)) - 1;
+    if (sourceSegments !== segments) return;
+    const edgeColors = destination.getAttribute('nhEdgeAlbedo');
+    const normalColors = destination.getAttribute('normal');
+    const tex = terrain.material.map as THREE.DataTexture | null;
+    const image = tex?.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
+    const pixels = image?.data;
+    const size = image?.width ?? 0;
+    const sample = new THREE.Color();
+    const boundaryNormal = new THREE.Vector3();
+    const computedNormal = new THREE.Vector3();
+    for (let i = 0; i < edgeCount; i++) {
+      const side = Math.floor(i / segments);
+      const step = i % segments;
+      const ix = side === 1 ? segments : side === 3 ? 0
+        : side === 2 ? segments - step : step;
+      const iy = side === 0 ? 0 : side === 2 ? segments
+        : side === 3 ? segments - step : step;
+      const sourceIndex = iy * (segments + 1) + ix;
+      const textureX = Math.round((ix / segments) * (size - 1));
+      const textureY = Math.round((iy / segments) * (size - 1));
+      const offset = (textureY * size + textureX) * 4;
+      if (pixels && size > 1 && offset >= 0 && offset + 2 < pixels.length) {
+        sample.setRGB(pixels[offset] / 255, pixels[offset + 1] / 255,
+          pixels[offset + 2] / 255, THREE.SRGBColorSpace);
+      } else if (terrain.material.vertexColors && sourceColors) {
+        sample.setRGB(sourceColors.getX(sourceIndex), sourceColors.getY(sourceIndex),
+          sourceColors.getZ(sourceIndex));
+        if (sample.r + sample.g + sample.b < 0.015) sample.set('#859982');
+      } else {
+        sample.copy(terrain.material.color);
+      }
+      boundaryNormal.set(
+        sourceNormals.getX(sourceIndex),
+        sourceNormals.getY(sourceIndex) / exaggeration,
+        sourceNormals.getZ(sourceIndex),
+      ).normalize();
+      for (let ring = 0; ring < levels.length; ring++) {
+        const index = ring * edgeCount + i;
+        edgeColors.setXYZ(index, sample.r, sample.g, sample.b);
+        // Normals should be continuous at the border, but quickly converge to
+        // the naturally smoothed apron rather than extending tile-side slopes.
+        const match = 1 - THREE.MathUtils.smoothstep(levels[ring], 0, 0.14);
+        if (match <= 0) continue;
+        computedNormal.set(
+          normalColors.getX(index), normalColors.getY(index), normalColors.getZ(index),
+        ).lerp(boundaryNormal, match).normalize();
+        normalColors.setXYZ(index, computedNormal.x, computedNormal.y, computedNormal.z);
+      }
+    }
+    edgeColors.needsUpdate = true;
+    normalColors.needsUpdate = true;
+  }
+
   private lastField: HeightField | null = null;
   private lastBase = 0;
 
-  private createTufts(extent: number, seed: number, density: number) {
+  private createTufts(extent: number, seed: number) {
     const half = extent * 0.5;
     const edge = HALF + APRON_WIDTH + 0.08;
     const availableArea = Math.max(0, extent * extent - (2 * edge) ** 2);
-    const count = Math.min(8000, Math.round(availableArea * 21 * density));
+    const count = Math.min(8000, Math.round(availableArea * 21 * 1.5));
     const mesh = new THREE.InstancedMesh(bladeGeometry(), this.bladeMaterial, count);
     mesh.name = 'Instanced meadow grass';
     mesh.castShadow = false;
@@ -368,6 +468,7 @@ export class GroundExtension {
       this.tufts.geometry.dispose();
     }
     this.meadowMaterial.dispose();
+    this.apronMaterial.dispose();
     this.bladeMaterial.dispose();
     this.texture.dispose();
   }
