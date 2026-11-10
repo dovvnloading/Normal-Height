@@ -408,7 +408,12 @@ export function evaluateGraph(
               gravity: number(node, 'gravity', 4, 0.01, 20),
               seed,
               multiscale: node.params.multiscale !== false,
-              method: text(node, 'method', 'watershed') === 'droplet' ? 'droplet' : 'watershed',
+              method: text(node, 'method', 'landscape') === 'droplet' ? 'droplet' :
+                text(node, 'method', 'landscape') === 'watershed' ? 'watershed' : 'landscape',
+              cycles: number(node, 'cycles', 28, 4, 72),
+              featureMeters: number(node, 'featureMeters', 140, 24, 600),
+              hillslope: number(node, 'hillslope', 0.38, 0, 1),
+              bankAngle: number(node, 'bankAngle', 38, 18, 80),
               worldSize: project.worldSize,
               heightScale: project.heightScale,
             },

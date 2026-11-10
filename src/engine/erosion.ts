@@ -1,5 +1,6 @@
 import { clamp, randomGenerator } from './noise';
 import { watershedErosion } from './watershed';
+import { landscapeErosion } from './landscape';
 
 export interface ErosionSettings {
   droplets: number;
@@ -13,8 +14,16 @@ export interface ErosionSettings {
   gravity: number;
   seed: number;
   multiscale: boolean;
-  /** Watershed routing is the default. Legacy droplets remain for A/B comparisons. */
-  method?: 'watershed' | 'droplet';
+  /** Landscape evolution is the default; prior watershed and droplet modes remain available. */
+  method?: 'landscape' | 'watershed' | 'droplet';
+  /** Long-term landscape evolution iteration count, independent of grid resolution. */
+  cycles?: number;
+  /** Physical scale of broad river/valley processes, in meters. */
+  featureMeters?: number;
+  /** Coupled bank/hillslope weathering, 0–1. */
+  hillslope?: number;
+  /** Riverbank / repose angle, in degrees. */
+  bankAngle?: number;
   /** Physical dimensions for grid-independent stream-power and discharge scales. */
   worldSize?: number;
   heightScale?: number;
@@ -201,9 +210,9 @@ export function dropletErosion(
 }
 
 /**
- * Public hydraulic graph entrypoint. Existing project JSONs without a method
- * use the connected watershed solver; choosing 'droplet' explicitly preserves
- * the previous deterministic particle implementation for A/B comparisons.
+ * Public hydraulic graph entrypoint. Projects without a selected algorithm use
+ * multi-resolution landscape evolution. The previous, simpler watershed and
+ * droplet solvers remain explicitly selectable for repeatable comparisons.
  */
 export function hydraulicErosion(
   input: Float32Array,
@@ -212,9 +221,11 @@ export function hydraulicErosion(
   mask?: Float32Array,
   progress?: (fraction: number) => void,
 ): ErosionResult {
-  return settings.method === 'droplet'
-    ? dropletErosion(input, n, settings, mask, progress)
-    : watershedErosion(input, n, settings, mask, progress);
+  if (settings.method === 'droplet')
+    return dropletErosion(input, n, settings, mask, progress);
+  if (settings.method === 'watershed')
+    return watershedErosion(input, n, settings, mask, progress);
+  return landscapeErosion(input, n, settings, mask, progress);
 }
 
 /** Conservative talus relaxation, using simultaneous transfers to avoid directional bias. */
