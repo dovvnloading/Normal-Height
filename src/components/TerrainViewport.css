@@ -530,6 +530,10 @@
   cursor: pointer;
 }
 .nh-display-panel {
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   position: absolute;
   right: 12px;
   top: 10px;
@@ -559,6 +563,24 @@
   border: 0;
   cursor: pointer;
   padding: 1px;
+}
+.nh-display-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #49644c;
+  letter-spacing: 0.025em;
+  margin: 3px 0 12px;
+}
+.nh-display-subsection {
+  padding-left: 11px;
+  border-left: 2px solid #a2b8a1;
+  margin: 12px 0 4px 4px;
+}
+.nh-display-subsection .nh-display-range:first-child {
+  margin-top: 0;
 }
 .nh-display-label {
   font-size: 11px;
