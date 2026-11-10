@@ -761,7 +761,7 @@ export function TerrainViewport({
                 </button>
               </div>
               <div className="nh-view-hint">
-                Drag to orbit<span>·</span>Right-drag to pan<span>·</span>Scroll to zoom
+                Drag to orbit<span>·</span>Right-drag to pan<span>·</span>Double-click to focus<span>·</span>Scroll to zoom
               </div>
               <div
                 className="nh-scene-resolution"
