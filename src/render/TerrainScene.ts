@@ -36,8 +36,10 @@ export class TerrainScene {
   private readonly resizeObserver: ResizeObserver;
   private readonly sun: THREE.DirectionalLight;
   private readonly hemisphere: THREE.HemisphereLight;
-  private readonly atmosphere: Atmosphere;
-  private readonly groundExtension: GroundExtension;
+  // Allocate optional atmosphere and foliage resources only while enabled.
+  // Software WebGL and 2D-only sessions should pay no GPU setup cost.
+  private atmosphere: Atmosphere | null = null;
+  private groundExtension: GroundExtension | null = null;
   private theme: 'light' | 'dark' = 'light';
   private readonly floor: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
   private readonly grid: THREE.GridHelper;
@@ -126,9 +128,6 @@ export class TerrainScene {
     this.sun.shadow.intensity = 0.68;
     this.sun.target.position.set(0, 0.15, 0);
     this.scene.add(this.sun, this.sun.target);
-    this.atmosphere = new Atmosphere(this.scene, this.renderer, () => { this.needsRender = true; });
-    this.groundExtension = new GroundExtension(this.scene, this.renderer);
-
     this.floor = new THREE.Mesh(
       new THREE.PlaneGeometry(30, 30),
       new THREE.MeshStandardMaterial({ color: '#b3bdb7', roughness: 1 }),
@@ -235,9 +234,9 @@ export class TerrainScene {
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
     const seconds = performance.now() / 1000;
-    this.atmosphere.follow(this.camera);
-    this.atmosphere.tick(seconds, this.settings);
-    this.groundExtension.tick(seconds, this.settings.cloudSpeed);
+    this.atmosphere?.follow(this.camera);
+    this.atmosphere?.tick(seconds, this.settings);
+    this.groundExtension?.tick(seconds, this.settings.cloudSpeed);
     const weatherMoves = this.settings.cloudSpeed > 0 && (
       (this.settings.skyEnabled && this.settings.cloudCoverage > 0) ||
       (this.settings.expandGround && this.settings.grassDensity > 0)
@@ -388,12 +387,26 @@ export class TerrainScene {
     this.contourUniform.value = settings.contours;
     this.material.wireframe = settings.wireframe;
     this.controls.autoRotate = settings.autoRotate;
-    this.atmosphere.apply(settings);
+    if (settings.skyEnabled) {
+      this.atmosphere ??= new Atmosphere(this.scene, this.renderer, () => {
+        this.needsRender = true;
+      });
+      this.atmosphere.apply(settings);
+    } else if (this.atmosphere) {
+      this.atmosphere.dispose();
+      this.atmosphere = null;
+    }
     this.updateEnvironmentLighting();
     if (this.terrain) this.terrain.scale.y = settings.exaggeration;
     if (this.skirt) this.skirt.scale.y = settings.exaggeration;
     this.updateSupport();
-    this.groundExtension.update(this.field, this.project, settings, this.minimumElevation);
+    if (settings.expandGround) {
+      this.groundExtension ??= new GroundExtension(this.scene, this.renderer);
+      this.groundExtension.update(this.field, this.project, settings, this.minimumElevation);
+    } else if (this.groundExtension) {
+      this.groundExtension.dispose();
+      this.groundExtension = null;
+    }
     if (paletteChanged && this.terrain) {
       this.updateColors();
       this.updatePBRTextures();
@@ -521,7 +534,7 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
-    this.groundExtension.update(this.field, this.project, this.settings, this.minimumElevation);
+    this.groundExtension?.update(this.field, this.project, this.settings, this.minimumElevation);
   }
 
   private updateColors() {
@@ -747,8 +760,8 @@ export class TerrainScene {
     cancelAnimationFrame(this.animation);
     this.resizeObserver.disconnect();
     this.controls.dispose();
-    this.atmosphere.dispose();
-    this.groundExtension.dispose();
+    this.atmosphere?.dispose();
+    this.groundExtension?.dispose();
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost);
     this.scene.traverse((object) => {
       const mesh = object as THREE.Mesh;
