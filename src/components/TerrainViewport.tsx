@@ -841,13 +841,13 @@ export function TerrainViewport({
               {([
                 { key: 'clear', label: 'Clear day', sunAzimuth: 265, sunElevation: 57,
                   skyTurbidity: 2.5, skyRayleigh: 2.2, skyExposure: 0.96,
-                  cloudCoverage: 0.12, cloudSpeed: 0.25 },
+                  cloudCoverage: 0.12 },
                 { key: 'golden', label: 'Golden hour', sunAzimuth: 252, sunElevation: 11,
                   skyTurbidity: 5.5, skyRayleigh: 2.9, skyExposure: 1.04,
-                  cloudCoverage: 0.29, cloudSpeed: 0.34 },
+                  cloudCoverage: 0.29 },
                 { key: 'overcast', label: 'Overcast', sunAzimuth: 315, sunElevation: 36,
                   skyTurbidity: 7.5, skyRayleigh: 1.8, skyExposure: 0.92,
-                  cloudCoverage: 0.88, cloudSpeed: 0.62 },
+                  cloudCoverage: 0.88 },
               ] as const).map(({ key, label, ...preset }) => (
                 <button
                   key={key}
