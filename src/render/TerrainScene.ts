@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, sampleSlope, terrainColor } from './maps';
-import { pbrPixels } from '../materials/pbr';
+import { resolveSurface } from '../materials/pbr';
+import { packPreviewPBR } from './previewMaterial';
+import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
 import { requestPBR } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
@@ -77,6 +79,7 @@ export class TerrainScene {
   private weatherInterval = 1 / 24;
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
+  private readonly nearField = createNearFieldUniforms();
   private meadowBlendUniform = { value: 0 };
   private meadowTextureUniform: { value: THREE.Texture | null } = { value: null };
   private splinePath: readonly SplinePoint[] | null = null;
@@ -114,6 +117,7 @@ export class TerrainScene {
     this.renderer.domElement.tabIndex = 0;
     host.appendChild(this.renderer.domElement);
     this.renderer.domElement.dataset.materialStatus = 'inactive';
+    this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
     this.scene.background = new THREE.Color('#cbd2cf');
     this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
 
@@ -207,6 +211,7 @@ export class TerrainScene {
           diffuseColor.rgb *= 1.0 - line * 0.46;
         }`,
       );
+      installNearFieldShader(shader, this.nearField);
     };
 
     this.camera.position.set(3.25, 2.4, 3.55);
@@ -261,6 +266,24 @@ export class TerrainScene {
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
+    // Enable the additional shader evaluation only when its physical wavelength
+    // can influence screen pixels. This is a display-only uniform; orbit/zoom
+    // never invalidates the erosion field or regenerates the PBR worker maps.
+    const activeMicro = !!this.project && this.settings.material === 'pbr' &&
+      nearFieldShouldRender(
+        this.settings.nearFieldDetail,
+        this.camera.position.distanceTo(this.controls.target),
+        this.host.clientHeight * this.renderer.getPixelRatio(),
+        this.camera.fov,
+        this.nearField.nhMetersPerUnit.value,
+        this.nearField.nhDetailMeters.value,
+      );
+    const activeValue = activeMicro ? 1 : 0;
+    if (this.nearField.nhNearFieldActive.value !== activeValue) {
+      this.nearField.nhNearFieldActive.value = activeValue;
+      this.renderer.domElement.dataset.nearFieldDetail = activeMicro ? 'active' : 'inactive';
+      this.needsRender = true;
+    }
     const seconds = performance.now() / 1000;
     this.atmosphere?.follow(this.camera);
     this.atmosphere?.tick(seconds, this.settings);
@@ -667,6 +690,11 @@ export class TerrainScene {
       return;
     }
     const field = this.field, project = this.project;
+    const surface = resolveSurface(project.surface);
+    this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
+    this.nearField.nhDetailMeters.value = surface.detailMeters;
+    this.nearField.nhDetailStrength.value = surface.detailStrength;
+    this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
     const surfaceKey = JSON.stringify([
       project.seed, project.surface ?? null, project.worldSize, project.heightScale,
     ]);
@@ -694,9 +722,11 @@ export class TerrainScene {
       // MeshStandardMaterial reads AO from the RED channel and roughness from
       // GREEN. Share one linear/non-color ORM map for both rather than uploading
       // two separately expanded 4-channel grayscale images.
-      const packedORM = tex(1, pbrPixels(maps, field, project, 'orm'));
-      // Geometry already provides macro normals; only microdetail is sampled.
-      const microNormal = tex(2, pbrPixels(maps, field, project, 'detailNormal'));
+      const preview = packPreviewPBR(maps, field, project);
+      const packedORM = tex(1, preview.orm);
+      // Macro geometry remains displaced; the RGB detail normal is unchanged.
+      // Alpha stores the vegetation layer weight for close-up shading only.
+      const microNormal = tex(2, preview.microNormal);
       for (const surplus of existing.slice(3)) surplus.dispose();
       this.pbrTextures = [albedo, packedORM, microNormal];
       applyPackedPBRMaterial(this.material, albedo, packedORM, microNormal);
