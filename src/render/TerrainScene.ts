@@ -9,6 +9,7 @@ import type { SplinePoint } from '../model/splines';
 import { Atmosphere, skyLighting } from './Atmosphere';
 import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
 import { updatePreviewTexture } from './pbrTexture';
+import { applyPackedPBRMaterial } from './pbrMaterial';
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
@@ -69,6 +70,9 @@ export class TerrainScene {
   private cameraView: 'perspective' | 'top' = 'perspective';
   private contextLost = false;
   private needsRender = true;
+  // Wall-clock diagnostics: the first draw includes shader/GPU uploads, not a
+  // GPU timer query; useful for locating exceptional frame stalls.
+  private measurePBRFirstRender = false;
   private lastWeatherFrame = 0;
   private weatherInterval = 1 / 24;
   private contourUniform = { value: false };
@@ -272,6 +276,11 @@ export class TerrainScene {
     if (this.needsRender || this.controls.autoRotate || weatherFrame) {
       const started = performance.now();
       this.renderer.render(this.scene, this.camera);
+      if (this.measurePBRFirstRender) {
+        this.renderer.domElement.dataset.pbrFirstRenderMs =
+          (performance.now() - started).toFixed(2);
+        this.measurePBRFirstRender = false;
+      }
       if (weatherFrame) {
         const finished = performance.now();
         this.lastWeatherFrame = finished / 1000;
@@ -636,6 +645,7 @@ export class TerrainScene {
   private updatePBRTextures() {
     if (!this.field || !this.project) return;
     if (this.settings.material !== 'pbr') {
+      this.measurePBRFirstRender = false;
       this.renderer.domElement.dataset.materialStatus = 'inactive';
       ++this.pbrGeneration;
       this.pbrRelease?.();
@@ -667,6 +677,7 @@ export class TerrainScene {
     this.lastPBRField = field;
     this.lastPBRSurface = surfaceKey;
     this.renderer.domElement.dataset.materialStatus = 'loading';
+    const workerStarted = performance.now();
     const request = requestPBR(field, project);
     this.pbrRelease = request.release;
     request.promise.then((maps) => {
@@ -674,36 +685,29 @@ export class TerrainScene {
           this.field !== field || this.settings.material !== 'pbr') return;
       this.pbrRelease?.();
       this.pbrRelease = null;
+      const preparedAt = performance.now();
       const n = maps.resolution;
       const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
       const existing = this.pbrTextures;
       const tex = (index: number, rgba: Uint8ClampedArray, srgb = false) =>
         updatePreviewTexture(existing[index], rgba, n, srgb, anisotropy);
       const albedo = tex(0, maps.basecolor, true);
-      const roughness = tex(1, pbrPixels(maps, field, project, 'roughness'));
-      const occlusion = tex(2, pbrPixels(maps, field, project, 'ao'));
-      // Geometric normals already hold the macro terrain slopes.
-      const microNormal = tex(3, pbrPixels(maps, field, project, 'detailNormal'));
-      this.pbrTextures = [albedo, roughness, occlusion, microNormal];
-      const materialLayoutChanged =
-        this.material.map !== albedo ||
-        this.material.normalMap !== microNormal ||
-        this.material.roughnessMap !== roughness ||
-        this.material.aoMap !== occlusion ||
-        this.material.vertexColors;
-      this.material.map = albedo;
-      this.material.normalMap = microNormal;
-      this.material.roughnessMap = roughness;
-      this.material.aoMap = occlusion;
-      this.material.aoMapIntensity = 0.85;
-      this.material.color.set('#ffffff');
-      this.material.normalScale.set(1, 1);
-      this.material.vertexColors = false;
-      this.material.roughness = 1;
-      this.material.metalness = 0;
-      if (materialLayoutChanged) this.material.needsUpdate = true;
+      // MeshStandardMaterial reads AO from the RED channel and roughness from
+      // GREEN. Share one linear/non-color ORM map for both rather than uploading
+      // two separately expanded 4-channel grayscale images.
+      const packedORM = tex(1, pbrPixels(maps, field, project, 'orm'));
+      // Geometry already provides macro normals; only microdetail is sampled.
+      const microNormal = tex(2, pbrPixels(maps, field, project, 'detailNormal'));
+      for (const surplus of existing.slice(3)) surplus.dispose();
+      this.pbrTextures = [albedo, packedORM, microNormal];
+      applyPackedPBRMaterial(this.material, albedo, packedORM, microNormal);
       this.groundExtension?.syncBoundary(this.terrain!, this.settings.exaggeration);
-      this.renderer.domElement.dataset.materialStatus = 'ready';
+      const monitor = this.renderer.domElement.dataset;
+      monitor.pbrWorkerMs = (preparedAt - workerStarted).toFixed(2);
+      monitor.pbrPackMs = (performance.now() - preparedAt).toFixed(2);
+      monitor.pbrTextureCount = String(this.pbrTextures.length);
+      this.measurePBRFirstRender = true;
+      monitor.materialStatus = 'ready';
       this.needsRender = true;
     }).catch((error: Error) => {
       if (this.disposed || generation !== this.pbrGeneration) return;

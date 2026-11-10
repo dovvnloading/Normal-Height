@@ -153,9 +153,19 @@ for (const resolution of [512, 1024] as const) {
         p99FrameGapMs: percentile(0.99),
       };
     });
+    const pipeline = await gl.evaluate((element: HTMLCanvasElement) => ({
+      textureCount: Number(element.dataset.pbrTextureCount),
+      workerMs: Number(element.dataset.pbrWorkerMs),
+      packMs: Number(element.dataset.pbrPackMs),
+      firstRenderMs: Number(element.dataset.pbrFirstRenderMs ?? 0),
+    }));
     await testInfo.attach(`pbr-latency-${resolution}.json`, {
-      body: JSON.stringify(stats, null, 2), contentType: 'application/json',
+      body: JSON.stringify({ ...stats, pipeline }, null, 2),
+      contentType: 'application/json',
     });
+    expect(pipeline.textureCount).toBe(3);
+    expect(Number.isFinite(pipeline.packMs)).toBe(true);
+    expect(pipeline.packMs).toBeGreaterThanOrEqual(0);
     expect(stats.frames).toBeGreaterThan(8);
     // A single cold SwiftShader texture upload or headless scheduling pause
     // can take >1.5 s, so the maximum is recorded rather than misrepresented
@@ -396,4 +406,65 @@ test('2K PBR preflight fails gracefully on constrained devices before starting a
   await expect(dialog.getByRole('alert')).toContainText('Choose a smaller resolution');
   const after = await page.evaluate(() => (window as Window & typeof globalThis & { __workersCreated: number }).__workersCreated);
   expect(after).toBe(before);
+});
+
+// Fixed-camera, fixed-sun PBR visual reference. The first CI run records the
+// 8x6 block-mean image to establish a real, reproducible SwiftShader baseline.
+// Subsequent runs compare this against a committed threshold/golden fixture.
+test('fixed-light 3D PBR material captures a reproducible visual baseline (#17)', async ({ page }, testInfo) => {
+  test.skip(!process.env.PBR_VISUAL_GOLDEN,
+    'Deterministic visual acceptance runs on pinned browser/container CI.');
+  test.setTimeout(180_000);
+  await loadFastProject(page, 512);
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const panel = page.getByRole('dialog', { name: 'Display settings' });
+  await expect(panel.getByRole('checkbox', { name: 'Enable sky dome' })).not.toBeChecked();
+  await expect(panel.getByRole('checkbox', { name: 'Expand ground' })).not.toBeChecked();
+  await expect(panel.getByRole('slider', { name: 'Sun direction' })).toHaveValue('315');
+  await expect(panel.getByRole('slider', { name: 'Sun elevation' })).toHaveValue('38');
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+  await canvas.evaluate(async () => {
+    await new Promise<void>(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  const data = await canvas.evaluate((source: HTMLCanvasElement) => {
+    const width = 160, height = 120, cols = 8, rows = 6;
+    const scratch = document.createElement('canvas');
+    scratch.width = width; scratch.height = height;
+    const ctx = scratch.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(source, 0, 0, width, height);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    const cells: number[][] = [];
+    let variance = 0;
+    for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+      const rgb = [0, 0, 0];
+      let count = 0;
+      for (let y = row * 20; y < (row + 1) * 20; y++)
+        for (let x = col * 20; x < (col + 1) * 20; x++) {
+          const p = (y * width + x) * 4;
+          for (let k = 0; k < 3; k++) rgb[k] += pixels[p + k];
+          count++;
+        }
+      cells.push(rgb.map(value => Math.round(value / count)));
+    }
+    const gray = cells.map(([r, g, b]) => (r + g + b) / 3);
+    const mean = gray.reduce((sum, n) => sum + n, 0) / gray.length;
+    variance = gray.reduce((sum, n) => sum + (n - mean) ** 2, 0) / gray.length;
+    const png = source.toDataURL('image/png').split(',')[1];
+    return { width: source.width, height: source.height, cells,
+      contrast: Math.round(Math.sqrt(variance)), png };
+  });
+  await testInfo.attach('pbr-fixed-light-golden-candidate.json', {
+    body: JSON.stringify({ width: data.width, height: data.height,
+      cells: data.cells, contrast: data.contrast }, null, 2),
+    contentType: 'application/json',
+  });
+  await testInfo.attach('pbr-fixed-light-preview.png', {
+    body: Buffer.from(data.png, 'base64'),
+    contentType: 'image/png',
+  });
+  expect(data.cells).toHaveLength(48);
+  expect(data.contrast).toBeGreaterThan(12);
 });
