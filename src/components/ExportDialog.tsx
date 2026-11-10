@@ -113,11 +113,24 @@ export function ExportDialog({
           encoderRef.current = null;
         };
         const field = m.result.field;
-        encoder.postMessage(
-          { type: 'encode', id: generation, field, project, format, bundle, memoryBudgetMiB },
-          [field.height.buffer, field.flow.buffer, field.wear.buffer,
-            field.deposition.buffer] as Transferable[],
-        );
+        // Upstream graph passes may share the same zero-filled diagnostic
+        // ArrayBuffer (especially graphs without erosion). A transferable may
+        // occur only ONCE; duplicates cause DataCloneError and a stuck export.
+        const transfer = Array.from(new Set([
+          field.height.buffer, field.flow.buffer, field.wear.buffer,
+          field.deposition.buffer,
+        ])).filter((buffer): buffer is ArrayBuffer => buffer instanceof ArrayBuffer);
+        try {
+          encoder.postMessage(
+            { type: 'encode', id: generation, field, project, format, bundle, memoryBudgetMiB },
+            transfer,
+          );
+        } catch (error) {
+          encoder.terminate();
+          encoderRef.current = null;
+          setBusy(false);
+          setError(error instanceof Error ? error.message : 'Unable to transfer terrain to export worker.');
+        }
       }
     };
     worker.onerror = (e) => {
