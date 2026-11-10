@@ -43,14 +43,14 @@ export function synthesizeMaterials(
   const noise = new Noise((project.seed + 0x3b9aca07) >>> 0);
   const analyze = createTerrainAnalyzer(field, project);
   const metrics: TerrainFactors = {
-    grade: 0, slopeDegrees: 0, northness: 0, landform: 0, occlusion: 1,
+    grade: 0, gradientX: 0, gradientY: 0, slopeDegrees: 0,
+    northness: 0, landform: 0, occlusion: 1,
   };
   const cell = project.worldSize / (n - 1);
   const wearReference = diagnosticReference(field.wear);
   const depositionReference = diagnosticReference(field.deposition);
   const grainVisibility = smooth(2, 3.5, params.detailMeters / cell);
   const fineVisibility = smooth(2, 3.5, params.detailMeters / (2.1 * cell));
-  const fractureVisibility = smooth(3, 5, params.fractureMeters / cell);
   let min = Infinity, max = -Infinity;
   for (let i = 0; i < count; i++) {
     const h = field.height[i];
@@ -72,8 +72,8 @@ export function synthesizeMaterials(
       const i = y * n + x, p = i * 4;
       const h = field.height[i];
       const height01 = (h - min) / span;
-      const { slopeDegrees: slope, grade, northness, landform, occlusion } =
-        analyze(x, y, metrics);
+      const { slopeDegrees: slope, grade, gradientX, gradientY,
+        northness, landform, occlusion } = analyze(x, y, metrics);
       const valley = smooth(0.012, 0.14, landform);
       const crest = smooth(0.012, 0.14, -landform);
       const northExposure = northness * smooth(7, 38, slope);
@@ -135,22 +135,44 @@ export function synthesizeMaterials(
       splat[p + 2] = b;
       splat[p + 3] = 255 - r - g - b;
 
-      // Rock bedding is an elevation-isosurface signal, with domain-warped
-      // fracture joints. Horizontal bedding spacing is strataMeters / grade,
-      // so it is attenuated where the grid cannot resolve it.
+      // Rock bedding follows real elevation, while joint fractures use a
+      // tri-planar world-space evaluation. The normal-based fourth-power
+      // weights favor XZ on gentle land and ZY/XY on cliffs, so the *baked*
+      // albedo/roughness/detail is not horizontally stretched over rock walls.
+      // Local surface-arc spacing controls Nyquist visibility on steep faces.
       const beddingSpacing = params.strataMeters / Math.max(0.25, grade);
       const beddingVisibility = smooth(3, 5, beddingSpacing / cell) *
         smooth(16, 47, slope);
+      const fractureVisibility = smooth(3, 5,
+        params.fractureMeters / (cell * Math.hypot(1, grade)));
       const needRockDetail = rock > 0.025 &&
         (fractureVisibility > 0 || beddingVisibility > 0);
       const rockWarp = needRockDetail
         ? noise.simplex(wx / (params.fractureMeters * 2.8) + 17.3,
             z / (params.fractureMeters * 2.8) - 9.5)
         : 0;
-      const fractureSignal = needRockDetail && fractureVisibility > 0
-        ? noise.simplex(wx / params.fractureMeters + rockWarp * 0.42 + 31.1,
-            z / params.fractureMeters - rockWarp * 0.26 - 19.7)
-        : 0;
+      let fractureSignal = 0;
+      if (needRockDetail && fractureVisibility > 0) {
+        const norm = 1 + grade * grade;
+        const top = 1 / (norm * norm);
+        const east = (gradientX * gradientX / norm) ** 2;
+        const south = (gradientY * gradientY / norm) ** 2;
+        const inv = 1 / (top + east + south);
+        const f = params.fractureMeters;
+        const elevation = h * project.heightScale;
+        if (top * inv > 0.002)
+          fractureSignal += top * inv * noise.simplex(
+            wx / f + rockWarp * 0.42 + 31.1,
+            z / f - rockWarp * 0.26 - 19.7);
+        if (east * inv > 0.002)
+          fractureSignal += east * inv * noise.simplex(
+            z / f + rockWarp * 0.42 + 31.1,
+            elevation / f - rockWarp * 0.26 - 19.7);
+        if (south * inv > 0.002)
+          fractureSignal += south * inv * noise.simplex(
+            wx / f + rockWarp * 0.42 + 31.1,
+            elevation / f - rockWarp * 0.26 - 19.7);
+      }
       const fractures = fractureVisibility *
         (1 - smooth(0.025, 0.22, Math.abs(fractureSignal))) ** 2;
       const bedding = beddingVisibility *
