@@ -427,6 +427,17 @@ export function Inspector({
                 value={surface.biome}
                 onChange={v => onProjectChange({ surface: { ...surface, biome: v as typeof surface.biome } })}
               />
+              <ParamControl
+                definition={{
+                  key: 'nearFieldDetail',
+                  label: 'Live close-up microdetail',
+                  type: 'toggle',
+                  default: true,
+                  description: 'Adds meter-scaled world-space rock joints, sediment grain and snow/vegetation micro-normal shading only when zoomed close enough to resolve them. Preview only; exported PBR maps are unchanged.',
+                }}
+                value={settings.nearFieldDetail}
+                onChange={v => onSettingsChange({ ...settings, nearFieldDetail: Boolean(v) })}
+              />
               {([
                 { key: 'snowLine', label: 'Snow-line elevation', min: 0.35, max: 1, step: 0.01,
                   description: 'Relative to the generated terrain elevation range.' },
