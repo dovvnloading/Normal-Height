@@ -41,6 +41,16 @@ function mapCanvas(page: Page) {
   return page.locator('.nh-map canvas').first();
 }
 
+async function mapColors(page: Page) {
+  return mapCanvas(page).evaluate((canvas: HTMLCanvasElement) => {
+    const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+    const colors = new Set<number>();
+    for (let i = 0; i < data.length; i += 388)
+      if (data[i + 3]) colors.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+    return colors.size;
+  });
+}
+
 async function mapHash(page: Page) {
   return mapCanvas(page).evaluate((canvas: HTMLCanvasElement) => {
     const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -90,6 +100,8 @@ function decodePNG(bytes: Uint8Array) {
 
 for (const resolution of [512, 1024] as const) {
   test(`rapid material edits use a responsive worker at ${resolution}² (#10)`, async ({ page }, testInfo) => {
+    test.skip(resolution === 1024 && !process.env.PBR_BROWSER_BENCH,
+      '1K performance profile runs in the opt-in browser QA workflow.');
     test.setTimeout(150_000);
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
@@ -98,7 +110,7 @@ for (const resolution of [512, 1024] as const) {
     await page.getByRole('combobox', { name: 'Map channel' }).selectOption('basecolor');
     const gl = page.getByRole('img', { name: /^Interactive 3D terrain/ });
     await expect(gl).toHaveAttribute('data-material-status', 'ready', { timeout: 45_000 });
-    await expect.poll(() => mapHash(page), { timeout: 45_000 }).not.toBe(2166136261);
+    await expect.poll(() => mapColors(page), { timeout: 45_000 }).toBeGreaterThan(8);
     const original = await mapHash(page);
     await page.getByRole('button', { name: 'Scene', exact: true }).click();
 
@@ -145,11 +157,13 @@ for (const resolution of [512, 1024] as const) {
 }
 
 test('1K browser export decodes every PBR PNG and aligns with the visible 2D map (#17)', async ({ page }, testInfo) => {
+  test.skip(!process.env.PBR_BROWSER_BENCH,
+    '1K full ZIP pixel audit runs in opt-in browser QA, not every commit.');
   test.setTimeout(240_000);
   await loadFastProject(page, 1024);
   await page.getByRole('button', { name: '2D map', exact: true }).click();
   await page.getByRole('combobox', { name: 'Map channel' }).selectOption('basecolor');
-  await expect.poll(() => mapHash(page), { timeout: 60_000 }).not.toBe(2166136261);
+  await expect.poll(() => mapColors(page), { timeout: 60_000 }).toBeGreaterThan(8);
   const previews = await mapCanvas(page).evaluate((canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
     const side = Math.max(1, Math.min(rect.width - 84, rect.height - 82));
