@@ -36,10 +36,14 @@ export function buildGroundApron(
   // high-frequency heightfields and at reduced working mesh resolutions.
   const segments = Math.max(1, Math.min(511, field.resolution - 1));
   const count = segments * 4;
-  const levels = [0, 0.2, 0.45, 0.7, 0.9, 1];
+  // Extra near-edge rings stop high-frequency erosion from stretching into
+  // visible radial grooves. Each ring is shared by its neighboring triangles.
+  const levels = [0, 0.035, 0.075, 0.14, 0.24, 0.38, 0.55, 0.75, 1];
   const vertices: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
+  const blends: number[] = [];
+  const boundaryColors: number[] = [];
   const heightScale = (TERRAIN_SIZE * project.heightScale / project.worldSize) * exaggeration;
 
   for (const t of levels) {
@@ -53,25 +57,35 @@ export function buildGroundApron(
       if (side === 2) { x = HALF - s * TERRAIN_SIZE; z = HALF; }
       if (side === 3) { x = -HALF; z = HALF - s * TERRAIN_SIZE; }
       const height = bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5);
-      // The terrain edge is exact at t=0. Moving outward, progressively
-      // low-pass the edge heights before relaxing into the flat meadow. This
-      // avoids radial spikes from tessellated, high-frequency erosion detail.
-      let blurred = height;
-      if (t > 0) {
-        let sum = height * 3;
-        const radius = TERRAIN_SIZE * 0.025;
-        for (const offset of [-2, -1, 1, 2]) {
-          const step = offset * radius;
-          const sx = THREE.MathUtils.clamp(x + (side % 2 === 0 ? step : 0), -HALF, HALF);
-          const sz = THREE.MathUtils.clamp(z + (side % 2 === 1 ? step : 0), -HALF, HALF);
-          sum += bilinear(field, sx / TERRAIN_SIZE + 0.5, sz / TERRAIN_SIZE + 0.5);
-        }
-        blurred = THREE.MathUtils.lerp(height, sum / 7, THREE.MathUtils.smoothstep(t, 0, 0.5));
+      // Preserve the exact incoming boundary, then rapidly attenuate the fine
+      // shoreline detail while the broad forms relax toward a level meadow.
+      // Sampling along the edge (not radially outward) avoids fan-shaped lines.
+      let broadHeight = height * 2.5;
+      let weight = 2.5;
+      const radius = TERRAIN_SIZE * 0.06;
+      for (const [offset, influence] of [
+        [-1, 1], [1, 1], [-0.6, 1.3], [0.6, 1.3], [-0.25, 1.6], [0.25, 1.6],
+      ]) {
+        const step = offset * radius;
+        const sx = THREE.MathUtils.clamp(x + (side % 2 === 0 ? step : 0), -HALF, HALF);
+        const sz = THREE.MathUtils.clamp(z + (side % 2 === 1 ? step : 0), -HALF, HALF);
+        broadHeight += bilinear(field, sx / TERRAIN_SIZE + 0.5, sz / TERRAIN_SIZE + 0.5)
+          * influence;
+        weight += influence;
       }
+      broadHeight /= weight;
+      const highFrequency = Math.exp(-30 * t);
+      const shorelineHeight = broadHeight + (height - broadHeight) * highFrequency;
+      const flatten = THREE.MathUtils.smoothstep(t, 0.02, 0.94);
+      const shapeY = THREE.MathUtils.lerp(shorelineHeight * heightScale, flatY, flatten);
       const scale = 1 + (APRON_WIDTH / HALF) * t;
       const px = x * scale, pz = z * scale;
-      vertices.push(px, THREE.MathUtils.lerp(blurred * heightScale, flatY, eased), pz);
+      vertices.push(px, shapeY, pz);
       uvs.push(0.5 + px / extent, 0.5 - pz / extent);
+      // The artist's existing material remains visible at the tile boundary,
+      // then crossfades to grass in linear color space.
+      blends.push(THREE.MathUtils.smoothstep(t, 0.045, 0.78));
+      boundaryColors.push(0.38, 0.45, 0.32);
     }
   }
   for (let ring = 0; ring < levels.length - 1; ring++) {
@@ -84,6 +98,10 @@ export function buildGroundApron(
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setAttribute('nhGrassBlend', new THREE.Float32BufferAttribute(blends, 1));
+  geo.setAttribute('nhEdgeAlbedo', new THREE.Float32BufferAttribute(boundaryColors, 3));
+  geo.userData.edgeVertexCount = count;
+  geo.userData.edgeLevels = levels;
   geo.setIndex(indices);
   geo.computeVertexNormals();
   geo.computeBoundingSphere();
