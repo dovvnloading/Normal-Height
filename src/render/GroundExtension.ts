@@ -222,12 +222,16 @@ export class GroundExtension {
       if (this.tufts) this.tufts.visible = false;
       return;
     }
+    // Always carry the low-detail meadow beyond the fog horizon, so the
+    // landscape never ends in a visible square. Ground reach controls the
+    // high-detail, instanced-grass area closest to the generated tile.
     const extent = TERRAIN_SIZE * settings.groundReach;
+    const horizonExtent = Math.max(54, extent);
     const base = minimum * settings.exaggeration - 0.048;
     const fieldKey = field && project ? [
       field.resolution, project.worldSize, project.heightScale, settings.exaggeration,
     ].join('/') : 'empty';
-    const key = [fieldKey, extent].join('|');
+    const key = [fieldKey, horizonExtent].join('|');
     // A new field object requires a fresh conforming border even if its
     // resolution and parameter values are unchanged.
     const currentField = this.lastField;
@@ -235,7 +239,7 @@ export class GroundExtension {
       this.geometryKey = key;
       this.lastField = field;
       this.meadow?.geometry.dispose();
-      const geometry = meadowGeometry(extent, !!field);
+      const geometry = meadowGeometry(horizonExtent, !!field);
       if (!this.meadow) {
         this.meadow = new THREE.Mesh(geometry, this.meadowMaterial);
         this.meadow.name = 'Expanded grassy landscape';
@@ -250,7 +254,7 @@ export class GroundExtension {
       }
       if (field && project) {
         this.apron = new THREE.Mesh(
-          buildGroundApron(field, project, settings.exaggeration, base, extent),
+          buildGroundApron(field, project, settings.exaggeration, base, horizonExtent),
           this.meadowMaterial,
         );
         this.apron.name = 'Terrain to meadow transition';
@@ -259,7 +263,7 @@ export class GroundExtension {
       }
     } else if (this.apron && base !== this.lastBase && field && project) {
       this.apron.geometry.dispose();
-      this.apron.geometry = buildGroundApron(field, project, settings.exaggeration, base, extent);
+      this.apron.geometry = buildGroundApron(field, project, settings.exaggeration, base, horizonExtent);
     }
     this.lastBase = base;
     if (this.meadow) {
@@ -267,7 +271,7 @@ export class GroundExtension {
       this.meadow.visible = true;
     }
     if (this.apron) this.apron.visible = true;
-    this.texture.repeat.set(extent * 1.7, extent * 1.7);
+    this.texture.repeat.set(horizonExtent * 1.7, horizonExtent * 1.7);
     const foliageKey = [extent, project?.seed ?? 1, settings.grassDensity].join('/');
     if (this.foliageKey !== foliageKey) {
       this.foliageKey = foliageKey;
