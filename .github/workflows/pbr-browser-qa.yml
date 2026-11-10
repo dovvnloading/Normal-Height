@@ -1,0 +1,42 @@
+name: PBR 1K browser acceptance and responsiveness (opt-in)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fix/pbr-acceptance-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pbr-browser-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chromium-pbr-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Build actual production app
+        run: npm run build
+      - name: Install Chromium and graphics dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Execute 512 and 1K worker responsiveness, 1K pixel export, 2K preflight
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts
+        env:
+          PBR_BROWSER_BENCH: '1'
+      - name: Store screenshots, traces and decoded ZIP evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbr-browser-qa-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 30
