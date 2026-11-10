@@ -153,9 +153,33 @@ for (const resolution of [512, 1024] as const) {
         p99FrameGapMs: percentile(0.99),
       };
     });
-    await testInfo.attach(`pbr-latency-${resolution}.json`, {
-      body: JSON.stringify(stats, null, 2), contentType: 'application/json',
+    const pipeline = await gl.evaluate((element: HTMLCanvasElement) => {
+      const context = element.getContext('webgl2');
+      const debug = context?.getExtension('WEBGL_debug_renderer_info');
+      return {
+        textureCount: Number(element.dataset.pbrTextureCount),
+        workerMs: Number(element.dataset.pbrWorkerMs),
+        packMs: Number(element.dataset.pbrPackMs),
+        firstRenderMs: Number(element.dataset.pbrFirstRenderMs ?? 0),
+        webglRenderer: context ? String(context.getParameter(
+          debug ? debug.UNMASKED_RENDERER_WEBGL : context.RENDERER)) : 'WebGL unavailable',
+      };
     });
+    await testInfo.attach(`pbr-latency-${resolution}.json`, {
+      body: JSON.stringify({ ...stats, pipeline }, null, 2),
+      contentType: 'application/json',
+    });
+    expect(pipeline.textureCount).toBe(3);
+    expect(Number.isFinite(pipeline.packMs)).toBe(true);
+    expect(pipeline.packMs).toBeGreaterThanOrEqual(0);
+    if (process.env.PBR_REAL_GPU) {
+      // Fail loudly if an ostensibly accelerated CI runner silently falls
+      // back to SwiftShader. This makes the latency budget hardware-backed.
+      expect(pipeline.webglRenderer).toMatch(/Apple|Metal|Paravirtual/i);
+      expect(pipeline.webglRenderer).not.toMatch(/SwiftShader|llvmpipe|Software/i);
+      expect(stats.p95FrameGapMs).toBeLessThan(120);
+      expect(stats.maxFrameGapMs).toBeLessThan(1000);
+    }
     expect(stats.frames).toBeGreaterThan(8);
     // A single cold SwiftShader texture upload or headless scheduling pause
     // can take >1.5 s, so the maximum is recorded rather than misrepresented
@@ -396,4 +420,150 @@ test('2K PBR preflight fails gracefully on constrained devices before starting a
   await expect(dialog.getByRole('alert')).toContainText('Choose a smaller resolution');
   const after = await page.evaluate(() => (window as Window & typeof globalThis & { __workersCreated: number }).__workersCreated);
   expect(after).toBe(before);
+});
+
+// Fixed-camera, fixed-sun PBR visual reference. The first CI run records the
+// 8x6 block-mean image to establish a real, reproducible SwiftShader baseline.
+// Subsequent runs compare this against a committed threshold/golden fixture.
+test('fixed-light 3D PBR material captures a reproducible visual baseline (#17)', async ({ page }, testInfo) => {
+  test.skip(!process.env.PBR_VISUAL_GOLDEN,
+    'Deterministic visual acceptance runs on pinned browser/container CI.');
+  test.setTimeout(180_000);
+  await loadFastProject(page, 512);
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 60_000 });
+  await page.getByRole('button', { name: 'Display settings' }).click();
+  const panel = page.getByRole('dialog', { name: 'Display settings' });
+  await expect(panel.getByRole('checkbox', { name: 'Enable sky dome' })).not.toBeChecked();
+  await expect(panel.getByRole('checkbox', { name: 'Expand ground' })).not.toBeChecked();
+  await expect(panel.getByRole('slider', { name: 'Sun direction' })).toHaveValue('315');
+  await expect(panel.getByRole('slider', { name: 'Sun elevation' })).toHaveValue('38');
+  await page.getByRole('button', { name: 'Close display settings' }).click();
+  await canvas.evaluate(async () => {
+    await new Promise<void>(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  const data = await canvas.evaluate((source: HTMLCanvasElement) => {
+    const width = 160, height = 120, cols = 8, rows = 6;
+    const scratch = document.createElement('canvas');
+    scratch.width = width; scratch.height = height;
+    const ctx = scratch.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(source, 0, 0, width, height);
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    const cells: number[][] = [];
+    let variance = 0;
+    for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+      const rgb = [0, 0, 0];
+      let count = 0;
+      for (let y = row * 20; y < (row + 1) * 20; y++)
+        for (let x = col * 20; x < (col + 1) * 20; x++) {
+          const p = (y * width + x) * 4;
+          for (let k = 0; k < 3; k++) rgb[k] += pixels[p + k];
+          count++;
+        }
+      cells.push(rgb.map(value => Math.round(value / count)));
+    }
+    const gray = cells.map(([r, g, b]) => (r + g + b) / 3);
+    const mean = gray.reduce((sum, n) => sum + n, 0) / gray.length;
+    variance = gray.reduce((sum, n) => sum + (n - mean) ** 2, 0) / gray.length;
+    const png = source.toDataURL('image/png').split(',')[1];
+    return { width: source.width, height: source.height, cells,
+      contrast: Math.round(Math.sqrt(variance)), png };
+  });
+  await testInfo.attach('pbr-fixed-light-golden-candidate.json', {
+    body: JSON.stringify({ width: data.width, height: data.height,
+      cells: data.cells, contrast: data.contrast }, null, 2),
+    contentType: 'application/json',
+  });
+  await testInfo.attach('pbr-fixed-light-preview.png', {
+    body: Buffer.from(data.png, 'base64'),
+    contentType: 'image/png',
+  });
+  expect(data.cells).toHaveLength(48);
+  expect(data.contrast).toBeGreaterThan(20);
+  // Version-controlled golden from a real seeded Chromium/SwiftShader capture.
+  // Compare a 160x120 downsample in 8x6 blocks to avoid antialiasing noise,
+  // while keeping the alpine relief, UV orientation, and color balance fixed.
+  const golden = JSON.parse(await readFile(
+    new URL('./fixtures/pbr-fixed-light-swiftshader.json', import.meta.url), 'utf8',
+  )) as { width: number; height: number; cells: number[][]; contrast: number };
+  expect([data.width, data.height]).toEqual([golden.width, golden.height]);
+  const errors = data.cells.flatMap((rgb, i) =>
+    rgb.map((color, channel) => Math.abs(color - golden.cells[i][channel])));
+  const meanError = errors.reduce((sum, error) => sum + error, 0) / errors.length;
+  const sorted = errors.sort((a, b) => a - b);
+  const p95Error = sorted[Math.floor(sorted.length * 0.95)];
+  await testInfo.attach('pbr-3d-golden-delta.json', {
+    body: JSON.stringify({ meanError, p95Error, maxError: sorted.at(-1),
+      referenceContrast: golden.contrast, actualContrast: data.contrast }, null, 2),
+    contentType: 'application/json',
+  });
+  expect(meanError).toBeLessThanOrEqual(8);
+  expect(p95Error).toBeLessThanOrEqual(20);
+  expect(Math.abs(data.contrast - golden.contrast)).toBeLessThanOrEqual(12);
+});
+
+test('2K cancellation terminates workers and a smaller PBR export recovers under bounded RAM (#17)', async ({ page }, testInfo) => {
+  test.skip(!process.env.PBR_CONSTRAINED_CANCEL,
+    'Real export cancellation is exercised only inside the capped 2-GiB container.');
+  test.setTimeout(120_000);
+  const errors: string[] = [];
+  const downloads: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('download', download => downloads.push(download.suggestedFilename()));
+  await loadFastProject(page, 512);
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'deviceMemory', { value: 8, configurable: true });
+    const scope = window as typeof window & {
+      __exportWorkerAudit?: { started: number; terminated: number };
+    };
+    const count = { started: 0, terminated: 0 };
+    scope.__exportWorkerAudit = count;
+    const Original = window.Worker;
+    window.Worker = class extends Original {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        count.started++;
+      }
+      override terminate() {
+        count.terminated++;
+        super.terminate();
+      }
+    };
+  });
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('pbr');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('2048');
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Cancel export' })).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel export' }).click();
+  await expect(dialog.locator('.export-progress')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Export bundle', exact: true })).toBeEnabled();
+  await page.waitForTimeout(300);
+  expect(downloads).toHaveLength(0);
+
+  // A successful retry proves we did not leak an active Worker or leave the
+  // export UI in the prior generation's busy/error state.
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
+  const nextDownload = page.waitForEvent('download', { timeout: 60_000 });
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  const archive = await nextDownload;
+  expect(archive.suggestedFilename()).toBe('pbr-acceptance-512-256-pbr.zip');
+  const path = testInfo.outputPath('pbr-256-after-cancel.zip');
+  await archive.saveAs(path);
+  const files = unzipSync(new Uint8Array(await readFile(path)));
+  expect(files['pbr-acceptance-512-256-basecolor.png']).toBeDefined();
+  expect(files['pbr-acceptance-512-256-height16.png']).toBeDefined();
+  const workerAudit = await page.evaluate(() =>
+    (window as typeof window & {
+      __exportWorkerAudit: { started: number; terminated: number };
+    }).__exportWorkerAudit);
+  await testInfo.attach('pbr-export-cancel-workers.json', {
+    body: JSON.stringify(workerAudit, null, 2), contentType: 'application/json',
+  });
+  expect(workerAudit.started).toBeGreaterThanOrEqual(3);
+  expect(workerAudit.terminated).toBe(workerAudit.started);
+  expect(downloads).toEqual(['pbr-acceptance-512-256-pbr.zip']);
+  expect(errors).toEqual([]);
 });

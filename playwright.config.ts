@@ -25,13 +25,18 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    // On macOS the full Chromium channel uses new headless mode and Metal,
+    // unlike the default Linux headless shell/SwiftShader golden environment.
+    channel: process.env.PBR_REAL_GPU ? 'chromium' : undefined,
     launchOptions: {
-      args: [
-        '--use-gl=angle',
-        '--use-angle=swiftshader',
-        '--enable-unsafe-swiftshader',
-        '--disable-dev-shm-usage',
-      ],
+      args: process.env.PBR_REAL_GPU
+        ? ['--use-gl=angle', '--use-angle=metal', '--ignore-gpu-blocklist']
+        : [
+          '--use-gl=angle',
+          '--use-angle=swiftshader',
+          '--enable-unsafe-swiftshader',
+          '--disable-dev-shm-usage',
+        ],
     },
   },
   projects: [

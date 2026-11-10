@@ -1,0 +1,126 @@
+name: PBR visual and physically memory-capped 2K acceptance
+
+on:
+  workflow_dispatch:
+  # Explicit/branch-only QA; expensive 2K+Metal jobs should not run on
+  # every unrelated pull request after this feature merges.
+  push:
+    branches: ['fix/pbr-closure-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pbr-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fixed-light-visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Verify actual 3D PBR under fixed camera and studio light
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep 'fixed-light 3D PBR' --retries=0
+        env:
+          PBR_VISUAL_GOLDEN: '1'
+      - name: Preserve 3D reference and independent color metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbr-visual-reference
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
+
+  bounded-2k-memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      # Actual Linux cgroup memory+swap limit covers Chromium, Node, workers,
+      # image encoding and the production test server; not a mocked API hint.
+      options: --memory=2g --memory-swap=2g --shm-size=256m
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify the Linux container is genuinely memory constrained
+        shell: bash
+        run: |
+          set -euo pipefail
+          cap="$(cat /sys/fs/cgroup/memory.max)"
+          echo "cgroup physical memory ceiling (bytes): $cap"
+          test "$cap" != "max"
+          test "$cap" -ge 1900000000
+          test "$cap" -le 2147483648
+      - name: Export and independently decode full 2K PBR ZIP under 2 GiB
+        shell: bash
+        env:
+          PBR_BROWSER_BENCH: '1'
+        run: |
+          set +e
+          npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep '2K full PBR export' --retries=0
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            # Playwright cleans its output directory on a new invocation.
+            # Preserve the real 2K archive evidence separately.
+            mv test-results test-results-full-2k
+            PBR_CONSTRAINED_CANCEL=1 npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep '2K cancellation' --retries=0
+            status=$?
+          fi
+          mkdir -p test-results
+          node -e "const fs=require('node:fs');const p='/sys/fs/cgroup/'; const read=x=>fs.readFileSync(p+x,'utf8').trim();fs.writeFileSync('test-results/pbr-cgroup-memory.json',JSON.stringify({ limitBytes:read('memory.max'), peakBytes:read('memory.peak'), events:read('memory.events'), testExitCode:Number(process.argv[1]) },null,2))" "$status"
+          cat test-results/pbr-cgroup-memory.json
+          exit "$status"
+      - name: Preserve exported file and measured cgroup RSS
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbr-real-2gib-memory-qa
+          path: |
+            test-results/
+            test-results-full-2k/
+            playwright-report/
+          retention-days: 30
+
+  hardware-accelerated-pbr:
+    # The standard Apple Silicon macOS runner exposes a Metal-backed virtual
+    # GPU. Renderer detection in the test prevents accidental software results.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium
+      - name: Benchmark rapid 512/1024 terrain material edits on Metal
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep 'rapid material edits' --retries=0
+        env:
+          PBR_BROWSER_BENCH: '1'
+          PBR_REAL_GPU: '1'
+      - name: Preserve actual GPU name and frame-time measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbr-macos-metal-frame-metrics
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
