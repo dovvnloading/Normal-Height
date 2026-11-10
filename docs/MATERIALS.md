@@ -57,6 +57,13 @@ There is a real sampling limit: a 2K map spanning kilometers cannot encode centi
 
 Run \`npm test\`, \`npm run build\` and \`npm run test:e2e\`. PBR-specific unit tests verify deterministic output, map alignment, unit length/normal conventions, flat-surface behavior, packed channels, project compatibility, and ZIP content. The full export encoder runs in a separate cancellable Web Worker to avoid blocking the editing interface.
 
+
+### Follow-up QA and preview performance
+
+The 3D PBR preview now updates the existing four WebGL DataTexture objects in place when the texture dimensions and color spaces are unchanged. This reduces GPU allocation churn during biome and surface edits. The underlying synthesized RGBA data still comes from the worker and is shared between 2D/3D consumers; the original erosion field is not regenerated.
+
+High-resolution browser acceptance is intentionally split from routine CI: the opt-in PBR workflow performs a **real 2048 × 2048 material ZIP export** with a simulated adequate device-memory hint, decodes the actual 16-bit height and representative RGBA maps, and checks GL/DX normal conventions and channel dimensions. The routine workflow still checks the low-memory **2K rejection before any Worker starts**. A device-memory hint is only a preflight input, **not** a simulated physical RAM limit or a promise of success on every GPU. Performance and peak-RSS profiling on actual low-memory devices remain outstanding.
+
 ## Repair notes: material scale, caching and export safety
 
 New badlands and volcano scene presets initialize arid and volcanic procedural materials; other presets initialize alpine. Switching presets starts a new scene with new material defaults, while importing a previously saved project preserves its surface overrides. A legacy project without explicit surface settings is saved with its resolved defaults.
