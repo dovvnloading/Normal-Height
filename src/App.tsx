@@ -32,6 +32,7 @@ import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
+import { loadViewSettings, saveViewSettings } from './model/viewSettings';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
@@ -55,15 +56,6 @@ function savedTheme(): ThemeMode | null {
   }
 }
 
-const DEFAULT_SETTINGS: ViewSettings = {
-  material: 'pbr',
-  sunAzimuth: 315,
-  sunElevation: 38,
-  exaggeration: 1,
-  contours: false,
-  wireframe: false,
-  autoRotate: false,
-};
 function initialProject() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -91,7 +83,7 @@ export default function App() {
   const [editingSplineId, setEditingSplineId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [channel, setChannel] = useState<MapChannel>('height');
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<ViewSettings>(loadViewSettings);
   const [automatic, setAutomatic] = useState(true);
   // No saved choice means follow the OS; a manual toggle becomes persistent.
   const [themeChoice, setThemeChoice] = useState<ThemeMode | null>(savedTheme);
@@ -135,6 +127,7 @@ export default function App() {
       theme === 'dark' ? '#292e30' : '#e9ebe7',
     );
   }, [theme]);
+  useEffect(() => saveViewSettings(settings), [settings]);
   const toggleTheme = () => {
     const next: ThemeMode = theme === 'dark' ? 'light' : 'dark';
     setThemeChoice(next);

@@ -78,7 +78,10 @@ The solver is an artistic particle model, not a calibrated watershed or geologic
 
 ### Preview
 
-- **3D:** real displaced geometry, computed normals, cast shadows, alpine/clay/elevation materials, sun controls, contours, wireframe, orbit controls, and image capture.
+- **3D:** real displaced geometry, computed normals, cast shadows, alpine/clay/elevation/PBR materials, physical atmospheric sky, dynamic clouds, matched sun and ambient illumination, contours, wireframe, orbit controls, and image capture.
+- **Sky dome (opt-in):** open **Display → Atmosphere & lighting** and choose **Clear day**, **Golden hour**, or **Overcast**, or enable the sky and customize sun position, haze, Rayleigh scattering, exposure, cloud cover, moving cloud shadows, and wind. The physical sky and clouds feed a debounced PBR environment map; solar color, ambient illumination, and fog follow the same weather model. Turning it off restores neutral studio lighting and releases atmospheric GPU resources.
+- **Expand ground (opt-in):** open **Display → Landscape context** for a textured grassy meadow beyond the tile. The terrain's outer preview material blends into matching grass, with a conforming, smoothed height apron and normal continuity. Grass instances sway with the same wind; ground reach and density are independent. Meadow resources exist only when enabled. No terrain simulations or exported maps are modified.
+- **Preview preferences:** sky, cloud, wind, lighting, material and ground settings are validated and stored separately in local browser storage (`normal-height.view.v1`), restoring after a reload without changing portable terrain projects. Weather redraw cadence adapts to GPU render cost, with fully paused idle animation at zero wind. See [Environment implementation and QA](docs/ENVIRONMENT.md).
 - **2D:** height, shaded terrain, OpenGL normals, physical slope, flow, wear, and deposition, with pan/zoom and pixel/elevation inspection.
 - **Split view:** inspect the surface and map together.
 - The 3D display mesh is capped at 512 × 512 vertices. Working simulation grids reach 1024 × 1024 and export grids reach 2048 × 2048. High-resolution exports rerun the entire connected graph.
