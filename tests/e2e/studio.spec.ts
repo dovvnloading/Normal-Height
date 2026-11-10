@@ -827,9 +827,11 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   // only the top-down terrain tile.
   const bounds = await canvas.boundingBox();
   expect(bounds).not.toBeNull();
-  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.48);
+  // OrbitControls increases its polar angle toward the horizon when the
+  // pointer moves UP. Dragging downward accidentally produced a top view.
+  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.56);
   await page.mouse.down();
-  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.72, { steps: 9 });
+  await page.mouse.move(bounds!.x + bounds!.width * 0.48, bounds!.y + bounds!.height * 0.46, { steps: 10 });
   await page.mouse.up();
   await captureTerrain(canvas, testInfo, 'atmosphere-overcast-horizon.png');
 
