@@ -105,6 +105,18 @@ describe('sediment-conserving connected watershed erosion', () => {
     expect(after.eroded).toBe(0);
   });
 
+  it('does not carve a grid of parallel rivers onto a perfectly tilted plane', () => {
+    const n = 128;
+    const plane = fixture(n, (u, v) => 0.23 + 0.44 * u + 0.09 * v);
+    const result = hydraulicErosion(plane, n, parameters);
+    // Sheet runoff on a plane should not spontaneously form parallel D8 grooves;
+    // erosion is permitted where actual cross-slope valleys or basin-sized
+    // contributing flow supplies geomorphological evidence.
+    expect(result.eroded).toBe(0);
+    expect(result.height).toEqual(plane);
+    expect(Math.max(...result.flow)).toBeGreaterThan(100);
+  });
+
   it('preserves masked geology and routes the rain into flow diagnostics', () => {
     const n = 48, height = fixture(n, (_u, v) => 0.9 - v * 0.7);
     const zero = new Float32Array(n * n);
