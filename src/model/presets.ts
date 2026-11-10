@@ -61,7 +61,7 @@ export const PRESETS: Preset[] = [
     seed: 48271,
     color: '#748872',
     build: () => [
-      node('range', 'mountain', 0, { profile: 'orogenic', dissection: 0.86 }, 'Dissected alpine orogen'),
+      node('range', 'mountain', 0, { profile: 'orogenic', dissection: 0.86 }, 'Alpine spine'),
       node('warp', 'warp', 270, { strength: 0.12, scale: 2.8 }, 'Break the symmetry'),
       node('erosion', 'hydraulic', 540, {}, 'Carve the watershed'),
       node('thermal', 'thermal', 810, { iterations: 10, strength: 0.35 }, 'Settle the scree'),
