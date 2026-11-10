@@ -8,6 +8,7 @@ import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { Atmosphere, skyLighting } from './Atmosphere';
 import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
+import { updatePreviewTexture } from './pbrTexture';
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
@@ -674,26 +675,22 @@ export class TerrainScene {
       this.pbrRelease?.();
       this.pbrRelease = null;
       const n = maps.resolution;
-      const texture = (rgba: Uint8ClampedArray, srgb = false): THREE.DataTexture => {
-        // A Uint8 view avoids copying the synthesized map yet another time.
-        const data = new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
-        const result = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
-        result.flipY = true; // row 0 north; matches plane geometry v=1
-        result.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-        result.generateMipmaps = true;
-        result.minFilter = THREE.LinearMipmapLinearFilter;
-        result.magFilter = THREE.LinearFilter;
-        result.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-        result.needsUpdate = true;
-        return result;
-      };
-      const albedo = texture(maps.basecolor, true);
-      const roughness = texture(pbrPixels(maps, field, project, 'roughness'));
-      const occlusion = texture(pbrPixels(maps, field, project, 'ao'));
+      const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      const existing = this.pbrTextures;
+      const tex = (index: number, rgba: Uint8ClampedArray, srgb = false) =>
+        updatePreviewTexture(existing[index], rgba, n, srgb, anisotropy);
+      const albedo = tex(0, maps.basecolor, true);
+      const roughness = tex(1, pbrPixels(maps, field, project, 'roughness'));
+      const occlusion = tex(2, pbrPixels(maps, field, project, 'ao'));
       // Geometric normals already hold the macro terrain slopes.
-      const microNormal = texture(pbrPixels(maps, field, project, 'detailNormal'));
-      this.pbrTextures.forEach((old) => old.dispose());
+      const microNormal = tex(3, pbrPixels(maps, field, project, 'detailNormal'));
       this.pbrTextures = [albedo, roughness, occlusion, microNormal];
+      const materialLayoutChanged =
+        this.material.map !== albedo ||
+        this.material.normalMap !== microNormal ||
+        this.material.roughnessMap !== roughness ||
+        this.material.aoMap !== occlusion ||
+        this.material.vertexColors;
       this.material.map = albedo;
       this.material.normalMap = microNormal;
       this.material.roughnessMap = roughness;
@@ -704,7 +701,7 @@ export class TerrainScene {
       this.material.vertexColors = false;
       this.material.roughness = 1;
       this.material.metalness = 0;
-      this.material.needsUpdate = true;
+      if (materialLayoutChanged) this.material.needsUpdate = true;
       this.groundExtension?.syncBoundary(this.terrain!, this.settings.exaggeration);
       this.renderer.domElement.dataset.materialStatus = 'ready';
       this.needsRender = true;
