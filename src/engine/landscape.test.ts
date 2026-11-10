@@ -96,8 +96,10 @@ describe('multi-scale landscape evolution', () => {
   });
 
   it('retains previous watershed and particle solvers for A/B testing', () => {
-    const n = 48, z = field(n, (u, v) => 0.75 - 0.6 * v +
-      0.2 * (u - 0.5) ** 2);
+    // A resolved valley is required for any of these geomorphic methods to
+    // act: a tiny 48², nearly featureless test field is not a useful A/B target.
+    const n = 129, z = field(n, (u, v) => 0.88 - 0.65 * v +
+      0.47 * (u - 0.5) ** 2 + 0.025 * Math.cos(15 * u) * Math.sin(v * 9));
     const old = hydraulicErosion(z, n, { ...params, method: 'droplet' });
     const legacyWatershed = hydraulicErosion(z, n, { ...params, method: 'watershed' });
     const latest = hydraulicErosion(z, n, params);
