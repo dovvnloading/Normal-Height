@@ -9,6 +9,7 @@ export const VIEW_STORAGE_KEY = 'normal-height.view.v1';
 
 export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   material: 'pbr',
+  nearFieldDetail: true,
   sunAzimuth: 315,
   sunElevation: 38,
   exaggeration: 1,
@@ -41,6 +42,7 @@ const ranges: Partial<Record<keyof ViewSettings, [number, number]>> = {
 
 const switches: (keyof ViewSettings)[] = [
   'contours', 'wireframe', 'autoRotate', 'skyEnabled', 'expandGround',
+  'nearFieldDetail',
 ];
 
 export function parseViewSettings(value: unknown): ViewSettings {
