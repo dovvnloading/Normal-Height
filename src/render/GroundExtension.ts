@@ -103,6 +103,7 @@ export function buildGroundApron(
   geo.userData.edgeLevels = levels;
   geo.setIndex(indices);
   geo.computeVertexNormals();
+  geo.setAttribute('nhOriginalNormal', geo.getAttribute('normal').clone());
   geo.computeBoundingSphere();
   return geo;
 }
@@ -363,6 +364,7 @@ export class GroundExtension {
     if (sourceSegments !== segments) return;
     const edgeColors = destination.getAttribute('nhEdgeAlbedo');
     const normalColors = destination.getAttribute('normal');
+    const originalNormals = destination.getAttribute('nhOriginalNormal');
     const tex = terrain.material.map as THREE.DataTexture | null;
     const image = tex?.image as { data?: Uint8Array; width?: number; height?: number } | undefined;
     const pixels = image?.data;
@@ -404,13 +406,18 @@ export class GroundExtension {
         const match = 1 - THREE.MathUtils.smoothstep(levels[ring], 0, 0.14);
         if (match <= 0) continue;
         computedNormal.set(
-          normalColors.getX(index), normalColors.getY(index), normalColors.getZ(index),
+          originalNormals.getX(index), originalNormals.getY(index), originalNormals.getZ(index),
         ).lerp(boundaryNormal, match).normalize();
         normalColors.setXYZ(index, computedNormal.x, computedNormal.y, computedNormal.z);
       }
     }
     edgeColors.needsUpdate = true;
     normalColors.needsUpdate = true;
+  }
+
+  /** The physically lit meadow and foliage share the sky's cloud shadows. */
+  get materials(): THREE.MeshStandardMaterial[] {
+    return [this.meadowMaterial, this.apronMaterial, this.bladeMaterial];
   }
 
   private lastField: HeightField | null = null;
