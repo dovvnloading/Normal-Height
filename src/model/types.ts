@@ -112,7 +112,6 @@ export interface ViewSettings {
   cloudShadowStrength: number;
   expandGround: boolean;
   groundReach: number;
-  grassDensity: number;
 }
 export interface ParamDefinition {
   key: string;

@@ -9,7 +9,7 @@ const settings: ViewSettings = {
   contours: false, wireframe: false, autoRotate: false,
   skyEnabled: true, skyTurbidity: 4.5, skyRayleigh: 2.2, skyExposure: 1,
   cloudCoverage: 0.42, cloudSpeed: 0.35, cloudShadowStrength: 0.72,
-  expandGround: false, groundReach: 5, grassDensity: 0.75,
+  expandGround: false, groundReach: 5,
 };
 
 function flatField(height: number): HeightField {

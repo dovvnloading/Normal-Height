@@ -24,7 +24,6 @@ export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   cloudShadowStrength: 0.72,
   expandGround: false,
   groundReach: 5,
-  grassDensity: 0.75,
 };
 
 const ranges: Partial<Record<keyof ViewSettings, [number, number]>> = {
@@ -38,7 +37,6 @@ const ranges: Partial<Record<keyof ViewSettings, [number, number]>> = {
   cloudSpeed: [0, 2],
   cloudShadowStrength: [0, 1],
   groundReach: [3, 8],
-  grassDensity: [0.2, 1.5],
 };
 
 const switches: (keyof ViewSettings)[] = [

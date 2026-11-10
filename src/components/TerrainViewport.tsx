@@ -946,7 +946,7 @@ export function TerrainViewport({
                 checked={settings.expandGround}
                 onChange={(e) => change({ expandGround: e.target.checked })}
               />
-              <span>Expand ground · grassy meadow</span>
+              <span>Expand ground · textured meadow</span>
             </label>
             {settings.expandGround && (
               <div className="nh-display-subsection">
@@ -954,11 +954,6 @@ export function TerrainViewport({
                   <span>Ground reach<b>{settings.groundReach.toFixed(1)}×</b></span>
                   <input aria-label="Ground reach" type="range" min="3" max="8" step="0.5"
                     value={settings.groundReach} onChange={(e) => change({ groundReach: Number(e.target.value) })} />
-                </label>
-                <label className="nh-display-range">
-                  <span>Grass density<b>{Math.round(settings.grassDensity * 100)}%</b></span>
-                  <input aria-label="Grass density" type="range" min="0.2" max="1.5" step="0.05"
-                    value={settings.grassDensity} onChange={(e) => change({ grassDensity: Number(e.target.value) })} />
                 </label>
                 <p className="nh-display-help">The meadow flattens beyond the heightmap boundary.
                   Your generated terrain and exported maps stay untouched.</p>

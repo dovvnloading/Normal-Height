@@ -180,45 +180,6 @@ function meadowGeometry(extent: number, hasTile: boolean): THREE.BufferGeometry 
   return geometry;
 }
 
-function bladeGeometry(): THREE.BufferGeometry {
-  const positions: number[] = [], colors: number[] = [];
-  const low = new THREE.Color('#496e2e'), high = new THREE.Color('#b3b875');
-  for (let blade = 0; blade < 4; blade++) {
-    const angle = (blade * Math.PI) / 4;
-    const c = Math.cos(angle), s = Math.sin(angle);
-    const height = 0.019 + (blade % 3) * 0.004;
-    const width = 0.0045 + (blade % 2) * 0.002;
-    const points = [
-      [-width, 0, 0],
-      [width, 0, 0],
-      [-width * 0.42, height * 0.62, 0.009],
-      [width * 0.42, height * 0.62, 0.009],
-      [0.006, height, 0.019],
-    ];
-    for (const i of [0, 1, 2, 1, 3, 2, 2, 3, 4]) {
-      const [x, y, z] = points[i];
-      positions.push(x * c - z * s, y, x * s + z * c);
-      const tint = low.clone().lerp(high, y / height);
-      colors.push(tint.r, tint.g, tint.b);
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geometry.computeVertexNormals();
-  return geometry;
-}
-
-function seededRandom(seed: number): () => number {
-  let state = (seed >>> 0) || 1;
-  return () => {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    return (state >>> 0) / 4294967296;
-  };
-}
-
 export class GroundExtension {
   private readonly texture = grassTexture();
   private readonly meadowMaterial = new THREE.MeshStandardMaterial({
@@ -227,15 +188,9 @@ export class GroundExtension {
   private readonly apronMaterial = new THREE.MeshStandardMaterial({
     map: this.texture, color: '#ffffff', roughness: 0.98, metalness: 0, side: THREE.DoubleSide,
   });
-  private readonly bladeTime = { value: 0 };
-  private readonly bladeMaterial = new THREE.MeshStandardMaterial({
-    color: '#ffffff', vertexColors: true, roughness: 1, side: THREE.DoubleSide,
-  });
   private meadow: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
   private apron: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
-  private tufts: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
   private geometryKey = '';
-  private foliageKey = '';
 
   constructor(private readonly scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
@@ -251,19 +206,6 @@ export class GroundExtension {
       shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>',
         '#include <map_fragment>\ndiffuseColor.rgb = mix(vNHEdgeAlbedo, diffuseColor.rgb, vNHGrassBlend);');
     };
-    this.bladeMaterial.onBeforeCompile = (shader) => {
-      shader.uniforms.nhWindTime = this.bladeTime;
-      shader.vertexShader = 'uniform float nhWindTime;\n' + shader.vertexShader;
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        #ifdef USE_INSTANCING
-          float sway = sin(nhWindTime * 1.9 + instanceMatrix[3].x * 2.1 + instanceMatrix[3].z * 1.6);
-          transformed.x += position.y * position.y * sway * 2.6;
-          transformed.z += position.y * position.y * cos(nhWindTime + instanceMatrix[3].z) * 1.2;
-        #endif`,
-      );
-    };
   }
 
   update(
@@ -276,12 +218,11 @@ export class GroundExtension {
     if (!settings.expandGround) {
       if (this.meadow) this.meadow.visible = false;
       if (this.apron) this.apron.visible = false;
-      if (this.tufts) this.tufts.visible = false;
       return;
     }
-    // Always carry the low-detail meadow beyond the fog horizon, so the
-    // landscape never ends in a visible square. Ground reach controls the
-    // high-detail, instanced-grass area closest to the generated tile.
+    // Carry the textured ground beyond the fog horizon, without any upright
+    // grass meshes, sprites or foliage instances. Ground reach remains an
+    // artist-controlled preview extent.
     const extent = TERRAIN_SIZE * settings.groundReach;
     const horizonExtent = Math.max(54, extent);
     const base = minimum * settings.exaggeration - 0.048;
@@ -330,27 +271,7 @@ export class GroundExtension {
     if (this.apron) this.apron.visible = true;
     this.texture.repeat.set(horizonExtent * 0.8, horizonExtent * 0.8);
     if (terrain) this.syncBoundary(terrain, settings.exaggeration);
-    const foliageKey = [extent, project?.seed ?? 1].join('/');
-    if (this.foliageKey !== foliageKey) {
-      this.foliageKey = foliageKey;
-      if (this.tufts) {
-        this.scene.remove(this.tufts);
-        this.tufts.geometry.dispose();
-        this.tufts.dispose(); // release per-instance GPU matrix/color buffers
-      }
-      this.tufts = this.createTufts(extent, project?.seed ?? 1);
-      this.scene.add(this.tufts);
-    }
-    if (this.tufts) {
-      const edge = HALF + APRON_WIDTH + 0.08;
-      const area = Math.max(0, extent * extent - (2 * edge) ** 2);
-      // Density changes only update the active instance count; no expensive
-      // blade geometry or GPU buffers are recreated while dragging the slider.
-      this.tufts.count = Math.min(this.tufts.instanceMatrix.count,
-        Math.round(area * 27 * settings.grassDensity));
-      this.tufts.position.y = base + 0.001;
-      this.tufts.visible = true;
-    }
+
   }
 
 
@@ -432,53 +353,13 @@ export class GroundExtension {
     return this.texture;
   }
 
-  /** The physically lit meadow and foliage share the sky's cloud shadows. */
+  /** Both flat ground surfaces receive the same physical sky/cloud lighting. */
   get materials(): THREE.MeshStandardMaterial[] {
-    return [this.meadowMaterial, this.apronMaterial, this.bladeMaterial];
+    return [this.meadowMaterial, this.apronMaterial];
   }
 
   private lastField: HeightField | null = null;
   private lastBase = 0;
-
-  private createTufts(extent: number, seed: number) {
-    const half = extent * 0.5;
-    const edge = HALF + APRON_WIDTH + 0.08;
-    const availableArea = Math.max(0, extent * extent - (2 * edge) ** 2);
-    const count = Math.min(8500, Math.round(availableArea * 27 * 1.5));
-    const mesh = new THREE.InstancedMesh(bladeGeometry(), this.bladeMaterial, count);
-    mesh.name = 'Instanced meadow grass';
-    mesh.castShadow = false;
-    // Lighting includes shared moving cloud shadows; per-blade 2048² PCF
-    // terrain shadow sampling is too expensive at grazing camera angles.
-    mesh.receiveShadow = false;
-    const random = seededRandom(seed ^ 0x759ef20a);
-    const dummy = new THREE.Object3D();
-    const color = new THREE.Color();
-    for (let i = 0; i < count; i++) {
-      let x = 0, z = 0;
-      for (let attempt = 0; attempt < 80; attempt++) {
-        x = (random() * 2 - 1) * (half - 0.12);
-        z = (random() * 2 - 1) * (half - 0.12);
-        if (Math.max(Math.abs(x), Math.abs(z)) > edge) break;
-      }
-      dummy.position.set(x, 0, z);
-      dummy.rotation.set(0, random() * Math.PI, 0);
-      const scale = 0.65 + random() * 0.95;
-      dummy.scale.setScalar(scale);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-      color.setHSL(0.23 + random() * 0.06, 0.32 + random() * 0.16, 0.39 + random() * 0.19);
-      mesh.setColorAt(i, color);
-    }
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-    mesh.computeBoundingSphere();
-    return mesh;
-  }
-
-  tick(seconds: number, windSpeed: number) {
-    this.bladeTime.value = seconds * windSpeed;
-  }
 
   dispose() {
     if (this.meadow) {
@@ -489,14 +370,8 @@ export class GroundExtension {
       this.scene.remove(this.apron);
       this.apron.geometry.dispose();
     }
-    if (this.tufts) {
-      this.scene.remove(this.tufts);
-      this.tufts.geometry.dispose();
-      this.tufts.dispose();
-    }
     this.meadowMaterial.dispose();
     this.apronMaterial.dispose();
-    this.bladeMaterial.dispose();
     this.texture.dispose();
   }
 }
