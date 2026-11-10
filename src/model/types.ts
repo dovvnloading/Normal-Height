@@ -96,6 +96,8 @@ export type MapChannel = 'height' | 'terrain' | 'normal' | 'slope' | 'flow' | 'w
 export type ViewMode = '3d' | '2d' | 'split';
 export interface ViewSettings {
   material: 'alpine' | 'clay' | 'height' | 'pbr';
+  /** Display-only near-camera procedural detail, independent of PBR map exports. */
+  nearFieldDetail: boolean;
   sunAzimuth: number;
   sunElevation: number;
   exaggeration: number;
