@@ -185,7 +185,7 @@ test('1K browser export decodes every PBR PNG and aligns with the visible 2D map
     return [[0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8], [0.5, 0.5]].map(([u, v]) => {
       const x = Math.min(canvas.width - 1, Math.floor((left + u * side) * canvas.width / rect.width));
       const y = Math.min(canvas.height - 1, Math.floor((top + v * side) * canvas.height / rect.height));
-      return { u, v, rgb: Array.from(ctx.getImageData(x, y, 1, 1).data.subarray(0, 3)) };
+      return { u, v, x, y, rgb: Array.from(ctx.getImageData(x, y, 1, 1).data.subarray(0, 3)) };
     });
   });
   await page.getByRole('button', { name: 'Export maps', exact: true }).click();
@@ -243,14 +243,39 @@ test('1K browser export decodes every PBR PNG and aligns with the visible 2D map
       splat[p] + splat[p + 1] + splat[p + 2] + splat[p + 3] === 255);
   }
   expect(mismatches, 'Export channel packing and GL/DX conventions').toEqual({});
-  const albedo = pixels('basecolor');
-  for (const { u, v, rgb } of previews) {
-    const x = Math.floor(u * 1023), y = Math.floor(v * 1023);
-    const offset = (y * 1024 + x) * 4;
-    // Canvas preview is downsampled with bilinear filtering; exported data is
-    // an unfiltered 1024² texture in the same north-first world orientation.
-    for (let c = 0; c < 3; c++)
-      expect(Math.abs(rgb[c] - albedo[offset + c])).toBeLessThanOrEqual(35);
+  // Verify the exported PNG *as it actually appears in the 2D canvas*.
+  // Comparing a single unfiltered 1K texel against a downsampled 2D canvas
+  // pixel is not an equivalent measurement: high-frequency rock/vegetation
+  // transitions can legitimately differ by 70+ sRGB levels. Decode the
+  // independently exported PNG in Chromium and apply the exact same 2D
+  // canvas scaling, interpolation, DPR, and positioning before comparing.
+  const pngBase64 = Buffer.from(files[prefix + 'basecolor.png']).toString('base64');
+  const expected = await page.evaluate(async ({ pngBase64, previews }) => {
+    const canvas = document.querySelector<HTMLCanvasElement>('.nh-map canvas')!;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const size = Math.max(1, Math.min(rect.width - 84, rect.height - 82));
+    const left = (rect.width - size) / 2, top = (rect.height - size) / 2;
+    const image = new Image();
+    image.src = 'data:image/png;base64,' + pngBase64;
+    await image.decode();
+    const reference = document.createElement('canvas');
+    reference.width = canvas.width;
+    reference.height = canvas.height;
+    const ctx = reference.getContext('2d')!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = size < image.naturalWidth;
+    ctx.drawImage(image, left, top, size, size);
+    return previews.map(({ x, y }) =>
+      Array.from(ctx.getImageData(x, y, 1, 1).data.subarray(0, 3)));
+  }, { pngBase64, previews });
+  for (let i = 0; i < previews.length; i++) {
+    for (let channel = 0; channel < 3; channel++) {
+      expect(
+        Math.abs(previews[i].rgb[channel] - expected[i][channel]),
+        `2D/export mismatch at world sample ${previews[i].u},${previews[i].v}; RGB channel ${channel}`,
+      ).toBeLessThanOrEqual(8);
+    }
   }
 });
 
