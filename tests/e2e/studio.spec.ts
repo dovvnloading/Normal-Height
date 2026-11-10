@@ -765,6 +765,12 @@ test('the sky and expanded meadow change rendered pixels without rebuilding the 
 });
 
 test('sky look presets survive a reload and keep the split map responsive', async ({ page }, testInfo) => {
+  // This single scenario creates three physical skies, reloads the editor,
+  // exercises split view, and captures two real grazing-angle WebGL frames.
+  // On CI SwiftShader each full framebuffer readback can take ~30 seconds.
+  // Keep all visual/behavioral assertions, but budget for those readbacks
+  // rather than applying the 90-second default intended for ordinary UI tests.
+  test.setTimeout(180_000);
   const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
   await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 30_000 });
   const fingerprint = () => canvas.evaluate((element: HTMLCanvasElement) => {
