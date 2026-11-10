@@ -2,9 +2,8 @@ name: PBR visual and physically memory-capped 2K acceptance
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['fix/pbr-closure-*']
   pull_request:
+    branches: [main]
     paths:
       - 'src/render/**'
       - 'src/materials/**'
@@ -41,7 +40,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pbr-visual-reference
-          path: test-results/
+          path: |
+            playwright-report/
+            test-results/
           retention-days: 30
 
   bounded-2k-memory:
