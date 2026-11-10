@@ -14,6 +14,9 @@ const clamp = (value: number, low = 0, high = 1) =>
 export interface TerrainFactors {
   /** Tangent of the physical slope, in meters per meter. */
   grade: number;
+  /** Eastward and southward physical height gradients (m/m). */
+  gradientX: number;
+  gradientY: number;
   slopeDegrees: number;
   /** -1 = south-facing, +1 = north-facing; zero on flats. */
   northness: number;
@@ -78,7 +81,8 @@ export function createTerrainAnalyzer(field: HeightField, project: TerrainProjec
   const cell = project.worldSize / (n - 1);
   const scale = project.heightScale;
   return (x: number, y: number, out: TerrainFactors = {
-    grade: 0, slopeDegrees: 0, northness: 0, landform: 0, occlusion: 1,
+    grade: 0, gradientX: 0, gradientY: 0, slopeDegrees: 0,
+    northness: 0, landform: 0, occlusion: 1,
   }): TerrainFactors => {
     const i = y * n + x;
     const l = Math.max(0, x - 1), r = Math.min(n - 1, x + 1);
@@ -110,6 +114,8 @@ export function createTerrainAnalyzer(field: HeightField, project: TerrainProjec
       }
     }
     out.grade = grade;
+    out.gradientX = gx;
+    out.gradientY = gy;
     out.slopeDegrees = Math.atan(grade) * 180 / Math.PI;
     // Rows increase southward. A downhill-facing-north surface climbs south.
     out.northness = grade > 1e-7 ? gy / grade : 0;
