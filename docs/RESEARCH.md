@@ -28,6 +28,85 @@ The mountain generator separates the elevation of the broad spine or massif from
 
 The default 3D view uses physical horizontal and vertical scale. Adjustable vertical exaggeration affects only the display; it never changes simulation heights, normals exported from physical dimensions, or elevation files.
 
+## Multi-resolution landscape evolution (experimental)
+
+Normal Height's **Landscape evolution · multi-scale** is a new *research-backed,
+independently implemented artistic model*, not the internal Terragen, Gaea or
+Houdini solver. It is not a calibrated rainfall, rock or groundwater simulation.
+
+The earlier watershed v1 improves connected flow but is restricted to a few
+same-resolution passes and erodes mostly pre-existing concavities. Its maps can
+show intricate dendritic drainage without actually creating deep ravines and
+broad ridgelines. The appearance of the *heightfield* therefore remains the
+acceptance criterion, not merely a pretty flow mask.
+
+### Methods that informed this change
+
+- **Terragen Heightfield Erode v3:** separate duration, erosion power, flow
+  distance, deposition/deposition-rate, slope-sensitive diffusion and
+  slip-at-angle. [Official manual](https://docs.planetside.co.uk/wiki/Heightfield_Erode_v3).
+- **Gaea Erosion2:** large erosion-scale passes precede finer gully passes;
+  downcutting, suspended load, bed load, heavy sediment and hillslope shape
+  controls interact rather than being one opaque strength slider.
+  [Official documentation](https://docs.gaea.app/using/using-gaea/understanding-erosion/erosion_2/).
+- **Houdini HeightField Erode 3.0:** feature size is in terrain meters,
+  coupled hydro/thermal steps use stream-width/bank-angle and sediment
+  transport parameters, and multiple operators can be chained for distinct
+  scales. [SideFX docs](https://www.sidefx.com/docs/houdini/nodes/sop/heightfield_erode).
+- **Landlab SPACE / Braun-Willett stream power:** established erosion/transport
+  formulations use discharge and bed slope, with finite sediment supply and
+  stable routed updates. [Landlab](https://landlab.readthedocs.io/en/latest/generated/api/landlab.components.erosion_deposition.shared_stream_power.html);
+  [Braun & Willett (2013)](https://doi.org/10.1016/j.geomorph.2012.10.008).
+
+### Independent algorithm in this branch
+
+1. Build an outlet-connected depression-aware drainage graph by priority
+   flood. Its surface is for *routing* only and does not fill the terrain.
+2. On the resulting acyclic heightfield order, divide discharge across all
+   strictly downhill earlier-ranked neighbors, weighted by physical gradient
+   to power 1.7. This multiple-flow-direction step reduces D8 striping; the
+   priority-flood receiver handles enclosed and flat basins.
+3. Evolve the landscape in **coarse-to-fine physical scales** (128→256→512
+   cells where source resolution supports them). The coarse delta is
+   transferred between stages while retaining the original high-frequency
+   source relief; extra export pixels are not claimed to be physical erosion.
+4. Recompute drainage each evolution step. Incise channel beds and retreat
+   banks using contributing drainage area, slope, width in meters, and an
+   explicit bank angle. Cap individual downcutting steps to preserve the
+   downstream gradient and a bounded bedrock base level.
+5. Transport eroded material downstream; low-capacity areas deposit shallow
+   alluvial fans. Weather oversteepened hillslopes through paired conservative
+   transfers, resulting in wear and deposition that modify actual height
+   samples, not a color mask.
+6. Return the original-grid elevation with signed landscape-evolution delta,
+   and derive final net wear/deposition from the actual resulting grid.
+   Exports and viewport continue to use the same computed field.
+
+### What this does *not* yet do
+
+- No shallow-water PDE solver, hydraulic jumps, groundwater, per-grain
+  suspended vs bed/coarse loads, calibrated geological time or uplift.
+- No true fractional-channel topology or river meandering. D8 remains the
+  depression-basin fallback, and raster anisotropy may persist at close zoom.
+- No automatic rock-type map. Artist-authored masks control relative erosion,
+  and hardness is not inferred from inaccessible real stratigraphy.
+- As in professional tools, good source relief matters: a simplistic broad
+  mountain envelope cannot become an accurate natural orogenic province
+  merely by running more erosion iterations.
+- The physical width must be sampled by several raster cells. Very fine
+  gullies require adequate working resolution; coarse-to-fine processing
+  maintains broad-scale consistency but is not a license to invent detail.
+
+### Validation
+
+Unit tests target zero-loss water conservation, physical transmission loss,
+determinism, non-mutating source inputs, sediment/net-height accounting, mask
+invariance, and broad source-resolution consistency. Chromium visual QA
+preserves for Alpine, Badlands and Volcano: original source, legacy watershed,
+multi-scale evolved height, flow, wear/deposition, and signed differences.
+Review the **actual heightmap** before judging the change ready; these tests
+do not establish photographic realism.
+
 ## Hydraulic erosion: watershed and legacy solvers
 
 **Why the first implementation looked artificial.** The original particle model starts individual droplets at random grid points, integrates local bilinear gradients and deposited/eroded material, then adds their footprint into a flow diagnostic. This can leave discontinuous, statistically distributed grooves rather than a consistent dendritic runoff network. Its flow signal is accumulated droplet visits, not the actual area of the upstream watershed.
