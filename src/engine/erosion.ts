@@ -1,4 +1,5 @@
 import { clamp, randomGenerator } from './noise';
+import { watershedErosion } from './watershed';
 
 export interface ErosionSettings {
   droplets: number;
@@ -12,6 +13,11 @@ export interface ErosionSettings {
   gravity: number;
   seed: number;
   multiscale: boolean;
+  /** Watershed routing is the default. Legacy droplets remain for A/B comparisons. */
+  method?: 'watershed' | 'droplet';
+  /** Physical dimensions for grid-independent stream-power and discharge scales. */
+  worldSize?: number;
+  heightScale?: number;
 }
 export interface ErosionResult {
   height: Float32Array;
@@ -40,7 +46,7 @@ export function sampleHeight(map: Float32Array, n: number, x: number, y: number)
 }
 
 /** Rainfall parcels carry removed material; exiting or unsettled sediment is counted. */
-export function hydraulicErosion(
+export function dropletErosion(
   input: Float32Array,
   n: number,
   settings: ErosionSettings,
@@ -192,6 +198,23 @@ export function hydraulicErosion(
   }
   progress?.(1);
   return { height, flow, wear, deposition, eroded, deposited, exportedSediment };
+}
+
+/**
+ * Public hydraulic graph entrypoint. Existing project JSONs without a method
+ * use the connected watershed solver; choosing 'droplet' explicitly preserves
+ * the previous deterministic particle implementation for A/B comparisons.
+ */
+export function hydraulicErosion(
+  input: Float32Array,
+  n: number,
+  settings: ErosionSettings,
+  mask?: Float32Array,
+  progress?: (fraction: number) => void,
+): ErosionResult {
+  return settings.method === 'droplet'
+    ? dropletErosion(input, n, settings, mask, progress)
+    : watershedErosion(input, n, settings, mask, progress);
 }
 
 /** Conservative talus relaxation, using simultaneous transfers to avoid directional bias. */

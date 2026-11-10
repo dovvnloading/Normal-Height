@@ -367,7 +367,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     category: 'Simulate',
     color: '#597e88',
     description:
-      'Rain droplets flow downhill, carrying sediment, cutting drainage channels, and depositing material as they slow.',
+      'Watershed routing builds connected drainage with upstream contributing area, stream-power incision, sediment transport and deposition. The original droplet model is optional.',
     inputs: [...input, { id: 'mask', label: 'Mask · optional' }],
     outputs: [
       ...output,
@@ -376,6 +376,18 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
       { id: 'deposition', label: 'Deposit' },
     ],
     params: [
+      {
+        key: 'method',
+        label: 'Erosion model',
+        type: 'select',
+        default: 'watershed',
+        section: 'Simulation',
+        description: 'Watershed traces connected drainage from open outlets and conserves exported sediment. Legacy droplets preserve the previous algorithm for comparisons.',
+        options: [
+          { value: 'watershed', label: 'Watershed · stream power' },
+          { value: 'droplet', label: 'Legacy · particle droplets' },
+        ],
+      },
       range(
         'droplets',
         'Rainfall budget',
@@ -383,9 +395,9 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         1000,
         300000,
         1000,
-        'Droplets per 512² terrain. The actual count scales with working resolution.',
+        'Watershed: relative rainfall/discharge forcing (70,000 = 1×). Legacy: actual droplets per 512², scaled with resolution.',
         'Simulation',
-        'drops',
+        'units',
       ),
       {
         key: 'multiscale',
@@ -433,7 +445,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         0,
         0.9,
         0.01,
-        'Higher values produce straighter drainage channels.',
+        'Legacy droplet mode only: momentum persistence. Watershed flow is routed by contributing terrain area and gravity, without an inertia parameter.',
         'Water',
       ),
       range(
@@ -443,19 +455,19 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         0.002,
         0.12,
         0.002,
-        'Higher values shorten water paths.',
+        'Watershed: exponential transmission loss over physical travel distance. Legacy: evaporation per droplet step.',
         'Water',
       ),
       range(
         'lifetime',
-        'Flow length',
+        'Duration / flow length',
         64,
         8,
         160,
         1,
-        'Maximum simulation steps per droplet.',
+        'Watershed: relative evolution duration (64 = 1×); legacy: maximum steps per droplet.',
         'Water',
-        'steps',
+        'units',
       ),
       range(
         'radius',
@@ -464,9 +476,9 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         1,
         6,
         1,
-        'Width of the brush that removes material.',
+        'Watershed: multiplier for bank/channel width in physical meters. Legacy: circular erosion brush in pixels.',
         'Advanced',
-        'px',
+        'factor',
       ),
       range(
         'gravity',
@@ -475,7 +487,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         0.5,
         12,
         0.1,
-        'Acceleration down steep surfaces. Artistic simulation units.',
+        'Watershed: scales stream-power incision from local physical gradients. Legacy: droplet acceleration.',
         'Advanced',
       ),
       { ...seed, default: 1 },

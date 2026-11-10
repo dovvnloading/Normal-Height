@@ -49,13 +49,15 @@ For the browser tests, run `npx playwright install chromium` once. CI installs i
 
 Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automated basin routing, groundwater and GPU fluid solvers remain future work.
 
-### Actual erosion
+### Watershed-driven hydraulic erosion
 
-Hydraulic erosion uses seeded droplets with downhill gradient sampling, inertia, gravity, carrying capacity, brush erosion, deposition, evaporation, and bounded flow length. Removed material is transported and deposited; it is not a visual noise overlay. Multi-scale mode runs wider, longer-lived parcels before finer rills on the requested grid.
+**Default: Connected watershed / stream power.** A priority-flood pass starts at the open tile boundary and guarantees outlet-connected flow directions, even when the source elevation contains enclosed basins. Downstream receivers are adjusted to favor actual steepest descent while preserving an acyclic routing graph. Rainfall accumulates from every upstream contributing cell, with a physically scaled travel-distance transmission loss. Channel incision responds to contributing area and local physical slope (a stream-power law), while sediment capacity, erosion, downstream transport, over-capacity deposition, and exported sediment are accounted for explicitly. Multi-scale duration first works dominant drainage, then finer tributaries. This creates a connected river hierarchy instead of unrelated random trails.
 
-Thermal weathering conservatively redistributes material from over-steep slopes to form softer talus transitions. Flow, erosion wear, and deposition are available as diagnostic maps and as graph inputs.
+**Optional: Legacy droplet simulation.** Switch the Hydraulic erosion node's **Erosion model** to **Legacy · particle droplets** to compare with the original seeded particle algorithm; the existing controls, maps, masks, seeds, and saved v1 graph structure remain supported. Previously saved erosion nodes without a model choice now use the watershed default; choose the legacy option for exact old-model comparisons.
 
-The solver is an artistic particle model, not a calibrated watershed or geological-time simulation. The research notes distinguish this implementation from Terragen's documented workflow and from more expensive grid-fluid solvers.
+Thermal weathering still redistributes loose material on excessive slopes. Flow, wear, and deposition remain genuine computed buffers available in the map and graph, not painted overlays.
+
+**Physical scope:** The new solver is a drainage-area/stream-power **landscape-evolution approximation** with artistic erodibility and duration constants, not a calibrated rainfall-runoff model, fluid dynamics, groundwater or real geological time. Grid-constrained D8 routing and the tile's open boundary remain visible limitations. See [hydrology and validation notes](docs/RESEARCH.md).
 
 ### Procedural PBR material studio (feature branch)
 
