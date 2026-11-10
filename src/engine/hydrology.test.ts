@@ -45,7 +45,8 @@ describe('priority-flood watershed routing', () => {
     const n = 49;
     const h = fixture(n, (u, v) =>
       0.8 - v * 0.6 + (u - 0.5) ** 2 * 0.2);
-    const route = routeDrainage(h, n, 9);
+    const workspace = createDrainageWorkspace(n);
+    const route = routeDrainage(h, n, 9, workspace);
     const area = accumulateDrainage(route, 1800, 0);
     let exportedWater = 0, outlets = 0;
     for (let i = 0; i < n * n; i++) {
