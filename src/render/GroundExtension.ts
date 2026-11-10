@@ -336,6 +336,7 @@ export class GroundExtension {
       if (this.tufts) {
         this.scene.remove(this.tufts);
         this.tufts.geometry.dispose();
+        this.tufts.dispose(); // release per-instance GPU matrix/color buffers
       }
       this.tufts = this.createTufts(extent, project?.seed ?? 1);
       this.scene.add(this.tufts);
@@ -491,6 +492,7 @@ export class GroundExtension {
     if (this.tufts) {
       this.scene.remove(this.tufts);
       this.tufts.geometry.dispose();
+      this.tufts.dispose();
     }
     this.meadowMaterial.dispose();
     this.apronMaterial.dispose();
