@@ -79,7 +79,7 @@ export function landscapeErosion(
   const cycles = Math.round(clamp(settings.cycles ?? 28, 4, 72));
   const featureMeters = clamp(settings.featureMeters ?? 140, 24, 600);
   const bankAngle = clamp(settings.bankAngle ?? 38, 18, 80) * Math.PI / 180;
-  const hillslope = clamp(settings.hillslope ?? 0.38);
+  const hillslope = clamp(settings.hillslope ?? 0.12);
   const carry = clamp(settings.capacity / 4, 0.025, 5);
   const settling = clamp(settings.deposition);
   const widthFactor = clamp(settings.radius / 3, 0.3, 3);
@@ -125,6 +125,15 @@ export function landscapeErosion(
     const dt = duration * 28 / Math.max(1, cycles);
     const stageFeature = featureMeters *
       (stageIndex === 0 && stages.length > 1 ? 1.65 : 1);
+    // Channel initiation requires a watershed large enough to organize
+    // real convergent water, not simply two or three same-direction D8 cells.
+    // The early broad pass only incises trunk valleys. Later passes admit
+    // successively smaller tributary catchments at the same physical units.
+    const scaleFactor = stages.length > 1
+      ? stageIndex === 0 ? 6 : stageIndex === stages.length - 1 ? 1 : 3
+      : 1;
+    const minimumCatchmentKm2 = Math.max(0.012,
+      stageFeature * stageFeature / 1_000_000 * scaleFactor);
     const windX = Math.cos(settings.seed * 0.00017);
     const windY = Math.sin(settings.seed * 0.00017);
 
@@ -183,8 +192,7 @@ export function landscapeErosion(
           const aNorm = contributingKm2 / (world * world / 1e6);
           // Small sheet runoff is not a river. This catchment threshold is
           // physical area, rather than a number of droplets or raster pixels.
-          if (contributingKm2 < Math.max(0.008, cell * cell * 2.5 / 1e6))
-            continue;
+          if (contributingKm2 < minimumCatchmentKm2) continue;
           const gx = sample(height, m, cx + 1, cy) -
             sample(height, m, cx - 1, cy);
           const gy = sample(height, m, cx, cy + 1) -
