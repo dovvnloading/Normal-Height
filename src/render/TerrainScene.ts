@@ -671,7 +671,6 @@ export class TerrainScene {
     const colors = geometry.getAttribute('color');
     const positions = geometry.getAttribute('position');
     const normals = geometry.getAttribute('normal');
-    const n = this.field.resolution;
     let min = Infinity,
       max = -Infinity;
     for (const value of this.field.height) {
@@ -683,8 +682,6 @@ export class TerrainScene {
     for (let i = 0; i < positions.count; i++) {
       const h = positions.getY(i) / heightUnits;
       const elevation = (h - min) / Math.max(0.0001, max - min);
-      const px = Math.round((positions.getX(i) / TERRAIN_SIZE + 0.5) * (n - 1));
-      const py = Math.round((positions.getZ(i) / TERRAIN_SIZE + 0.5) * (n - 1));
       if (this.settings.material === 'clay') {
         color.setRGB(0.61, 0.64, 0.56, THREE.SRGBColorSpace);
       } else if (this.settings.material === 'height') {
