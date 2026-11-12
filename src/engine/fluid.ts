@@ -27,6 +27,22 @@ function resize(values: Float32Array, n: number, m: number): Float32Array {
   return out;
 }
 
+/** Regrid a surface density while preserving integrated physical volume. */
+function resizeConservativeDensity(
+  source: Float32Array, n: number, m: number,
+): Float32Array {
+  const out = resize(source, n, m);
+  if (n === m) return out;
+  let before = 0, after = 0;
+  for (const value of source) before += value;
+  for (const value of out) after += value;
+  if (after <= 0) return out;
+  const multiplier = (before / ((n - 1) * (n - 1))) /
+    (after / ((m - 1) * (m - 1)));
+  for (let i = 0; i < out.length; i++) out[i] *= multiplier;
+  return out;
+}
+
 /**
  * Conservative column/virtual-pipe hydraulic erosion, informed by
  * Mei-Decaudin-Hu (PG 2007) and Stava-Benes et al. (SCA 2008).
@@ -90,10 +106,19 @@ export function fluidGridErosion(
     Math.max(1, Math.round(steps *
       (stages.length === 1 ? 1 :
         stages.length === 2 ? [0.45, 0.55][index] : [0.33, 0.34, 0.33][index]))));
-  const numberOfSteps = cycles.reduce((a, b) => a + b, 0);
+  // Subdivide hydraulic steps at finer physical scales without increasing
+  // the artist-selected overall simulation duration.
+  const substeps = stages.map(m =>
+    Math.max(1, Math.min(4, Math.ceil(20 / (worldMeters / (m - 1))))));
+  const stepCounts = cycles.map((c, i) => c * substeps[i]);
+  const numberOfSteps = stepCounts.reduce((a, b) => a + b, 0);
   const noise = new Noise((settings.seed ^ 0x51c7a17e) >>> 0);
-  let previous:
-    { size: number; original: Float32Array; height: Float32Array } | undefined;
+  const soilDepth = Math.max(0, settings.soilDepthMeters ?? 1.5) / elevationMeters;
+  let previous: {
+    size: number; original: Float32Array; height: Float32Array;
+    mobile: Float32Array; water: Float32Array; sediment: Float32Array;
+  } | undefined;
+  let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
   let finalFlow: Float32Array | undefined;
   let completed = 0;
 
@@ -112,7 +137,24 @@ export function fluidGridErosion(
       }
     }
     const materialMask = mask ? resize(mask, n, m) : undefined;
-    const water = new Float32Array(length), sediment = new Float32Array(length);
+    // Transported water and suspended sediment persist across coarse-to-fine
+    // stages; deposits are tracked in a separate mobile layer.
+    const mobile = previous
+      ? resizeConservativeDensity(previous.mobile, previous.size, m)
+      : new Float32Array(length).fill(soilDepth);
+    const bedrock = new Float32Array(length);
+    for (let i = 0; i < length; i++) bedrock[i] = height[i] - mobile[i];
+    const water = previous
+      ? resizeConservativeDensity(previous.water, previous.size, m)
+      : new Float32Array(length);
+    const sediment = previous
+      ? resizeConservativeDensity(previous.sediment, previous.size, m)
+      : new Float32Array(length);
+    const volumePerSample = cellMeters * cellMeters * elevationMeters;
+    const subdiv = substeps[stage];
+    const retainedBoundary = Math.pow(0.4, 1 / subdiv);
+    const evaporationRate = 1 - Math.pow(
+      1 - Math.min(0.45, evaporation * 1.2), 1 / subdiv);
     const waterDelta = new Float32Array(length);
     const sedimentDelta = new Float32Array(length);
     const outgoing = new Float32Array(length);
@@ -122,14 +164,18 @@ export function fluidGridErosion(
     const rainMap = new Float32Array(length);
     const slopeMoves = new Float64Array(length);
     const pipes = Array.from({ length: 4 }, () => new Float32Array(length));
-    const rainfall = relief * 0.00155 * rainFactor;
-    const maxTransfer = relief * 0.16;
-    const pressure = 0.25 * gravity;
-    const inertia = 0.66;
+    // Rainfall and incision are expressed in physical meters rather than
+    // varying with the relief of a particular input DEM.
+    const rainfall = (1.6 / elevationMeters) * rainFactor;
+    const maxTransfer = Math.max(1 / elevationMeters,
+      Math.min(200 / elevationMeters, relief * 0.16)) / subdiv;
+    const pressure = 0.25 * gravity *
+      clamp(20 / cellMeters, 0.35, 2) / (subdiv * subdiv);
+    const inertia = Math.pow(0.66, 1 / subdiv);
     const sedimentCapacity = 2.4 * capacity;
-    const depthLimit = relief * 0.004;
+    const depthLimit = Math.min(relief * 0.004, 6 / elevationMeters) / subdiv;
     const relaxation = (0.006 + hillslope * 0.018) *
-      Math.sqrt(128 / Math.max(128, m));
+      Math.sqrt(128 / Math.max(128, m)) / subdiv;
 
     for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
       const i = y * m + x;
@@ -140,8 +186,8 @@ export function fluidGridErosion(
         noise.simplex(px / 2800 + 7.7, py / 2800 - 3.3) * 0.25, 0.55, 1.5);
     }
 
-    for (let t = 0; t < cycles[stage]; t++) {
-      for (let i = 0; i < length; i++) water[i] += rainfall * rainMap[i];
+    for (let t = 0; t < stepCounts[stage]; t++) {
+      for (let i = 0; i < length; i++) water[i] += rainfall * rainMap[i] / subdiv;
       outgoing.fill(0);
       waterDelta.fill(0);
       sedimentDelta.fill(0);
