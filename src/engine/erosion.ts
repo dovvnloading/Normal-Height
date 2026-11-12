@@ -32,6 +32,8 @@ export interface ErosionSettings {
   heightScale?: number;
   /** Initial mobile soil cover in physical meters; does not raise terrain. */
   soilDepthMeters?: number;
+  /** Relative bedrock resistance: 0 = soft, 1 = erosion-resistant. */
+  bedrockResistance?: number;
 }
 
 /** Independently tracked transport volumes, not inferred from output pixels. */
