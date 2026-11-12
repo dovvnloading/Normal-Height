@@ -33,6 +33,25 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Verify the studio in Chromium
         run: npm run test:e2e
+      - name: Smoke-test mesh performance recorder (software WebGL only)
+        env:
+          MESH_BENCH_SOFTWARE: '1'
+          MESH_BENCH_HEADLESS: '1'
+          MESH_BENCH_REQUIRE_HARDWARE: '0'
+          MESH_BENCH_RESOLUTIONS: '128'
+          MESH_BENCH_QUALITIES: 'balanced'
+          MESH_BENCH_MATERIALS: 'clay'
+          MESH_BENCH_DEVICE: 'CI SwiftShader — no hardware FPS claims'
+        run: npm run test:mesh-perf
+      - name: Save mesh benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terrain-mesh-benchmark-smoke
+          path: |
+            mesh-benchmark-results/
+            mesh-benchmark-report/
+          retention-days: 14
       - name: Save browser evidence
         if: always()
         uses: actions/upload-artifact@v4
