@@ -9,6 +9,7 @@ import type {
 } from '../model/types';
 import { clamp, mix, Noise, smoothstep } from './noise';
 import { hydraulicErosion, sampleHeight, thermalErosion } from './erosion';
+import type { SedimentBudget } from './erosion';
 import { generateOrogenicRelief } from './orogeny';
 import { sculptSpline } from './spline';
 import { validSplinePoint, MAX_SPLINE_POINTS } from '../model/splines';
@@ -20,6 +21,7 @@ interface WorkingField extends HeightField {
   eroded: number;
   deposited: number;
   exportedSediment: number;
+  sedimentBudget?: SedimentBudget;
 }
 const kinds = new Set([
   'mountain',
@@ -446,6 +448,22 @@ export function evaluateGraph(
             eroded: input.eroded + result.eroded,
             deposited: input.deposited + result.deposited,
             exportedSediment: input.exportedSediment + result.exportedSediment,
+            sedimentBudget: result.sedimentBudget
+              ? input.sedimentBudget
+                ? {
+                    erodedVolumeM3: input.sedimentBudget.erodedVolumeM3 +
+                      result.sedimentBudget.erodedVolumeM3,
+                    depositedVolumeM3: input.sedimentBudget.depositedVolumeM3 +
+                      result.sedimentBudget.depositedVolumeM3,
+                    exportedVolumeM3: input.sedimentBudget.exportedVolumeM3 +
+                      result.sedimentBudget.exportedVolumeM3,
+                    suspendedVolumeM3: input.sedimentBudget.suspendedVolumeM3 +
+                      result.sedimentBudget.suspendedVolumeM3,
+                    balanceErrorM3: input.sedimentBudget.balanceErrorM3 +
+                      result.sedimentBudget.balanceErrorM3,
+                  }
+                : result.sedimentBudget
+              : input.sedimentBudget,
           };
           for (let i = 0; i < length; i++) {
             field.flow[i] += input.flow[i];
@@ -525,6 +543,8 @@ export function evaluateGraph(
           field.exportedSediment =
             (input.exportedSediment * contributionA) / length +
             (b.exportedSediment * contributionB) / length;
+          // Blended terrain cannot have a meaningful single physical ledger.
+          field.sedimentBudget = undefined;
           break;
         }
         case 'mask': {
@@ -599,6 +619,7 @@ export function evaluateGraph(
       eroded: output.eroded,
       deposited: output.deposited,
       exportedSediment: output.exportedSediment,
+      sedimentBudget: output.sedimentBudget,
     },
     duration: performance.now() - started,
     outputNodeId: target.id,
