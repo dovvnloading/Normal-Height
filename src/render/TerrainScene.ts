@@ -4,6 +4,7 @@ import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, terrainColor } from './maps';
 import {
   buildAdaptiveTerrainGeometry, createTerrainSampler, planTerrainMesh,
+  planUniform512Reference,
 } from './terrainMesh';
 import type { TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 import { resolveSurface } from '../materials/pbr';
@@ -16,6 +17,7 @@ import { Atmosphere, skyLighting } from './Atmosphere';
 import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
 import { updatePreviewTexture } from './pbrTexture';
 import { applyPackedPBRMaterial } from './pbrMaterial';
+import { geometryBufferBytes } from './meshDiagnostics';
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
@@ -64,6 +66,17 @@ export class TerrainScene {
   private lodKey = '';
   private lastLODCheckMs = 0;
   private lastCameraChangeMs = 0;
+  // LOD is event-driven, not recomputed at 300 ms intervals while idle.
+  private lodDirty = true;
+  private readonly meshBenchmark = new URLSearchParams(window.location.search)
+    .get('meshBenchmark');
+  private meshPlanChecks = 0;
+  private meshBuilds = 0;
+  private meshDisposals = 0;
+  private pbrRequests = 0;
+  private pbrUploads = 0;
+  private lastMeshBuildMs = 0;
+  private lastMeshPlanMs = 0;
   private readonly skirtMaterial = new THREE.MeshStandardMaterial({
     color: '#5b6054',
     roughness: 1,
@@ -265,6 +278,7 @@ export class TerrainScene {
     this.controls.update();
     this.controls.addEventListener('change', () => {
       this.needsRender = true;
+      this.lodDirty = true;
       this.lastCameraChangeMs = performance.now();
     });
     this.controls.addEventListener('start', () => {
@@ -298,6 +312,7 @@ export class TerrainScene {
     // retaining an artist's orbit, pan, or zoom once they have adjusted it.
     if (this.terrain && !this.cameraAdjusted) this.fitCamera();
     this.lastLODCheckMs = 0;
+    this.lodDirty = true;
     this.needsRender = true;
   }
 
@@ -306,13 +321,15 @@ export class TerrainScene {
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
-    // Rebuild only after camera motion settles. A stable LOD signature and a
-    // strict vertex budget prevent per-frame allocations and zoom thrashing.
+    // Camera changes mark LOD dirty. Don't re-plan 3x/s while idle. When
+    // auto-rotating, refresh at most every 1.5 s rather than staying stale.
     const lodNow = performance.now();
-    if (this.terrain && this.field && this.project && this.heightSampler &&
-        lodNow - this.lastCameraChangeMs > 220 &&
-        lodNow - this.lastLODCheckMs > 300) {
+    if (this.lodDirty && this.terrain && this.field && this.project &&
+        this.heightSampler && lodNow - this.lastLODCheckMs > 240 &&
+        (lodNow - this.lastCameraChangeMs > 220 ||
+         lodNow - this.lastLODCheckMs > 1500)) {
       this.lastLODCheckMs = lodNow;
+      this.lodDirty = false;
       const plan = this.planCurrentMesh();
       if (plan && plan.key !== this.lodKey) {
         this.buildGeometry(plan);
@@ -352,6 +369,12 @@ export class TerrainScene {
     if (this.needsRender || this.controls.autoRotate || weatherFrame) {
       const started = performance.now();
       this.renderer.render(this.scene, this.camera);
+      if (this.meshBenchmark) {
+        const stats = this.renderer.domElement.dataset;
+        stats.meshRenderCpuMs = (performance.now() - started).toFixed(2);
+        stats.meshRendererGeometries = String(this.renderer.info.memory.geometries);
+        stats.meshRendererTextures = String(this.renderer.info.memory.textures);
+      }
       if (this.measurePBRFirstRender) {
         this.renderer.domElement.dataset.pbrFirstRenderMs =
           (performance.now() - started).toFixed(2);
@@ -580,16 +603,26 @@ export class TerrainScene {
   /** The original heightfield remains authoritative for every LOD. */
   private planCurrentMesh(): TerrainMeshPlan | null {
     if (!this.heightSampler || !this.project) return null;
-    return planTerrainMesh(
-      this.heightSampler, this.camera,
-      this.host.clientHeight, this.renderer.getPixelRatio(),
-      this.project.heightScale, this.project.worldSize,
-      this.settings.exaggeration, this.settings.meshQuality,
-    );
+    const started = performance.now();
+    const plan = this.meshBenchmark === 'uniform512'
+      ? planUniform512Reference()
+      : planTerrainMesh(
+          this.heightSampler, this.camera,
+          this.host.clientHeight, this.renderer.getPixelRatio(),
+          this.project.heightScale, this.project.worldSize,
+          this.settings.exaggeration, this.settings.meshQuality,
+        );
+    this.lastMeshPlanMs = performance.now() - started;
+    this.meshPlanChecks++;
+    const stats = this.renderer.domElement.dataset;
+    stats.meshPlanChecks = String(this.meshPlanChecks);
+    stats.meshPlanMs = this.lastMeshPlanMs.toFixed(2);
+    return plan;
   }
 
   private buildGeometry(requestedPlan?: TerrainMeshPlan) {
     if (!this.field || !this.project) return;
+    const started = performance.now();
     const { resolution: n, height } = this.field;
     const scaleKey = `${this.project.worldSize}/${this.project.heightScale}`;
     if (this.samplerSource !== height || this.samplerScaleKey !== scaleKey) {
@@ -612,6 +645,7 @@ export class TerrainScene {
     if (this.terrain) {
       this.scene.remove(this.terrain);
       this.terrain.geometry.dispose();
+      this.meshDisposals++;
     }
     this.terrain = new THREE.Mesh(geometry, this.material);
     this.terrain.receiveShadow = true;
@@ -619,6 +653,8 @@ export class TerrainScene {
     this.terrain.scale.y = this.settings.exaggeration;
     this.scene.add(this.terrain);
     this.lodKey = plan.key;
+    this.lodDirty = false;
+    this.meshBuilds++;
     const stats = this.renderer.domElement.dataset;
     stats.meshVertices = String(plan.vertexCount);
     stats.meshTriangles = String(plan.triangleCount);
@@ -663,6 +699,14 @@ export class TerrainScene {
     this.groundExtension?.update(
       this.field, this.project, this.settings, this.minimumElevation, this.terrain,
     );
+    this.lastMeshBuildMs = performance.now() - started;
+    stats.meshBuildMs = this.lastMeshBuildMs.toFixed(2);
+    stats.meshBuildCount = String(this.meshBuilds);
+    stats.meshDisposeCount = String(this.meshDisposals);
+    stats.meshBufferBytes = String(geometryBufferBytes(
+      this.terrain?.geometry, this.skirt?.geometry,
+      this.groundExtension?.apronGeometry,
+    ));
   }
 
   private updateColors() {
@@ -748,6 +792,8 @@ export class TerrainScene {
     this.renderer.domElement.dataset.materialStatus = 'loading';
     const workerStarted = performance.now();
     const request = requestPBR(field, project);
+    this.pbrRequests++;
+    this.renderer.domElement.dataset.pbrRequestCount = String(this.pbrRequests);
     this.pbrRelease = request.release;
     request.promise.then((maps) => {
       if (this.disposed || generation !== this.pbrGeneration ||
@@ -771,6 +817,8 @@ export class TerrainScene {
       const microNormal = tex(2, preview.microNormal);
       for (const surplus of existing.slice(3)) surplus.dispose();
       this.pbrTextures = [albedo, packedORM, microNormal];
+      this.pbrUploads++;
+      this.renderer.domElement.dataset.pbrUploadCount = String(this.pbrUploads);
       applyPackedPBRMaterial(this.material, albedo, packedORM, microNormal);
       this.groundExtension?.syncBoundary(this.terrain!, this.settings.exaggeration);
       const monitor = this.renderer.domElement.dataset;
