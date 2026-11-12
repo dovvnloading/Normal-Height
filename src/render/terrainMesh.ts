@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import type { HeightField } from '../model/types';
 import { TERRAIN_SIZE } from './GroundExtension';
 
 /**
