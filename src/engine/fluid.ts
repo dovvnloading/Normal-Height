@@ -124,6 +124,7 @@ export function fluidGridErosion(
     mobile: Float32Array; water: Float32Array; sediment: Float32Array;
   } | undefined;
   let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
+  let physicalRain = 0, physicalWaterExport = 0, physicalEvaporation = 0;
   let finalFlow: Float32Array | undefined;
   let completed = 0;
 
@@ -193,8 +194,11 @@ export function fluidGridErosion(
         noise.simplex(px / 2800 + 7.7, py / 2800 - 3.3) * 0.25, 0.55, 1.5);
     }
 
+    let rainSum = 0;
+    for (const exposure of rainMap) rainSum += exposure;
     for (let t = 0; t < stepCounts[stage]; t++) {
       for (let i = 0; i < length; i++) water[i] += rainfall * rainMap[i] / subdiv;
+      physicalRain += rainfall * rainSum / subdiv * volumePerSample;
       outgoing.fill(0);
       waterDelta.fill(0);
       sedimentDelta.fill(0);
@@ -351,6 +355,7 @@ export function fluidGridErosion(
       for (let x = 0; x < m; x++) {
         for (const i of [x, (m - 1) * m + x]) {
           physicalExported += sediment[i] * (1 - retainedBoundary) * volumePerSample;
+          physicalWaterExport += water[i] * (1 - retainedBoundary) * volumePerSample;
           water[i] *= retainedBoundary;
           sediment[i] *= retainedBoundary;
         }
@@ -358,12 +363,15 @@ export function fluidGridErosion(
       for (let y = 1; y < m - 1; y++) {
         for (const i of [y * m, y * m + m - 1]) {
           physicalExported += sediment[i] * (1 - retainedBoundary) * volumePerSample;
+          physicalWaterExport += water[i] * (1 - retainedBoundary) * volumePerSample;
           water[i] *= retainedBoundary;
           sediment[i] *= retainedBoundary;
         }
       }
-      for (let i = 0; i < length; i++)
+      for (let i = 0; i < length; i++) {
+        physicalEvaporation += water[i] * evaporationRate * volumePerSample;
         water[i] *= 1 - evaporationRate;
+      }
       completed++;
       progress?.(Math.min(0.999, completed / numberOfSteps));
     }
@@ -399,12 +407,14 @@ export function fluidGridErosion(
       }
     }
   }
-  let suspendedVolumeM3 = 0;
+  let suspendedVolumeM3 = 0, retainedWaterVolumeM3 = 0;
   if (previous) {
     const sampleVolume = worldMeters * worldMeters /
       (previous.size * previous.size) * elevationMeters;
     for (const amount of previous.sediment)
       suspendedVolumeM3 += amount * sampleVolume;
+    for (const amount of previous.water)
+      retainedWaterVolumeM3 += amount * sampleVolume;
   }
   progress?.(1);
   return {
@@ -419,6 +429,14 @@ export function fluidGridErosion(
       suspendedVolumeM3,
       balanceErrorM3: physicalEroded - physicalDeposited -
         physicalExported - suspendedVolumeM3,
+    },
+    waterBudget: {
+      rainfallVolumeM3: physicalRain,
+      exportedVolumeM3: physicalWaterExport,
+      evaporatedVolumeM3: physicalEvaporation,
+      retainedVolumeM3: retainedWaterVolumeM3,
+      balanceErrorM3: physicalRain - physicalWaterExport -
+        physicalEvaporation - retainedWaterVolumeM3,
     },
   };
 }
