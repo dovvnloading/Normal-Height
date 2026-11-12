@@ -163,6 +163,7 @@ export function planTerrainMesh(
   worldSize: number,
   exaggeration: number,
   quality: MeshQuality,
+  previous?: TerrainMeshPlan | null,
 ): TerrainMeshPlan {
   const n = sampler.resolution;
   const base = baseSegments(n);
@@ -202,6 +203,20 @@ export function planTerrainMesh(
     const ideal = tilePixels / targetPixelSize;
     let desired = base;
     while (desired < maximum && desired < ideal) desired *= 2;
+    // Hysteresis keeps a tile's resolution until the footprint has changed
+    // meaningfully. Otherwise a camera hovering near a power-of-two boundary
+    // repeatedly allocates/reuploads both the terrain and its ground apron.
+    // Re-planning at a fixed camera remains deterministic without a previous.
+    const old = previous?.key.startsWith(`${quality}:`)
+      ? previous.segments[index] : undefined;
+    if (old && old > base) {
+      if (desired < old && ideal >= old * 0.65)
+        desired = old;
+      else if (desired > old && ideal < old * 1.25)
+        desired = old;
+    } else if (old === base && desired > base && ideal < base * 1.25) {
+      desired = base;
+    }
     if (desired > base) candidates.push({ index, desired, score: tilePixels });
   }
   candidates.sort((a, b) => b.score - a.score || a.index - b.index);
