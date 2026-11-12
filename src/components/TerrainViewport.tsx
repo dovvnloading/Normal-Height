@@ -85,6 +85,20 @@ const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
   rockWeight: 0, soilWeight: 1, vegetationWeight: 2, snowWeight: 3,
 };
 
+// The map canvas mounts each time the 2D or split view opens. Re-rasterizing
+// an unchanged 1024² field cost 55–75 ms of main thread on every switch, so
+// keep a few finished rasters per field (released with the field itself).
+const MAP_RASTERS_PER_FIELD = 4;
+const mapRasters = new WeakMap<HeightField, Map<string, HTMLCanvasElement>>();
+function rememberRaster(field: HeightField, key: string, raster: HTMLCanvasElement) {
+  let rasters = mapRasters.get(field);
+  // `Map` in this file is the lucide icon; use the global collection.
+  if (!rasters) mapRasters.set(field, rasters = new globalThis.Map());
+  rasters.delete(key);
+  rasters.set(key, raster);
+  if (rasters.size > MAP_RASTERS_PER_FIELD) rasters.delete(rasters.keys().next().value!);
+}
+
 function MapCanvas({
   field,
   channel,
@@ -156,12 +170,12 @@ function MapCanvas({
       setRasterVersion((version) => version + 1);
       return;
     }
-    const paintPixels = (source: Uint8ClampedArray) => {
-      if (!active) return;
+    const paintPixels = (source: Uint8ClampedArray): HTMLCanvasElement | null => {
+      if (!active) return null;
       const canvas = document.createElement('canvas');
       canvas.width = canvas.height = field.resolution;
       const context = canvas.getContext('2d');
-      if (!context) return;
+      if (!context) return null;
       let pixels = source;
       if (channel === 'splat') {
         // Splat alpha is a fourth physical material, not canvas transparency.
@@ -181,6 +195,7 @@ function MapCanvas({
       // The visible canvas must repaint for every newly generated map. Changing
       // surface settings/seed does not necessarily change field or view state.
       setRasterVersion((version) => version + 1);
+      return canvas;
     };
     const material = [
       'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
@@ -198,7 +213,16 @@ function MapCanvas({
       });
       return () => { active = false; request.release(); };
     }
-    paintPixels(colorizeMap(field, channel, project.worldSize, project.heightScale));
+    // colorizeMap depends only on these inputs, so its raster is reusable.
+    const key = `${channel}/${project.worldSize}/${project.heightScale}`;
+    const cached = mapRasters.get(field)?.get(key);
+    if (cached) {
+      imageRef.current = cached;
+      setRasterVersion((version) => version + 1);
+    } else {
+      const raster = paintPixels(colorizeMap(field, channel, project.worldSize, project.heightScale));
+      if (raster) rememberRaster(field, key, raster);
+    }
     return () => { active = false; };
   }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed]);
 

@@ -143,6 +143,28 @@ for (const ex of [...new Set(results.map((r) => r.case.exaggeration))]) {
     );
   }
   out.push('');
+
+  const pbr = group.filter((r) => r.case.material === 'pbr');
+  if (pbr.length) {
+    out.push(`### PBR cold start (×${ex})`);
+    out.push('');
+    out.push(
+      'Map synthesis runs in a worker. Main-thread cost is applying the maps (packing, texture updates) plus the first PBR draw, which includes shader compilation and texture upload. In a fresh browser the first PBR draw compiles the program; later cases reuse it.',
+    );
+    out.push('');
+    out.push(
+      '| Field | Quality | Topology | Worker, off-thread (ms) | Main-thread apply (ms) | First PBR draw (ms) |',
+    );
+    out.push('|---|---|---|--:|--:|--:|');
+    for (const r of pbr)
+      out.push(
+        `| ${r.case.resolution}² | ${r.case.quality} | ${r.case.reference} | ${fmt(r.final.pbrWorkerMs, 0)} | ${fmt(
+          r.final.pbrPackCpuMs,
+          1,
+        )} | ${fmt(r.final.pbrFirstDrawCpuMs, 1)} |`,
+      );
+    out.push('');
+  }
 }
 
 out.push('## Caveats');

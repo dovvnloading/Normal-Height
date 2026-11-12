@@ -11,6 +11,7 @@ Issue: [#34](https://github.com/dovvnloading/Normal-Height/issues/34). The [adap
 - Diagnostic canvas attributes track `data-mesh-plan-checks`, `data-mesh-build-count`, `data-mesh-dispose-count`, `data-mesh-buffer-bytes`, `data-pbr-request-count`, `data-pbr-upload-count`, `data-mesh-plan-ms`, `data-mesh-build-ms`, `data-mesh-render-cpu-ms`, `data-mesh-renderer-geometries`, `data-mesh-renderer-textures`, and benchmark camera position/target.
 - An **optional WebGL2 timer query** collects elapsed GPU draw-submission command time when `EXT_disjoint_timer_query_webgl2` is present. Queries are polled asynchronously; invalid/disjoint samples are excluded. If unsupported, the report says *unavailable*—never zero.
 - The benchmark collects requestAnimationFrame interval percentiles and the browser's `longtask` entries for orbit, pan, zoom, focus and idle. These are **responsiveness/jank signals**, not a substitute for measured GPU render times.
+- Two further opt-in hardware specs share the same config. `npm run test:mesh-lifecycle` repeats cycles of fast zoom/orbit, 3D → 2D → split → 3D switches and PBR material edits. Each cycle it records JS heap and ArrayBuffer memory after a forced GC, live geometries/textures, terrain/PBR worker starts, main-thread long tasks, and the Chrome GPU process's dedicated/shared video memory from the Windows "GPU Process Memory" counters (real VRAM, the same source as Task Manager). `npm run test:mesh-visual` aims captures at the highest ridge against the sky, the steepest cliff, the valley floor, the terrain-skirt seam and the expanded-meadow boundary, plus a 24-step orbit. It locates these on the displayed surface through a benchmark-only `window.__nhMeshBenchmark` hook (camera placement and surface height), and compares each frame before and after LOD refinement to quantify popping. It saves frames, JPEG thumbnails and a video.
 - `data-mesh-buffer-bytes` is the distinct underlying CPU-side geometry buffer sizes, **not GPU VRAM**. `renderer.info.memory` counts live geometries/textures but does not provide true VRAM bytes. `performance.memory` may be unavailable on some browsers.
 
 ## Run on real hardware
@@ -53,7 +54,18 @@ Each test opens its own visible Chrome window for about 10–25 seconds, so the 
 npm run report:mesh-perf -- path/to/summary-ex1 path/to/summary-ex1.8 > report.md
 ```
 
-The report lists every case, compares adaptive against the uniform reference, and checks the gates below; it exits with status 2 if any case misses them.
+The report lists every case, compares adaptive against the uniform reference, summarises PBR cold start, and checks the gates below; it exits with status 2 if any case misses them.
+
+Memory/lifetime and visual audits (Chrome, hardware GPU; results land in `mesh-benchmark-results/lifecycle/` and `mesh-benchmark-results/visual/`):
+
+```bash
+MESH_BENCH_CHROME=1 MESH_LIFE_RESOLUTIONS=128,256,512,1024 MESH_LIFE_CYCLES=8 \
+npm run test:mesh-lifecycle
+MESH_BENCH_CHROME=1 MESH_VISUAL_RESOLUTION=1024 MESH_VISUAL_EXAGGERATION=1.8 \
+MESH_VISUAL_PRESETS="River-cut highlands,Alpine watershed" npm run test:mesh-visual
+```
+
+The lifecycle audit fails on any growth in live geometries or textures, on any terrain-worker rerun, on a PBR re-upload caused by camera motion or view switches, or on a per-cycle trend above 1 MB JS heap, 2 MB ArrayBuffers or 8 MB GPU-process video memory. Video memory is read on Windows only (`null` elsewhere, never estimated).
 
 Hardware is required by default. If the browser reports SwiftShader/llvmpipe or the GPU renderer is hidden, the **hardware-mode test fails** to prevent falsely declaring real GPU validation. Record the device GPU name, driver, OS, browser build, display refresh rate and power mode before comparing.
 
@@ -108,7 +120,45 @@ After the fix, across all 96 cases (Balanced/High/Ultra × 128²–1024² × cla
 - **Synchronous builds** (new field or quality change) are 2–3× faster, e.g. 1024² High 199 → 71 ms and the uniform reference 267 → 109 ms; they still block for that one frame.
 - **Visual check:** captured ridge, near-cliff and expanded-ground frames at 1.8× show continuous silhouettes and no cracks, seams or apron gaps. Geometry is bit-identical to the pre-fix build, so tessellation output is unchanged.
 
-Still outstanding for full sign-off: an **integrated GPU** run (this machine's i5-10400F has no iGPU) and, where possible, a representative **mobile** device, plus OS-profiler VRAM numbers.
+#### Memory and lifetime: zoom, 3D/2D/split and PBR edits
+
+Ultra PBR adaptive mesh, 8 cycles per size. Trends are least-squares slopes per cycle from cycle 2 on, taken per phase (after camera, after view switches, after the PBR edit). Video memory is the Chrome GPU process's dedicated usage from the Windows counters; it includes the browser compositor, which accounts for the ±15 MB difference between phases.
+
+| Field | JS heap trend | ArrayBuffer trend | GPU-process VRAM trend | GPU-process VRAM | Live geometries / textures | Terrain-worker reruns | Worst stall: camera / views / PBR edit |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| 128² | +0.08 MB/cycle | +0.01 MB/cycle | +0.15 MB/cycle | 109–147 MB | constant | 0 | none / none / none |
+| 256² | +0.09 | +0.01 | +0.02 | 110–155 MB | constant | 0 | none / none / none |
+| 512² | +0.07 | 0.00 | +0.02 | 115–158 MB | constant | 0 | none / none / none |
+| 1024² | +0.07 | 0.00 | +0.15 | 128–167 MB | constant | 0 | none / 64 ms once / none |
+
+Each PBR edit caused exactly one PBR request and one upload. Repeated settings reused the cached material variant: two PBR worker starts in total for eight edits. Camera motion and view switches caused no PBR uploads.
+
+This audit found two recurrent main-thread stalls at 1024², both now fixed:
+
+- **PBR material edit: 84–102 ms on every edit → none.** Packing the live-preview ORM/micro-normal textures ran on the main thread (~85 ms at 1024², ~26 ms at 512²). It now runs in the PBR worker and is cached with the maps; main-thread apply cost is 0.4–2.6 ms at every size.
+- **Switching to 2D or split: 54–77 ms on every switch → 64 ms on the first switch only.** The 2D map re-rasterized an unchanged field each time it mounted. Up to four finished rasters per field are now reused.
+
+#### PBR cold start
+
+Material synthesis runs off-thread (80 ms at 128² to ~1.2 s at 1024²). The main thread spends 0.4–2.6 ms applying the maps, and the first PBR draw takes 10–17 ms once its shader program exists. The program is compiled once per browser session: the first PBR draw in a fresh browser took 153–193 ms. That is a one-time cost within the 250 ms stall target. See the [final-code PBR report](benchmarks/rtx-3060-ti-2026-11-12-pbr-final.md); Ultra frame pacing there is unchanged (p95 16.8 ms, no long tasks).
+
+#### Visual audit (1024², Ultra, PBR, 1.8× exaggeration)
+
+Views are aimed at features found on the displayed surface. "LOD swap" compares the frame drawn right after the camera move with the frame after the sliced refinement lands. It is the share of pixels whose colour changes by more than 24 levels; a crack, hole or topology jump would show up there.
+
+- **River-cut highlands:** LOD swaps changed 0.1–0.4% of pixels across all five feature views, and at most 0.4% across 24 orbit steps.
+- **Alpine watershed:** LOD swaps changed 2.4–5.9% for the long camera jumps between feature views (expected coarse-to-fine refinement after a jump) and at most 1.5% between orbit steps, apart from 4.2% on the jump into the first step.
+- **Inspection:** silhouettes against the sky are continuous; the skirt follows the terrain edge without gaps; the meadow boundary blends without seams; no cracks or holes appear on cliffs or valley floors.
+
+| | |
+|---|---|
+| ![Ridge silhouette against the sky](benchmarks/rtx-3060-ti-2026-11-12/river-cut-ridge-silhouette-sky.jpg) | ![Alpine ridgeline against the sky](benchmarks/rtx-3060-ti-2026-11-12/alpine-ridge-silhouette-sky.jpg) |
+| ![Steepest cliff close-up with micro-detail](benchmarks/rtx-3060-ti-2026-11-12/river-cut-vertical-cliff.jpg) | ![River channel and banks](benchmarks/rtx-3060-ti-2026-11-12/river-cut-river-banks.jpg) |
+| ![Terrain-skirt seam](benchmarks/rtx-3060-ti-2026-11-12/alpine-terrain-skirt-seam.jpg) | ![Expanded-meadow boundary](benchmarks/rtx-3060-ti-2026-11-12/river-cut-meadow-boundary.jpg) |
+
+**Targets for this class of device** (desktop dGPU, 60 Hz): p95 frame interval ≤ 16.9 ms in every camera phase, with no main-thread task over 50 ms during camera interaction, PBR edits or repeated view switches. GPU draw p95 ≤ 4.2 ms adaptive at Ultra. CPU-side geometry buffers ≤ 12 MB. Chrome GPU-process video memory ≤ 170 MB at 1024² Ultra PBR, with no growth across cycles (< 8 MB/cycle gate; measured ≤ 0.15 MB/cycle).
+
+Still outstanding for full sign-off: an **integrated GPU** run (this machine's i5-10400F has no iGPU) and, where possible, a representative **mobile** device. The same three commands produce all of the above evidence on them.
 
 ## CI versus hardware coverage
 

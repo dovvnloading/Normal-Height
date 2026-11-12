@@ -14,6 +14,20 @@ interface Job {
 // erosion field; a physical/material signature distinguishes its PBR variants.
 const cache = new WeakMap<HeightField, Map<string, Job>>();
 
+/** Live-preview textures packed by the worker alongside each set of maps. */
+export interface PackedPreview {
+  orm: Uint8ClampedArray;
+  microNormal: Uint8ClampedArray;
+}
+// Kept for as long as the maps themselves, so a cached material variant
+// (e.g. an artist toggling between two settings) never repacks on the main thread.
+const previews = new WeakMap<PBRMaps, PackedPreview>();
+
+/** The worker-packed preview for these maps, or null if it must be packed here. */
+export function packedPreview(maps: PBRMaps): PackedPreview | null {
+  return previews.get(maps) ?? null;
+}
+
 export function requestPBR(field: HeightField, project: TerrainProject): {
   promise: Promise<PBRMaps>;
   release: () => void;
@@ -49,7 +63,8 @@ export function requestPBR(field: HeightField, project: TerrainProject): {
       reject(new Error(message));
     };
     worker.onmessage = (event: MessageEvent<
-      { type: 'result'; maps: PBRMaps } | { type: 'error'; message: string }
+      { type: 'result'; maps: PBRMaps; preview?: PackedPreview } |
+      { type: 'error'; message: string }
     >) => {
       if (running.finished) return;
       const message = event.data;
@@ -60,6 +75,7 @@ export function requestPBR(field: HeightField, project: TerrainProject): {
       running.finished = true;
       running.worker?.terminate();
       running.worker = null;
+      if (message.preview) previews.set(message.maps, message.preview);
       accept(message.maps);
     };
     worker.onerror = (event) => fail(event.message || 'PBR material worker failed.');

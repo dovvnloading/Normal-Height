@@ -8,7 +8,8 @@ const chrome = process.env.MESH_BENCH_CHROME === '1';
 
 export default defineConfig({
   testDir: './tests/perf',
-  testMatch: 'mesh-perf.spec.ts',
+  // Hardware specs: frame pacing matrix, memory/lifetime audit, visual audit.
+  testMatch: /mesh-(perf|lifecycle|visual)\.spec\.ts$/,
   outputDir: './mesh-benchmark-results',
   fullyParallel: false,
   workers: 1,

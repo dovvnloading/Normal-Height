@@ -10,7 +10,7 @@ import type { BudgetedStep, TerrainMeshPlan, TerrainSampler } from './terrainMes
 import { resolveSurface } from '../materials/pbr';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
-import { requestPBR } from '../materials/pbrClient';
+import { packedPreview, requestPBR } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { Atmosphere, skyLighting } from './Atmosphere';
@@ -33,6 +33,15 @@ interface BuiltTerrainMesh {
   /** The surface material the vertex colours were written for. */
   colorMaterial: ViewSettings['material'];
 }
+
+/** Present only on ?meshBenchmark=... pages; used by tests/perf. */
+export interface MeshBenchmarkHooks {
+  /** Place the orbit camera (scene units). */
+  setCamera: (position: [number, number, number], target: [number, number, number]) => void;
+  /** Displayed terrain surface height at scene x/z, including exaggeration. */
+  heightAt: (x: number, z: number) => number | null;
+}
+type BenchmarkWindow = Window & { __nhMeshBenchmark?: MeshBenchmarkHooks };
 
 interface PendingTerrainMesh {
   plan: TerrainMeshPlan;
@@ -204,6 +213,23 @@ export class TerrainScene {
       const gl = this.renderer.getContext();
       this.gpuTimer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
       this.renderer.domElement.dataset.meshGpuTimerSupported = String(!!this.gpuTimer);
+      // Benchmark-only hooks (?meshBenchmark=...): aim reproducible visual
+      // captures at real ridges, cliffs and edges of the displayed terrain.
+      (window as BenchmarkWindow).__nhMeshBenchmark = {
+        setCamera: (position, target) => {
+          this.controls.target.set(target[0], target[1], target[2]);
+          this.camera.position.set(position[0], position[1], position[2]);
+          this.cameraAdjusted = true;
+          this.controls.update();
+          this.needsRender = true;
+        },
+        heightAt: (x, z) => {
+          if (!this.heightSampler || !this.project) return null;
+          const scale = TERRAIN_SIZE * this.project.heightScale / this.project.worldSize;
+          return this.heightSampler.height(x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5) *
+            scale * this.settings.exaggeration;
+        },
+      };
     }
     this.scene.background = new THREE.Color('#cbd2cf');
     this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
@@ -1019,7 +1045,8 @@ export class TerrainScene {
       // MeshStandardMaterial reads AO from the RED channel and roughness from
       // GREEN. Share one linear/non-color ORM map for both rather than uploading
       // two separately expanded 4-channel grayscale images.
-      const preview = packPreviewPBR(maps, field, project);
+      // Packed off-thread by the PBR worker; pack here only as a fallback.
+      const preview = packedPreview(maps) ?? packPreviewPBR(maps, field, project);
       const packedORM = tex(1, preview.orm);
       // Macro geometry remains displaced; the RGB detail normal is unchanged.
       // Alpha stores the vegetation layer weight for close-up shading only.
@@ -1142,6 +1169,7 @@ export class TerrainScene {
   dispose() {
     this.disposed = true;
     this.pendingMesh = null;
+    if (this.meshBenchmark) delete (window as BenchmarkWindow).__nhMeshBenchmark;
     ++this.pbrGeneration;
     this.pbrRelease?.();
     this.pbrRelease = null;

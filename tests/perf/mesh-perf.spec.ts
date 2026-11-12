@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { timingDistribution } from '../../src/render/meshDiagnostics';
+import { buildTerrain } from './meshBench';
+import type { Material, Quality } from './meshBench';
 
-type Quality = 'balanced' | 'high' | 'ultra';
-type Material = 'clay' | 'pbr';
 type Reference = 'uniform512' | 'adaptive';
 type BenchWindow = Window & {
   __meshLongTasks?: number[];
@@ -125,34 +125,6 @@ async function telemetry(canvas: Locator) {
       jsHeapTotalBytes: memory?.totalJSHeapSize ?? null,
     };
   });
-}
-
-async function buildTerrain(page: Page, resolution: number, quality: Quality,
-  material: Material, exaggeration: number,
-) {
-  await page.getByRole('combobox', { name: 'Working resolution' })
-    .selectOption(String(resolution));
-  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain\./ });
-  await expect(canvas).toHaveAttribute(
-    'data-mesh-source-resolution', String(resolution), { timeout: 150_000 },
-  );
-  await page.getByRole('button', { name: 'Scene', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Terrain mesh fidelity' })
-    .selectOption(quality);
-  await page.getByRole('combobox', { name: 'Surface material' })
-    .selectOption(material);
-  if (exaggeration !== 1) {
-    const spin = page.getByRole('spinbutton', {
-      name: 'Vertical exaggeration value',
-    });
-    await spin.fill(String(exaggeration));
-    await spin.press('Enter');
-  }
-  await expect(canvas).toHaveAttribute('data-mesh-quality', quality);
-  await expect(canvas).toHaveAttribute('data-material-status',
-    material === 'pbr' ? 'ready' : 'inactive', { timeout: 90_000 });
-  await expect(page.locator('.status-bar')).toContainText('Terrain ready');
-  return canvas;
 }
 
 // Test matrix is environment-selected; the default is a matched-camera

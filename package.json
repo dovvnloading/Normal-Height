@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "test:mesh-perf": "playwright test --config playwright.mesh-perf.config.ts",
+    "test:mesh-perf": "playwright test --config playwright.mesh-perf.config.ts mesh-perf.spec",
+    "test:mesh-lifecycle": "playwright test --config playwright.mesh-perf.config.ts mesh-lifecycle.spec",
+    "test:mesh-visual": "playwright test --config playwright.mesh-perf.config.ts mesh-visual.spec",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "report:mesh-perf": "node scripts/mesh-bench-report.mjs"
