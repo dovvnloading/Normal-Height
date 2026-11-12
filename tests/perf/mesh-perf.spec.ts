@@ -223,7 +223,7 @@ for (const resolution of resolutions)
 
             // A reversible expanded-ground transition exercises the
             // terrain/apron boundary, geometry disposal, and real preview.
-            const display = page.getByRole('button', { name: 'Display settings' });
+            const display = page.getByRole('button', { name: 'Display settings', exact: true });
             await display.click();
             await page.getByRole('checkbox', { name: 'Expand ground' }).check();
             await page.waitForTimeout(550);
