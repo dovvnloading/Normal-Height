@@ -1,0 +1,80 @@
+name: Extended terrain QA (manual only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Run extended browser tests, mesh benchmark smoke, or both"
+        required: true
+        default: browser
+        type: choice
+        options:
+          - browser
+          - mesh-benchmark
+          - all
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    if: ${{ inputs.suite == 'browser' || inputs.suite == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Build once
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run full browser suite
+        run: npm run test:e2e
+      - name: Save browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-terrain-browser-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+  mesh-benchmark:
+    if: ${{ inputs.suite == 'mesh-benchmark' || inputs.suite == 'all' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Build once
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Smoke-test recorder (software renderer only; NOT real GPU validation)
+        env:
+          MESH_BENCH_SOFTWARE: '1'
+          MESH_BENCH_HEADLESS: '1'
+          MESH_BENCH_REQUIRE_HARDWARE: '0'
+          MESH_BENCH_RESOLUTIONS: '128'
+          MESH_BENCH_QUALITIES: 'balanced'
+          MESH_BENCH_MATERIALS: 'clay'
+          MESH_BENCH_DEVICE: 'CI SwiftShader — not a real GPU'
+        run: npm run test:mesh-perf
+      - name: Save benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manual-terrain-mesh-benchmark
+          path: |
+            mesh-benchmark-results/
+            mesh-benchmark-report/
+          retention-days: 7

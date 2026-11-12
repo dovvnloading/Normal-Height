@@ -1,4 +1,4 @@
-name: Terrain studio checks
+name: Fast terrain checks
 
 on:
   push:
@@ -11,13 +11,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: terrain-checks-${{ github.workflow }}-${{ github.ref }}
+  group: fast-terrain-checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
+    name: Unit tests + production build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,26 +26,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Check terrain math, project files, and export encoding
+      - name: Unit tests
         run: npm test
-      - name: Typecheck and build production app
+      - name: Typecheck and production build
         run: npm run build
-      - name: Install browser test runtime
-        run: npx playwright install --with-deps chromium
-      - name: Verify the studio in Chromium
-        run: npm run test:e2e
-      - name: Save browser evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: terrain-studio-browser-evidence
-          path: |
-            test-results/
-            playwright-report/
-          retention-days: 14
-      - name: Save production webapp
-        uses: actions/upload-artifact@v4
-        with:
-          name: normal-height-webapp
-          path: dist/
-          retention-days: 14

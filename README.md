@@ -23,10 +23,10 @@ Open the URL printed by Vite. All terrain generation and project storage happen 
 npm run build       # Typecheck and generate dist/
 npm run preview     # Serve the production build
 npm test            # Engine, export, and rendering-math tests
-npm run test:e2e     # Build and verify the production app in Chromium
+npm run test:e2e    # Optional full browser suite; run npm run build first
 ```
 
-For the browser tests, run `npx playwright install chromium` once. CI installs its browser dependencies automatically and uploads screenshots, traces, and the production app as build artifacts.
+**Routine CI runs only `npm test` and `npm run build`.** It does not install Chromium, run the browser suite, or run performance benchmarks on every push. To request extended browser QA or the mesh benchmark smoke test, open **GitHub Actions → Extended terrain QA (manual only) → Run workflow**. Locally, run `npm run build` first, install Chromium once with `npx playwright install chromium`, then run `npm run test:e2e`. Hardware benchmarking instructions are in [docs/MESH_PERFORMANCE.md](docs/MESH_PERFORMANCE.md).
 
 ## What the studio does
 
