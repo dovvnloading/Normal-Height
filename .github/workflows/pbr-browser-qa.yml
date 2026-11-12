@@ -2,8 +2,6 @@ name: PBR 1K browser acceptance and responsiveness (opt-in)
 
 on:
   workflow_dispatch:
-  push:
-    branches: ['fix/pbr-acceptance-*']
 
 permissions:
   contents: read
