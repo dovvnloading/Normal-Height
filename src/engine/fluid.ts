@@ -113,6 +113,7 @@ export function fluidGridErosion(
   const numberOfSteps = stepCounts.reduce((a, b) => a + b, 0);
   const noise = new Noise((settings.seed ^ 0x51c7a17e) >>> 0);
   const soilDepth = Math.max(0, settings.soilDepthMeters ?? 1.5) / elevationMeters;
+  const rockFactor = 1 - clamp(settings.bedrockResistance ?? 0.6);
   let previous: {
     size: number; original: Float32Array; height: Float32Array;
     mobile: Float32Array; water: Float32Array; sediment: Float32Array;
@@ -274,7 +275,9 @@ export function fluidGridErosion(
             const before = height[i];
             const loose = Math.min(mobile[i], requested);
             mobile[i] -= loose;
-            bedrock[i] -= requested - loose;
+            const rock = Math.min(requested - loose,
+              Math.max(0, bedrock[i] - floor)) * rockFactor;
+            bedrock[i] -= rock;
             height[i] = bedrock[i] + mobile[i];
             const removed = Math.max(0, before - height[i]);
             sediment[i] += removed;
