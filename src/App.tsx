@@ -474,6 +474,7 @@ export default function App() {
     handle.addEventListener('pointerup', up);
   };
   const graphHeight = useMemo(() => `${graphRatio}%`, [graphRatio]);
+  const sedimentBudget = engine.result?.stats.sedimentBudget;
   return (
     <div
       className={`app-shell ${!leftOpen ? 'library-collapsed' : ''} ${!rightOpen ? 'inspector-collapsed' : ''}`}
@@ -797,26 +798,23 @@ export default function App() {
           <span>
             {engine.result ? `${(engine.result.duration / 1000).toFixed(2)} s` : 'Worker ready'}
           </span>
-          {engine.result?.stats.sedimentBudget && (
+          {sedimentBudget && (
             <>
               <span>·</span>
               <span
                 className="status-budget"
-                title={(() => {
-                  const b = engine.result.stats.sedimentBudget!;
-                  return [
-                    'Simulation transport (approximate physical volume):',
-                    `Eroded: ${b.erodedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                    `Deposited: ${b.depositedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                    `Boundary export: ${b.exportedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                    `Still suspended: ${b.suspendedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                    `Balance residual: ${b.balanceErrorM3.toLocaleString('en-US', { maximumFractionDigits: 2 })} m³`,
-                  ].join('\n');
-                })()}
+                title={[
+                  'Simulation sediment transport (approximate physical volume):',
+                  `Eroded: ${sedimentBudget.erodedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                  `Deposited: ${sedimentBudget.depositedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                  `Boundary export: ${sedimentBudget.exportedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                  `Still suspended: ${sedimentBudget.suspendedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                  `Balance residual: ${sedimentBudget.balanceErrorM3.toLocaleString('en-US', { maximumFractionDigits: 2 })} m³`,
+                ].join('\n')}
               >
                 Sediment out {new Intl.NumberFormat('en-US', {
                   notation: 'compact', maximumFractionDigits: 1,
-                }).format(engine.result.stats.sedimentBudget.exportedVolumeM3)} m³
+                }).format(sedimentBudget.exportedVolumeM3)} m³
               </span>
             </>
           )}
