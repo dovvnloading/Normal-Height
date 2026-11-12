@@ -79,6 +79,58 @@ describe('conservative coupled fluid-grid erosion', () => {
     expect(Math.max(...rain.height)).toBeGreaterThan(Math.max(...z) * 0.56);
   });
 
+
+  it('tracks exported and still-suspended sediment independently of terrain reconstruction', () => {
+    const n = 96;
+    const terrain = field(n, (u, v) =>
+      0.93 - 0.66 * v + 0.42 * (u - 0.5) ** 2 +
+      0.025 * Math.cos(u * 13) * Math.sin(v * 10));
+    for (const multiscale of [false, true]) {
+      const out = hydraulicErosion(terrain, n, {
+        ...params, multiscale, soilDepthMeters: 3, cycles: 22,
+      });
+      const budget = out.sedimentBudget!;
+      expect(budget.erodedVolumeM3).toBeGreaterThan(0);
+      expect(budget.exportedVolumeM3).toBeGreaterThanOrEqual(0);
+      expect(budget.suspendedVolumeM3).toBeGreaterThanOrEqual(0);
+      expect(Number.isFinite(budget.balanceErrorM3)).toBe(true);
+      expect(Math.abs(budget.balanceErrorM3)).toBeLessThan(
+        Math.max(1, budget.erodedVolumeM3) * 0.015);
+    }
+  });
+
+  it('keeps resistant bedrock intact when no mobile soil is present', () => {
+    const n = 64;
+    const source = field(n, (u, v) =>
+      0.83 - 0.6 * v + 0.4 * (u - 0.5) ** 2);
+    const hard = hydraulicErosion(source, n, {
+      ...params, soilDepthMeters: 0, bedrockResistance: 1, hillslope: 0,
+    });
+    const soil = hydraulicErosion(source, n, {
+      ...params, soilDepthMeters: 20, bedrockResistance: 1, hillslope: 0,
+    });
+    expect(hard.height).toEqual(source);
+    expect(hard.eroded).toBe(0);
+    expect(soil.eroded).toBeGreaterThan(0);
+  });
+
+  it('does not create or lose waterborne material when rainfall is disabled', () => {
+    const n = 65;
+    const source = field(n, (u, v) =>
+      0.85 - v * 0.55 + 0.2 * (u - 0.5) ** 2);
+    const out = hydraulicErosion(source, n, {
+      ...params, droplets: 0, hillslope: 0,
+    });
+    expect(out.height).toEqual(source);
+    expect(out.sedimentBudget).toMatchObject({
+      erodedVolumeM3: 0,
+      depositedVolumeM3: 0,
+      exportedVolumeM3: 0,
+      suspendedVolumeM3: 0,
+      balanceErrorM3: 0,
+    });
+  });
+
   it('preserves previous erosion methods as independent, selectable algorithms', () => {
     const n = 64, z = field(n, (x, y) =>
       0.8 - 0.6 * y + 0.28 * (x - 0.5) ** 2);
