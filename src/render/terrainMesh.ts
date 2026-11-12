@@ -225,6 +225,25 @@ export function planTerrainMesh(
   };
 }
 
+/**
+ * Diagnostic-only uniform 512-by-512-equivalent reference mesh.
+ * Each of 8×8 tiles uses 64 segments: 512 cells across the complete tile.
+ * Uses the *same* physical sampler and normals as adaptive mode so the
+ * performance comparison isolates topology allocation, not shader changes.
+ * Selected only by the explicit ?meshBenchmark=uniform512 URL parameter.
+ */
+export function planUniform512Reference(): TerrainMeshPlan {
+  const segments = new Array<number>(TERRAIN_TILES * TERRAIN_TILES).fill(64);
+  const vertexCount = segments.length * vertexCost(64);
+  return {
+    segments,
+    key: 'benchmark:uniform512',
+    vertexCount,
+    triangleCount: segments.length * 2 * 64 * 64,
+    maxSegments: 64,
+  };
+}
+
 export interface TerrainMeshGeometry extends THREE.BufferGeometry {
   userData: {
     nhPerimeterIndices?: number[];
