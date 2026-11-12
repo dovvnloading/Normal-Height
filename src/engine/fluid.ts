@@ -1,5 +1,6 @@
 import type { ErosionResult, ErosionSettings } from './erosion';
 import { clamp, Noise } from './noise';
+import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
 
 const DIAGONAL = 1 / Math.SQRT2;
 const DX = [1, 0, 1, -1] as const;
@@ -170,7 +171,7 @@ export function fluidGridErosion(
     const movement = new Float32Array(length);
     const cumulativeFlow = new Float32Array(length);
     const rainMap = new Float32Array(length);
-    const slopeMoves = new Float64Array(length);
+    const slopeWorkspace = createHillslopeWorkspace(length);
     const pipes = Array.from({ length: 4 }, () => new Float32Array(length));
     // Rainfall and incision are expressed in physical meters rather than
     // varying with the relief of a particular input DEM.
@@ -310,44 +311,11 @@ export function fluidGridErosion(
       // undercut riverbanks. Process each pair only once, then apply all
       // changes simultaneously to remove directional scan bias.
       if (hillslope > 0 && (t & 3) === 3) {
-        slopeMoves.fill(0);
         const threshold = Math.tan(reposeAngle) * cellMeters / elevationMeters;
-        for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
-          const i = y * m + x;
-          if (x + 1 < m) {
-            const j = i + 1;
-            const difference = height[i] - height[j];
-            const permission = materialMask
-              ? Math.min(clamp(materialMask[i]), clamp(materialMask[j])) : 1;
-            const moved = Math.sign(difference) *
-              Math.max(0, Math.abs(difference) - threshold) *
-              relaxation * permission;
-            slopeMoves[i] -= moved;
-            slopeMoves[j] += moved;
-          }
-          if (y + 1 < m) {
-            const j = i + m;
-            const difference = height[i] - height[j];
-            const permission = materialMask
-              ? Math.min(clamp(materialMask[i]), clamp(materialMask[j])) : 1;
-            const moved = Math.sign(difference) *
-              Math.max(0, Math.abs(difference) - threshold) *
-              relaxation * permission;
-            slopeMoves[i] -= moved;
-            slopeMoves[j] += moved;
-          }
-        }
-        for (let i = 0; i < length; i++) {
-          const change = slopeMoves[i];
-          if (change < 0) {
-            const loose = Math.min(mobile[i], -change);
-            mobile[i] -= loose;
-            bedrock[i] -= -change - loose;
-          } else if (change > 0) {
-            mobile[i] += change;
-          }
-          if (change !== 0) height[i] = bedrock[i] + mobile[i];
-        }
+        relaxLayeredHillslope(
+          height, mobile, bedrock, m, threshold,
+          relaxation, rockFactor, floor, materialMask, slopeWorkspace,
+        );
       }
 
       // Open boundary: water/suspended sediment leave instead of forming a
