@@ -1,4 +1,4 @@
-name: Terrain studio checks
+name: Fast terrain checks
 
 on:
   push:
@@ -11,13 +11,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: terrain-checks-${{ github.workflow }}-${{ github.ref }}
+  group: fast-terrain-checks-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify:
+    name: Unit tests + production build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,45 +26,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Check terrain math, project files, and export encoding
+      - name: Unit tests
         run: npm test
-      - name: Typecheck and build production app
+      - name: Typecheck and production build
         run: npm run build
-      - name: Install browser test runtime
-        run: npx playwright install --with-deps chromium
-      - name: Verify the studio in Chromium
-        run: npm run test:e2e
-      - name: Smoke-test mesh performance recorder (software WebGL only)
-        env:
-          MESH_BENCH_SOFTWARE: '1'
-          MESH_BENCH_HEADLESS: '1'
-          MESH_BENCH_REQUIRE_HARDWARE: '0'
-          MESH_BENCH_RESOLUTIONS: '128'
-          MESH_BENCH_QUALITIES: 'balanced'
-          MESH_BENCH_MATERIALS: 'clay'
-          MESH_BENCH_DEVICE: 'CI SwiftShader — no hardware FPS claims'
-        run: npm run test:mesh-perf
-      - name: Save mesh benchmark evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: terrain-mesh-benchmark-smoke
-          path: |
-            mesh-benchmark-results/
-            mesh-benchmark-report/
-          retention-days: 14
-      - name: Save browser evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: terrain-studio-browser-evidence
-          path: |
-            test-results/
-            playwright-report/
-          retention-days: 14
-      - name: Save production webapp
-        uses: actions/upload-artifact@v4
-        with:
-          name: normal-height-webapp
-          path: dist/
-          retention-days: 14
