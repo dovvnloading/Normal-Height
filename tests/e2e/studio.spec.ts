@@ -384,7 +384,9 @@ test('camera-adaptive terrain density increases at close range without regenerat
   expect(closeTriangles).toBeGreaterThan(farTriangles);
   expect(Number(await canvas.getAttribute('data-mesh-vertices'))).toBeLessThanOrEqual(970000);
   expect(await canvas.getAttribute('data-mesh-source-resolution')).toBe(sourceResolution);
-  await capture(page, testInfo, 'terrain-adaptive-closeup.png');
+  // Capture the actual WebGL framebuffer directly. Full-page capture can
+  // stall on font readiness or the software-GPU compositor during close zoom.
+  await captureTerrain(canvas, testInfo, 'terrain-adaptive-closeup.png');
 
   // Changing only viewport fidelity cannot rerun the terrain Worker or change
   // the actual source height resolution. Lower budgets must reduce triangles.
