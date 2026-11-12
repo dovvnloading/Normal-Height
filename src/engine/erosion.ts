@@ -45,6 +45,14 @@ export interface SedimentBudget {
   /** Eroded - deposited - exported - suspended; near zero is conservative. */
   balanceErrorM3: number;
 }
+/** Physical water accounting from the virtual-pipe model. */
+export interface WaterBudget {
+  rainfallVolumeM3: number;
+  exportedVolumeM3: number;
+  evaporatedVolumeM3: number;
+  retainedVolumeM3: number;
+  balanceErrorM3: number;
+}
 export interface ErosionResult {
   height: Float32Array;
   flow: Float32Array;
@@ -55,6 +63,7 @@ export interface ErosionResult {
   exportedSediment: number;
   /** Available for landscape and fluid models. Values are measured at simulation resolution. */
   sedimentBudget?: SedimentBudget;
+  waterBudget?: WaterBudget;
   /** Internal mobile material layer passed to hybrid hydraulic refinement. */
   mobileSediment?: Float32Array;
 }
@@ -274,6 +283,7 @@ export function hydraulicErosion(
     return {
       height, flow: fluid.flow, wear, deposition, eroded, deposited,
       exportedSediment: Math.max(0, eroded - deposited),
+      waterBudget: fluid.waterBudget,
       sedimentBudget: {
         erodedVolumeM3: a.erodedVolumeM3 + b.erodedVolumeM3,
         depositedVolumeM3: a.depositedVolumeM3 + b.depositedVolumeM3,
