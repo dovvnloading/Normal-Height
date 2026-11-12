@@ -9,7 +9,7 @@ export function geometryBufferBytes(...geometries: Array<THREE.BufferGeometry | 
     const attributes = Object.values(geometry.attributes);
     if (geometry.index) attributes.push(geometry.index);
     for (const attribute of attributes) {
-      const buffer = attribute.isInterleavedBufferAttribute
+      const buffer = 'data' in attribute
         ? attribute.data.array.buffer : attribute.array.buffer;
       if (!seen.has(buffer)) {
         seen.add(buffer);
