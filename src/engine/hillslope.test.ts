@@ -56,6 +56,23 @@ describe('layered, conservative hillslope relaxation', () => {
     expect(mobile.some(v => v > 0)).toBe(true);
   });
 
+  it('caps extreme hillslope strength to avoid reversing the local terrain gradient', () => {
+    const n = 9, height = new Float32Array(n * n).fill(0.12);
+    const center = 4 * n + 4;
+    height[center] = 0.92;
+    const initial = height.slice(), before = sum(height);
+    const mobile = new Float32Array(n * n).fill(2);
+    const bedrock = height.map(v => v - 2);
+    relaxLayeredHillslope(height, mobile, bedrock, n,
+      0, 9, 1, -10, undefined, createHillslopeWorkspace(n * n));
+    expect(height[center]).toBeGreaterThan(Math.max(
+      height[center - 1], height[center + 1],
+      height[center - n], height[center + n],
+    ));
+    expect(height[center]).toBeLessThan(initial[center]);
+    expect(Math.abs(sum(height) - before)).toBeLessThan(2e-5);
+  });
+
   it('remains unchanged on a planar slope below repose, even with loose soil', () => {
     const n = 16, height = new Float32Array(n * n);
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
