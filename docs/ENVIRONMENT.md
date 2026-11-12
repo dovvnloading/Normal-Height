@@ -47,7 +47,7 @@ These controls are independent of the procedural graph and material-export param
 
 - `npm test`: material and geometry math, apron edge conformance including negative relief, shared weather fields, shader injection, preview-settings sanitization, export correctness.
 - `npm run build`: TypeScript and production bundling.
-- `npm run test:e2e`: real Chromium/WebGL snapshots for sky and textured-ground toggles, preset looks, cloud-shadow controls, reload persistence, 2D split view, and absence of console errors. Browser evidence is uploaded as a GitHub Actions artifact.
+- `npm run test:e2e` (after `npm run build`): optional, manually triggered Chromium/WebGL snapshots for sky and textured-ground toggles, preset looks, cloud-shadow controls, reload persistence, 2D split view, and absence of console errors. The full browser suite is **never a routine per-push CI gate**; request it from the manual Extended terrain QA workflow.
 - Visual review: ensure no hard source-tile boundary, no outer apron line, visible directional lighting at golden hour, readable overcast atmospheric contrast, no hard meadow cutoff, and no small individual grass sprites.
 - Runtime review: test on actual discrete and integrated GPUs; software WebGL alone is not a substitute for frame-time profiling on consumer hardware.
 
