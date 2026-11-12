@@ -68,10 +68,12 @@ export function fluidGridErosion(
   settings: ErosionSettings,
   mask?: Float32Array,
   progress?: (fraction: number) => void,
+  initialMobile?: Float32Array,
 ): ErosionResult {
   const count = n * n;
   if (!Number.isInteger(n) || n < 2 || n > 2048 ||
-      input.length !== count || (mask && mask.length !== count))
+      input.length !== count || (mask && mask.length !== count) ||
+      (initialMobile && initialMobile.length !== count))
     throw new Error('Fluid erosion requires aligned square height and mask fields.');
   let minimum = Infinity, maximum = -Infinity;
   for (const value of input) {
@@ -82,6 +84,9 @@ export function fluidGridErosion(
   }
   if (mask) for (const value of mask)
     if (!Number.isFinite(value)) throw new Error('Fluid erosion mask must be finite.');
+  if (initialMobile) for (const value of initialMobile)
+    if (!Number.isFinite(value) || value < 0)
+      throw new Error('Fluid erosion requires finite nonnegative mobile sediment.');
 
   const relief = Math.max(1e-6, maximum - minimum);
   const floor = minimum - relief * 0.06;
@@ -141,7 +146,9 @@ export function fluidGridErosion(
     // stages; deposits are tracked in a separate mobile layer.
     const mobile = previous
       ? resizeConservativeDensity(previous.mobile, previous.size, m)
-      : new Float32Array(length).fill(soilDepth);
+      : initialMobile
+        ? resizeConservativeDensity(initialMobile, n, m)
+        : new Float32Array(length).fill(soilDepth);
     const bedrock = new Float32Array(length);
     for (let i = 0; i < length; i++) bedrock[i] = height[i] - mobile[i];
     const water = previous
