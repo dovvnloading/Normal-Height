@@ -250,7 +250,7 @@ export function fluidGridErosion(
         cumulativeFlow[i] += movement[i];
       }
 
-      if (rainfall > 0 && erodibility > 0) {
+      if (rainfall > 0 && (erodibility > 0 || depositionRate > 0)) {
         for (let y = 1; y < m - 1; y++) for (let x = 1; x < m - 1; x++) {
           const i = y * m + x, allowance =
             materialMask ? clamp(materialMask[i]) : 1;
@@ -259,28 +259,36 @@ export function fluidGridErosion(
             (height[i + 1] - height[i - 1]) * 0.5,
             (height[i + m] - height[i - m]) * 0.5,
           ) * elevationMeters / cellMeters;
-          // With no terrain gradient, even variable precipitation cannot
-          // invent incised valleys from a mathematically level plateau.
-          if (grade < 1e-5) continue;
-          const carrying = Math.max(0,
-            sedimentCapacity * movement[i] * Math.sqrt(grade) *
-            (1 + Math.min(2, water[i] * 20)) - relief * 0.0014);
+          // A mathematically level source cannot initiate a channel, but
+          // sediment already in suspension must still settle in slow water.
+          const carrying = grade < 1e-5 ? 0 : Math.max(0,
+            sedimentCapacity * movement[i] * subdiv * Math.sqrt(grade) *
+            (1 + Math.min(2, water[i] * 20)) -
+              (1.6 / elevationMeters) * 2.2);
           const excess = carrying - sediment[i];
-          if (excess > 0) {
+          if (excess > 0 && erodibility > 0) {
             const requested = Math.min(
-              excess * (0.045 + erodibility * 0.13) * erodibility,
+              excess * (0.045 + erodibility * 0.13) * erodibility / subdiv,
               depthLimit,
               Math.max(0, height[i] - floor),
             ) * allowance;
             const before = height[i];
-            height[i] -= requested;
-            sediment[i] += before - height[i];
+            const loose = Math.min(mobile[i], requested);
+            mobile[i] -= loose;
+            bedrock[i] -= requested - loose;
+            height[i] = bedrock[i] + mobile[i];
+            const removed = Math.max(0, before - height[i]);
+            sediment[i] += removed;
+            physicalEroded += removed * volumePerSample;
           } else if (excess < 0 && depositionRate > 0) {
             const settle = Math.min(sediment[i],
-              -excess * depositionRate * 0.095) * allowance;
+              -excess * depositionRate * 0.095 / subdiv) * allowance;
             const before = height[i];
-            height[i] += settle;
-            sediment[i] -= height[i] - before;
+            mobile[i] += settle;
+            height[i] = bedrock[i] + mobile[i];
+            const actual = Math.max(0, height[i] - before);
+            sediment[i] = Math.max(0, sediment[i] - actual);
+            physicalDeposited += actual * volumePerSample;
           }
         }
       }
@@ -316,7 +324,17 @@ export function fluidGridErosion(
             slopeMoves[j] += moved;
           }
         }
-        for (let i = 0; i < length; i++) height[i] += slopeMoves[i];
+        for (let i = 0; i < length; i++) {
+          const change = slopeMoves[i];
+          if (change < 0) {
+            const loose = Math.min(mobile[i], -change);
+            mobile[i] -= loose;
+            bedrock[i] -= -change - loose;
+          } else if (change > 0) {
+            mobile[i] += change;
+          }
+          if (change !== 0) height[i] = bedrock[i] + mobile[i];
+        }
       }
 
       // Open boundary: water/suspended sediment leave instead of forming a
