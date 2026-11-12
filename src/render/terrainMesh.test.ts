@@ -5,7 +5,7 @@ import type { HeightField } from '../model/types';
 import { buildGroundApron, TERRAIN_SIZE } from './GroundExtension';
 import {
   buildAdaptiveTerrainGeometry, createTerrainSampler,
-  planTerrainMesh, TERRAIN_TILES,
+  planTerrainMesh, planUniform512Reference, TERRAIN_TILES,
 } from './terrainMesh';
 import type { TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 
@@ -87,6 +87,27 @@ describe('budgeted camera-adaptive terrain mesh', () => {
     expect(near.segments.some((value) => value < near.maxSegments)).toBe(true);
     expect(planTerrainMesh(simpleSampler, camera(0, 0.4, 0.45), 860, 1.5,
       1800, 8000, 1, 'high')).toEqual(near);
+  });
+
+  it('offers a reproducible uniform reference for matched-camera hardware benchmarks', () => {
+    const reference = planUniform512Reference();
+    expect(reference.maxSegments).toBe(64);
+    expect(reference.vertexCount).toBe(8 * 8 * 65 * 65);
+    expect(reference.triangleCount).toBe(8 * 8 * 2 * 64 * 64);
+    expect(reference.segments.every(value => value === 64)).toBe(true);
+    expect(reference).toEqual(planUniform512Reference());
+  });
+
+  it('keeps mesh density stable across small camera motion, then downgrades when far away', () => {
+    const near = planTerrainMesh(simpleSampler, camera(0, 0.4, 0.45),
+      860, 1.5, 1800, 8000, 1, 'high');
+    const drift = planTerrainMesh(simpleSampler, camera(0, 0.4, 0.455),
+      860, 1.5, 1800, 8000, 1, 'high', near);
+    expect(drift.key).toBe(near.key);
+    const far = planTerrainMesh(simpleSampler, camera(0, 6, 10),
+      860, 1.5, 1800, 8000, 1, 'high', near);
+    expect(far.vertexCount).toBeLessThan(near.vertexCount);
+    expect(far.maxSegments).toBeLessThan(near.maxSegments);
   });
 
   it('stitches unequal-resolution borders without cracks or differing border normals', () => {
