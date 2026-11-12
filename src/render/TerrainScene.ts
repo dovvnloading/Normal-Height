@@ -382,7 +382,7 @@ export class TerrainScene {
     if (this.needsRender || this.controls.autoRotate || weatherFrame) {
       const started = performance.now();
       const gl = this.meshBenchmark && this.gpuTimer
-        ? this.renderer.getContext() : null;
+        ? this.renderer.getContext() as WebGL2RenderingContext : null;
       let gpuQuery: WebGLQuery | null = null;
       if (gl && this.gpuTimer && this.gpuPending.length < 4) {
         gpuQuery = gl.createQuery();
@@ -423,7 +423,7 @@ export class TerrainScene {
   private pollGpuTimers(now: number) {
     const ext = this.gpuTimer;
     if (!ext || this.contextLost) return;
-    const gl = this.renderer.getContext();
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
     const disjoint = Boolean(gl.getParameter(ext.GPU_DISJOINT_EXT));
     while (this.gpuPending.length &&
         gl.getQueryParameter(this.gpuPending[0], gl.QUERY_RESULT_AVAILABLE)) {
@@ -987,7 +987,7 @@ export class TerrainScene {
     this.pbrTextures = [];
     cancelAnimationFrame(this.animation);
     if (!this.contextLost && this.gpuPending.length) {
-      const gl = this.renderer.getContext();
+      const gl = this.renderer.getContext() as WebGL2RenderingContext;
       for (const query of this.gpuPending) gl.deleteQuery(query);
     }
     this.gpuPending = [];
