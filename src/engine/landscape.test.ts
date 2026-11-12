@@ -81,7 +81,8 @@ describe('multi-flow rainfall', () => {
       let outlets = 0;
       for (let i = 0; i < flow.length; i++)
         if (work.receiver[i] < 0) outlets += flow[i];
-      expect(outlets * world * world / (n * n)).toBeCloseTo(world * world, 0);
+      expect(Math.abs(outlets * world * world / (n * n) - world * world))
+        .toBeLessThan(world * world * 1e-6);
     }
   });
 
