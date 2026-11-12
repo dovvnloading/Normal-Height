@@ -70,7 +70,7 @@ test('adaptive 3D mesh stays idle and disposes replaced GPU buffers without reru
     await testInfo.attach('mesh-resource-audit.json', {
       body: Buffer.from(JSON.stringify({
         initialPlanChecks: planCount,
-        closeupPlanChecks,
+        closeupPlanChecks: closeupPlans,
         buildCount,
         disposalCount,
         cpuGeometryBytes: await value('data-mesh-buffer-bytes'),
