@@ -315,7 +315,9 @@ test('renders real 3D terrain and switches between split, flow, and normal maps'
     'aria-pressed',
     'true',
   );
-  await expect(page.locator('.nh-scene-resolution')).toHaveText('512² mesh');
+  await expect(page.locator('.nh-scene-resolution')).toContainText('tris · high');
+  await expect.poll(() => threeCanvas.evaluate((el) =>
+    Number((el as HTMLCanvasElement).dataset.meshTriangles))).toBeGreaterThan(100000);
   await expect(page.locator('.nh-render-error')).toHaveCount(0);
   await expect(terrainNodes(page)).toHaveCount(5);
   await expect(page.getByRole('textbox', { name: 'Node name' })).toHaveValue('Carve the watershed');
@@ -357,6 +359,40 @@ test('renders real 3D terrain and switches between split, flow, and normal maps'
   await expect(page.getByRole('img', { name: /^Normals map\./ })).toBeVisible();
   await expect(page.locator('.nh-map-legend')).toContainText('OpenGL');
   await expect.poll(() => mapColors(page)).toBeGreaterThan(20);
+});
+
+test('camera-adaptive terrain density increases at close range without regenerating the heightmap', async ({ page }, testInfo) => {
+  test.setTimeout(110_000);
+  const canvas = page.getByRole('img', { name: /^Interactive 3D terrain\./ });
+  await expect(canvas).toBeVisible();
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-mesh-vertices'))).toBeGreaterThan(0);
+  const sourceResolution = await canvas.getAttribute('data-mesh-source-resolution');
+  const farTriangles = Number(await canvas.getAttribute('data-mesh-triangles'));
+  expect(farTriangles).toBeGreaterThan(0);
+
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  const quality = page.getByRole('combobox', { name: 'Terrain mesh fidelity' });
+  await quality.selectOption('ultra');
+  await expect(canvas).toHaveAttribute('data-mesh-quality', 'ultra');
+  await canvas.hover();
+  for (let i = 0; i < 12; i++) await page.mouse.wheel(0, -260);
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-mesh-max-segments')),
+    { timeout: 25_000 }).toBeGreaterThan(64);
+  const closeTriangles = Number(await canvas.getAttribute('data-mesh-triangles'));
+  expect(closeTriangles).toBeGreaterThan(farTriangles);
+  expect(Number(await canvas.getAttribute('data-mesh-vertices'))).toBeLessThanOrEqual(970000);
+  expect(await canvas.getAttribute('data-mesh-source-resolution')).toBe(sourceResolution);
+  await capture(page, testInfo, 'terrain-adaptive-closeup.png');
+
+  // Changing only viewport fidelity cannot rerun the terrain Worker or change
+  // the actual source height resolution. Lower budgets must reduce triangles.
+  await quality.selectOption('balanced');
+  await expect(canvas).toHaveAttribute('data-mesh-quality', 'balanced');
+  await expect.poll(async () =>
+    Number(await canvas.getAttribute('data-mesh-vertices'))).toBeLessThanOrEqual(340000);
+  await expect(page.locator('.nh-render-error')).toHaveCount(0);
 });
 
 test('seed and erosion parameter changes regenerate the actual height data', async ({ page }) => {
