@@ -142,7 +142,11 @@ export function createTerrainSampler(
   return { resolution: n, height: sampleHeight, normal };
 }
 
-const baseSegments = (n: number) => n < 256 ? 16 : n < 512 ? 32 : 64;
+// A 512² source no longer forces a 512² mesh at full-tile distance. Base
+// geometry is ~256² total samples; only visible camera-near tiles refine.
+// This keeps software/iGPU rendering responsive without losing the source
+// DEM's fine structure when the camera approaches it.
+const baseSegments = (n: number) => n < 256 ? 8 : n < 512 ? 16 : 32;
 const vertexCost = (segments: number) => (segments + 1) * (segments + 1);
 
 /**
