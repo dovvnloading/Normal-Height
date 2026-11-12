@@ -341,22 +341,24 @@ export function fluidGridErosion(
       // tile-edge dam or giant erosion stripe. Accumulate actual outlet flow.
       for (let x = 0; x < m; x++) {
         for (const i of [x, (m - 1) * m + x]) {
-          water[i] *= 0.4;
-          sediment[i] *= 0.4;
+          physicalExported += sediment[i] * (1 - retainedBoundary) * volumePerSample;
+          water[i] *= retainedBoundary;
+          sediment[i] *= retainedBoundary;
         }
       }
       for (let y = 1; y < m - 1; y++) {
         for (const i of [y * m, y * m + m - 1]) {
-          water[i] *= 0.4;
-          sediment[i] *= 0.4;
+          physicalExported += sediment[i] * (1 - retainedBoundary) * volumePerSample;
+          water[i] *= retainedBoundary;
+          sediment[i] *= retainedBoundary;
         }
       }
       for (let i = 0; i < length; i++)
-        water[i] *= 1 - Math.min(0.45, evaporation * 1.2);
+        water[i] *= 1 - evaporationRate;
       completed++;
       progress?.(Math.min(0.999, completed / numberOfSteps));
     }
-    previous = { size: m, original, height };
+    previous = { size: m, original, height, mobile, water, sediment };
     finalFlow = cumulativeFlow;
   }
 
@@ -388,9 +390,25 @@ export function fluidGridErosion(
       }
     }
   }
+  let suspendedVolumeM3 = 0;
+  if (previous) {
+    const sampleVolume = (worldMeters / (previous.size - 1)) ** 2 * elevationMeters;
+    for (const amount of previous.sediment)
+      suspendedVolumeM3 += amount * sampleVolume;
+  }
   progress?.(1);
   return {
     height, flow, wear, deposition, eroded, deposited,
+    // Keep historical output-grid statistics for downstream graph consumers.
     exportedSediment: Math.max(0, eroded - deposited),
+    // Actual transport volumes are tracked at each physical simulation cell.
+    sedimentBudget: {
+      erodedVolumeM3: physicalEroded,
+      depositedVolumeM3: physicalDeposited,
+      exportedVolumeM3: physicalExported,
+      suspendedVolumeM3,
+      balanceErrorM3: physicalEroded - physicalDeposited -
+        physicalExported - suspendedVolumeM3,
+    },
   };
 }
