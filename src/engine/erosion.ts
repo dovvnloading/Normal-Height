@@ -30,6 +30,18 @@ export interface ErosionSettings {
   /** Physical dimensions for grid-independent stream-power and discharge scales. */
   worldSize?: number;
   heightScale?: number;
+  /** Initial mobile soil cover in physical meters; does not raise terrain. */
+  soilDepthMeters?: number;
+}
+
+/** Independently tracked transport volumes, not inferred from output pixels. */
+export interface SedimentBudget {
+  erodedVolumeM3: number;
+  depositedVolumeM3: number;
+  exportedVolumeM3: number;
+  suspendedVolumeM3: number;
+  /** Eroded - deposited - exported - suspended; near zero is conservative. */
+  balanceErrorM3: number;
 }
 export interface ErosionResult {
   height: Float32Array;
@@ -39,6 +51,8 @@ export interface ErosionResult {
   eroded: number;
   deposited: number;
   exportedSediment: number;
+  /** Available for landscape and fluid models. Values are measured at simulation resolution. */
+  sedimentBudget?: SedimentBudget;
 }
 
 export function sampleHeight(map: Float32Array, n: number, x: number, y: number): number {
