@@ -180,7 +180,7 @@ export function landscapeErosion(
     const fanIndices = new Int32Array(5);
     const fanWeights = [0.55, 0.1125, 0.1125, 0.1125, 0.1125];
     let stageEroded = 0, stageDeposited = 0, stageExported = 0;
-    const volumePerSample = cell * cell * heightScale;
+    const volumePerSample = world * world / size * heightScale;
     const stageCycles = Math.max(1, Math.round(cycles * weights[stageIndex]));
     const dt = duration * 28 / Math.max(1, cycles);
     const stageFeature = featureMeters *
@@ -256,7 +256,7 @@ export function landscapeErosion(
           if (head <= 0 || spill[i] - height[i] > 0.003 * relief) continue;
           const grade = head * heightScale / distance;
           if (grade <= 0.001) continue;
-          const contributingKm2 = area[i] * cell * cell / 1e6;
+          const contributingKm2 = area[i] * world * world / size / 1e6;
           const aNorm = contributingKm2 / (world * world / 1e6);
           // Small sheet runoff is not a river. This catchment threshold is
           // physical area, rather than a number of droplets or raster pixels.
@@ -341,7 +341,7 @@ export function landscapeErosion(
           // Capacity is based on *physical* rain-weighted catchment area,
           // not an arbitrary number of contributing raster pixels.
           // 2500 m² is a fixed coefficient reference, independent of m.
-          const dischargeReference = area[i] * cell * cell / 2500;
+          const dischargeReference = area[i] * world * world / size / 2500;
           const capacity = relief * 0.032 * carry *
             Math.pow(Math.max(1e-8, dischargeReference), 0.56) *
             Math.pow(Math.max(0.001, grade), 0.85);
