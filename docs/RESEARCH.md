@@ -28,72 +28,109 @@ The mountain generator separates the elevation of the broad spine or massif from
 
 The default 3D view uses physical horizontal and vertical scale. Adjustable vertical exaggeration affects only the display; it never changes simulation heights, normals exported from physical dimensions, or elevation files.
 
-## Conservative virtual-pipe hydraulic grid (experimental)
+## Hydraulic sediment transport, physical scale and hybrid refinement
 
-**Motivation.** The preceding particle, D8 watershed and MFD landscape-evolution
-solvers still do not reproduce the deep, feathered dendritic incision and
-sediment-filled banks visible in professional heightfield erosion outputs.
-The issue is partly structural: they infer rivers directly from a static
-flow network and then modify height by scalar stream power, instead of
-simulating moving water *and sediment* as interacting spatial fields.
+Normal Height offers a default **landscape-evolution** solver, a separate
+eight-neighbor **virtual-pipe fluid** solver, and an experimental **hybrid**
+mode that runs both in sequence. These models are independent implementations
+of artistic landscape evolution, not numerical reproductions of proprietary
+terrain products or calibrated geologic/meteorological models.
 
-**Research basis.** Unlike the earlier heuristics, this module follows the
-well-described column/virtual-pipe families in
-[Mei, Decaudin & Hu (2007), Fast Hydraulic Erosion Simulation and Visualization
-on GPU](https://doi.org/10.1109/PG.2007.15) and
-[Šťava et al. (2008), Interactive Terrain Modeling Using Hydraulic Erosion]
-(https://diglib.eg.org/items/60afda0c-a666-4df8-90dd-9b80afc554c2).
-Houdini [Erode 3.0](https://www.sidefx.com/docs/houdini/nodes/sop/heightfield_erode)
-and Gaea [Erosion2](https://docs.gaea.app/using/using-gaea/understanding-erosion/erosion_2/)
-independently corroborate the importance of *iterating fluid transport and
-bed exchange at several physically defined feature sizes*. Those products'
-internal algorithms are not represented as available or reproduced.
+### Landscape flow/solid transport
 
-**Implementation.** `src/engine/fluid.ts` supplies an opt-in **Hydraulic
-fluid grid · experimental** erosion mode, leaving `Landscape evolution` as
-the untouched default. Four persistent signed link-flux fields connect each
-raster cell to eight neighbors (cardinal and diagonal). Each step:
+A priority flood from the open tile boundary produces an acyclic drainage
+order. Each routed cell partitions runoff between all strictly downhill
+earlier-ranked neighbors by `slope^1.7`. Flat or enclosed basins use the
+priority-flood receiver. The same eight fractions are stored in a typed
+array and reused in sediment advection, preventing a water network that
+branches while sediments inexplicably follow a single D8 receiver.
 
-1. Adds deterministic, spatially coherent rainfall.
-2. Computes pressure gradients from **terrain plus water surface** and
-   integrates prior-flow inertia to predict link discharge.
-3. Normalizes outgoing link discharge **by the water actually available** in
-   each source cell, then performs paired water and suspended-sediment exchange
-   using pre-transport concentrations. This is a true advection step; it is
-   not random stamped gully noise.
-4. Evaluates sediment transport capacity from local water flux and physical
-   slope. Transport deficits erode solid height; overload deposits existing
-   suspended material onto the same elevation grid.
-5. Runs conservative, simultaneous bank slippage for slopes exceeding a
-   physical repose angle.
-6. Drains surface water and suspended sediment at open tile boundaries;
-   evaporates remaining water, and repeats.
+The accumulation field represents rain-weighted source-cell contributions.
+Each cell represents `worldSize² / resolution²` square meters for the
+transport budget. Capacity uses a fixed 2,500 m² reference area (an artistic
+coefficient) and cannot increase just because the same catchment was
+resampled more finely. Surface gradients still use the distance between
+elevation samples, `worldSize / (resolution - 1)`.
 
-Coarse-to-fine 128/256/512-cell stages share actual *net terrain displacement*
-while retaining original source high-frequency relief. 4 fluid steps per
-existing evolution-step control are used to reduce interface clutter.
-At output, height, wear, deposition and flow are resampled consistently and
-net eroded/deposited heights are computed from actual Float32 differences.
+Channel incision depends on physical contributing area, slope, valley
+confinement, and an artist-controlled strength. Sediment removal first takes
+from a mobile soil/alluvium layer; remaining demand erodes bedrock with
+resistance `1 - bedrockResistance`. The initial soil cover is *subtracted
+from* the source surface when constructing the rock layer; it never raises
+the original terrain. Riverbank geometry and paired conservative hillslope
+transfers remain as before, with received material becoming mobile sediment.
 
-**Important limitations.** This is a CPU-limited shallow-water-inspired
-virtual-pipe approximation. It is neither a full Navier–Stokes solver nor
-equivalent to commercial Gaea/Terragen. The fluid model does not infer true
-groundwater, grainsize, lithology or geologic time. Its sediment flux is
-tracked at the simulation resolution, while output terrain maps may be
-upscaled; the final `exportedSediment` is a reconciliation of net solid
-height differences, not an independent measurement of waterborne mass.
-Temporal steps are artistic and spatial rain is statistical. A 512-cell grid
-cannot produce centimeter-scale ground-truth gully geometry, and a poor input
-mountain remains a poor input mountain. No visual fidelity claim should be
-accepted from passing tests without inspecting the actual heightfield.
+Transported material deposits when the local capacity falls below its
+incoming load, or reaches an open outlet. Eroded, deposited, and exported
+volumes are accumulated directly from simulation-cell material exchanges.
+The material is fully routed along the current topological drainage network
+on each landscape-evolution cycle.
 
-**Validation criteria.** Unit tests check that a flat surface does not
-manufacture channels, zero erodibility masks preserve elevations, material
-changes are deterministic and statistically significant, and net solid
-changes agree with signed wear/deposition. Browser QA attaches comparable
-source/previous/fluid **height**, shaded relief, runoff, wear and deposition
-PNGs for three terrain profiles. Tests demonstrate functional invariants,
-not realistic geomorphology or matching a user-provided visual reference.
+### Virtual-pipe hydraulic grid
+
+The fluid solver is informed by [Mei, Decaudin & Hu (2007)](https://doi.org/10.1109/PG.2007.15)
+and [Šťava et al. (2008)](https://diglib.eg.org/items/60afda0c-a666-4df8-90dd-9b80afc554c2).
+Each iteration computes pressure differences from surface elevation plus
+water depth; retains approximate directional momentum; scales all outgoing
+links to available water; advects suspended solids using pre-transport water
+concentration; and erodes or deposits according to slope and transport
+capacity. Water and solids drain at open boundaries.
+
+Erosion suppresses incision on a level surface, but *does not suppress
+deposition*: existing suspended sediment can settle when the slope and
+carrying capacity become small. Material exchanged with the terrain is
+split into mobile sediment and underlying rock. Rainfall is expressed as
+an artistic physical depth per evolution step (relative to the configured
+terrain height scale), rather than as a fraction of initial relief.
+
+The solver limits its simulation to 512² cells. It uses smaller substeps
+where the physical grid spacing is small (up to four substeps per nominal
+time step), reducing pressure/transfer steps while preserving the nominal
+rainfall and boundary-loss rate. Coarse-to-fine stages interpolate actual
+terrain displacement while carrying water, suspended sediment, and loose
+sediment as conserved area densities. Momentum links are reinitialized at
+each refinement; hydrodynamic state continuity is approximate.
+
+### Hybrid mode and conservation budget
+
+Hybrid runs the landscape model with a portion of the selected cycles,
+passes the evolved terrain and physical mobile layer into a fluid-grid pass,
+then returns the signed net elevation change relative to the original input.
+It retains the fluid flow diagnostic and adds both stages' independently
+measured transport budgets. It is intentionally opt-in while visual and
+performance characterization continues.
+
+Each landscape and fluid result includes `sedimentBudget` with
+`erodedVolumeM3`, `depositedVolumeM3`, `exportedVolumeM3`,
+`suspendedVolumeM3` and `balanceErrorM3`. The last value is
+
+`erosion - deposition - boundary export - terminal suspended`.
+
+Only independently measured transport fluxes enter this budget; hillslope
+rearrangement is conservative and excluded from the waterborne balance.
+The legacy `exportedSediment` API field still uses net signed final-grid
+height differences for compatibility with existing graph statistics.
+The two figures are not equivalent where output reconstruction, masks,
+resampling or source-detail preservation alter the integrated result.
+
+### Limitations and validation
+
+This is a bounded CPU erosion approximation, not Navier–Stokes, a calibrated
+sediment-size distribution, measured rock competence, true groundwater,
+or geologic time. Eight-neighbor raster anisotropy, the open-tile boundary,
+and the 512-cell maximum simulation grid constrain geometry. Transport
+density uses equal-area finite-volume samples; the exported high-resolution
+heightfield interpolates the coarse-stage displacement. This can alter
+final-grid integrated terrain mass even when the **simulated transport**
+budget balances. The UI's physical scales improve reproducibility, not
+ground-truth realism.
+
+Tests verify connected runoff, matching water/sediment routing fractions,
+relative physical-resolution consistency, bedrock resistance, no spurious
+erosion on level terrain, masks, determinism, and actual transport ledger
+balance. The final acceptance gate is comparison of **heightfield geometry**
+and shaded relief on diverse terrain presets. A plausible-looking water
+flow mask is not sufficient.
 
 ---
 

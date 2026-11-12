@@ -34,6 +34,58 @@ describe('multi-flow rainfall', () => {
     expect(runoff.some(q => q > 10)).toBe(true);
   });
 
+  it('provides normalized downhill fractions that conserve transported solids', () => {
+    const n = 49;
+    const z = field(n, (u, v) =>
+      0.83 - v * 0.56 + 0.18 * (u - 0.5) ** 2);
+    const work = routeDrainage(z, n, 27);
+    const rain = new Float32Array(n * n).fill(1);
+    const fractions = new Float32Array(n * n * 8);
+    accumulateMultiFlow(z, work, rain, 2000, 0, fractions);
+    const dx = [-1, 0, 1, -1, 1, -1, 0, 1];
+    const dy = [-1, -1, -1, 0, 0, 1, 1, 1];
+    const solids = new Float64Array(n * n).fill(1);
+    let exported = 0;
+    for (let k = work.order.length - 1; k >= 0; k--) {
+      const i = work.order[k];
+      if (work.receiver[i] < 0) {
+        exported += solids[i];
+        continue;
+      }
+      let sumFractions = 0;
+      for (let d = 0; d < 8; d++) {
+        const share = fractions[i * 8 + d];
+        if (share <= 0) continue;
+        const x = i % n + dx[d], y = ((i / n) | 0) + dy[d];
+        expect(x).toBeGreaterThanOrEqual(0);
+        expect(y).toBeGreaterThanOrEqual(0);
+        expect(x).toBeLessThan(n);
+        expect(y).toBeLessThan(n);
+        const receiver = y * n + x;
+        expect(work.rank[receiver]).toBeLessThan(work.rank[i]);
+        solids[receiver] += solids[i] * share;
+        sumFractions += share;
+      }
+      expect(sumFractions).toBeCloseTo(1, 5);
+    }
+    expect(exported).toBeCloseTo(n * n, 3);
+  });
+
+  it('keeps watershed discharge in physical area units across resolutions', () => {
+    const world = 4800;
+    for (const n of [49, 97, 193]) {
+      const terrain = field(n, (u, v) => 0.8 - 0.5 * v + 0.1 * u);
+      const work = routeDrainage(terrain, n, 31);
+      const rain = new Float32Array(n * n).fill(1);
+      const flow = accumulateMultiFlow(terrain, work, rain, world, 0);
+      let outlets = 0;
+      for (let i = 0; i < flow.length; i++)
+        if (work.receiver[i] < 0) outlets += flow[i];
+      expect(Math.abs(outlets * world * world / (n * n) - world * world))
+        .toBeLessThan(world * world * 1e-6);
+    }
+  });
+
   it('loses discharge with physical-distance transmission losses', () => {
     const n = 49, z = field(n, (u, v) => 0.8 - 0.5 * v + 0.12 * u);
     const before = z.slice();
@@ -65,6 +117,12 @@ describe('multi-scale landscape evolution', () => {
     expect(a.eroded).toBeGreaterThan(0.01);
     expect(a.height.every(Number.isFinite)).toBe(true);
     expect(a.flow.every(Number.isFinite)).toBe(true);
+    const budget = a.sedimentBudget!;
+    expect(budget.erodedVolumeM3).toBeGreaterThan(0);
+    expect(budget.exportedVolumeM3).toBeGreaterThanOrEqual(0);
+    expect(budget.suspendedVolumeM3).toBe(0);
+    expect(Math.abs(budget.balanceErrorM3)).toBeLessThan(
+      Math.max(1, budget.erodedVolumeM3) * 0.01);
     expect(Math.abs(sum(z) - sum(a.height) -
       (a.eroded - a.deposited))).toBeLessThan(0.001);
     expect(Math.abs(a.eroded - a.deposited - a.exportedSediment)).toBeLessThan(0.001);
@@ -93,6 +151,22 @@ describe('multi-scale landscape evolution', () => {
     expect(high.eroded).toBeGreaterThan(0);
     expect(Math.abs(low.height[35 * 65 + 32] - high.height[70 * 129 + 64]))
       .toBeLessThan(0.12);
+  });
+
+  it('erodes loose soil before resistant bedrock without lifting the source', () => {
+    const n = 129, source = field(n, (u, v) =>
+      0.88 - 0.65 * v + 0.47 * (u - 0.5) ** 2 +
+      0.025 * Math.cos(u * 15) * Math.sin(v * 9));
+    const hard = hydraulicErosion(source, n, {
+      ...params, hillslope: 0, soilDepthMeters: 0, bedrockResistance: 1,
+    });
+    const loose = hydraulicErosion(source, n, {
+      ...params, hillslope: 0, soilDepthMeters: 30, bedrockResistance: 1,
+    });
+    expect(hard.height).toEqual(source);
+    expect(hard.eroded).toBe(0);
+    expect(loose.eroded).toBeGreaterThan(0);
+    expect(source.every(Number.isFinite)).toBe(true);
   });
 
   it('retains previous watershed and particle solvers for A/B testing', () => {

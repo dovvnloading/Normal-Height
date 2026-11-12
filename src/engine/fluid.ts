@@ -1,5 +1,6 @@
 import type { ErosionResult, ErosionSettings } from './erosion';
 import { clamp, Noise } from './noise';
+import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
 
 const DIAGONAL = 1 / Math.SQRT2;
 const DX = [1, 0, 1, -1] as const;
@@ -24,6 +25,21 @@ function resize(values: Float32Array, n: number, m: number): Float32Array {
     out[y * m + x] = bilinear(
       values, n, x * (n - 1) / (m - 1), y * (n - 1) / (m - 1),
     );
+  return out;
+}
+
+/** Regrid a surface density while preserving integrated physical volume. */
+function resizeConservativeDensity(
+  source: Float32Array, n: number, m: number,
+): Float32Array {
+  const out = resize(source, n, m);
+  if (n === m) return out;
+  let before = 0, after = 0;
+  for (const value of source) before += value;
+  for (const value of out) after += value;
+  if (after <= 0) return out;
+  const multiplier = (before / (n * n)) / (after / (m * m));
+  for (let i = 0; i < out.length; i++) out[i] *= multiplier;
   return out;
 }
 
@@ -53,10 +69,12 @@ export function fluidGridErosion(
   settings: ErosionSettings,
   mask?: Float32Array,
   progress?: (fraction: number) => void,
+  initialMobile?: Float32Array,
 ): ErosionResult {
   const count = n * n;
   if (!Number.isInteger(n) || n < 2 || n > 2048 ||
-      input.length !== count || (mask && mask.length !== count))
+      input.length !== count || (mask && mask.length !== count) ||
+      (initialMobile && initialMobile.length !== count))
     throw new Error('Fluid erosion requires aligned square height and mask fields.');
   let minimum = Infinity, maximum = -Infinity;
   for (const value of input) {
@@ -67,6 +85,9 @@ export function fluidGridErosion(
   }
   if (mask) for (const value of mask)
     if (!Number.isFinite(value)) throw new Error('Fluid erosion mask must be finite.');
+  if (initialMobile) for (const value of initialMobile)
+    if (!Number.isFinite(value) || value < 0)
+      throw new Error('Fluid erosion requires finite nonnegative mobile sediment.');
 
   const relief = Math.max(1e-6, maximum - minimum);
   const floor = minimum - relief * 0.06;
@@ -90,10 +111,21 @@ export function fluidGridErosion(
     Math.max(1, Math.round(steps *
       (stages.length === 1 ? 1 :
         stages.length === 2 ? [0.45, 0.55][index] : [0.33, 0.34, 0.33][index]))));
-  const numberOfSteps = cycles.reduce((a, b) => a + b, 0);
+  // Subdivide hydraulic steps at finer physical scales without increasing
+  // the artist-selected overall simulation duration.
+  const substeps = stages.map(m =>
+    Math.max(1, Math.min(4, Math.ceil(20 / (worldMeters / (m - 1))))));
+  const stepCounts = cycles.map((c, i) => c * substeps[i]);
+  const numberOfSteps = stepCounts.reduce((a, b) => a + b, 0);
   const noise = new Noise((settings.seed ^ 0x51c7a17e) >>> 0);
-  let previous:
-    { size: number; original: Float32Array; height: Float32Array } | undefined;
+  const soilDepth = Math.max(0, settings.soilDepthMeters ?? 1.5) / elevationMeters;
+  const rockFactor = 1 - clamp(settings.bedrockResistance ?? 0.6);
+  let previous: {
+    size: number; original: Float32Array; height: Float32Array;
+    mobile: Float32Array; water: Float32Array; sediment: Float32Array;
+  } | undefined;
+  let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
+  let physicalRain = 0, physicalWaterExport = 0, physicalEvaporation = 0;
   let finalFlow: Float32Array | undefined;
   let completed = 0;
 
@@ -112,7 +144,26 @@ export function fluidGridErosion(
       }
     }
     const materialMask = mask ? resize(mask, n, m) : undefined;
-    const water = new Float32Array(length), sediment = new Float32Array(length);
+    // Transported water and suspended sediment persist across coarse-to-fine
+    // stages; deposits are tracked in a separate mobile layer.
+    const mobile = previous
+      ? resizeConservativeDensity(previous.mobile, previous.size, m)
+      : initialMobile
+        ? resizeConservativeDensity(initialMobile, n, m)
+        : new Float32Array(length).fill(soilDepth);
+    const bedrock = new Float32Array(length);
+    for (let i = 0; i < length; i++) bedrock[i] = height[i] - mobile[i];
+    const water = previous
+      ? resizeConservativeDensity(previous.water, previous.size, m)
+      : new Float32Array(length);
+    const sediment = previous
+      ? resizeConservativeDensity(previous.sediment, previous.size, m)
+      : new Float32Array(length);
+    const volumePerSample = worldMeters * worldMeters / length * elevationMeters;
+    const subdiv = substeps[stage];
+    const retainedBoundary = Math.pow(0.4, 1 / subdiv);
+    const evaporationRate = 1 - Math.pow(
+      1 - Math.min(0.45, evaporation * 1.2), 1 / subdiv);
     const waterDelta = new Float32Array(length);
     const sedimentDelta = new Float32Array(length);
     const outgoing = new Float32Array(length);
@@ -120,16 +171,20 @@ export function fluidGridErosion(
     const movement = new Float32Array(length);
     const cumulativeFlow = new Float32Array(length);
     const rainMap = new Float32Array(length);
-    const slopeMoves = new Float64Array(length);
+    const slopeWorkspace = createHillslopeWorkspace(length);
     const pipes = Array.from({ length: 4 }, () => new Float32Array(length));
-    const rainfall = relief * 0.00155 * rainFactor;
-    const maxTransfer = relief * 0.16;
-    const pressure = 0.25 * gravity;
-    const inertia = 0.66;
+    // Rainfall and incision are expressed in physical meters rather than
+    // varying with the relief of a particular input DEM.
+    const rainfall = (1.6 / elevationMeters) * rainFactor;
+    const maxTransfer = Math.max(1 / elevationMeters,
+      Math.min(200 / elevationMeters, relief * 0.16)) / subdiv;
+    const pressure = 0.25 * gravity *
+      clamp(20 / cellMeters, 0.35, 2) / (subdiv * subdiv);
+    const inertia = Math.pow(0.66, 1 / subdiv);
     const sedimentCapacity = 2.4 * capacity;
-    const depthLimit = relief * 0.004;
+    const depthLimit = Math.min(relief * 0.004, 6 / elevationMeters) / subdiv;
     const relaxation = (0.006 + hillslope * 0.018) *
-      Math.sqrt(128 / Math.max(128, m));
+      Math.sqrt(128 / Math.max(128, m)) / subdiv;
 
     for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
       const i = y * m + x;
@@ -140,8 +195,11 @@ export function fluidGridErosion(
         noise.simplex(px / 2800 + 7.7, py / 2800 - 3.3) * 0.25, 0.55, 1.5);
     }
 
-    for (let t = 0; t < cycles[stage]; t++) {
-      for (let i = 0; i < length; i++) water[i] += rainfall * rainMap[i];
+    let rainSum = 0;
+    for (const exposure of rainMap) rainSum += exposure;
+    for (let t = 0; t < stepCounts[stage]; t++) {
+      for (let i = 0; i < length; i++) water[i] += rainfall * rainMap[i] / subdiv;
+      physicalRain += rainfall * rainSum / subdiv * volumePerSample;
       outgoing.fill(0);
       waterDelta.fill(0);
       sedimentDelta.fill(0);
@@ -204,7 +262,7 @@ export function fluidGridErosion(
         cumulativeFlow[i] += movement[i];
       }
 
-      if (rainfall > 0 && erodibility > 0) {
+      if (rainfall > 0 && (erodibility > 0 || depositionRate > 0)) {
         for (let y = 1; y < m - 1; y++) for (let x = 1; x < m - 1; x++) {
           const i = y * m + x, allowance =
             materialMask ? clamp(materialMask[i]) : 1;
@@ -213,28 +271,38 @@ export function fluidGridErosion(
             (height[i + 1] - height[i - 1]) * 0.5,
             (height[i + m] - height[i - m]) * 0.5,
           ) * elevationMeters / cellMeters;
-          // With no terrain gradient, even variable precipitation cannot
-          // invent incised valleys from a mathematically level plateau.
-          if (grade < 1e-5) continue;
-          const carrying = Math.max(0,
-            sedimentCapacity * movement[i] * Math.sqrt(grade) *
-            (1 + Math.min(2, water[i] * 20)) - relief * 0.0014);
+          // A mathematically level source cannot initiate a channel, but
+          // sediment already in suspension must still settle in slow water.
+          const carrying = grade < 1e-5 ? 0 : Math.max(0,
+            sedimentCapacity * movement[i] * subdiv * Math.sqrt(grade) *
+            (1 + Math.min(2, water[i] * 20)) -
+              (1.6 / elevationMeters) * 2.2);
           const excess = carrying - sediment[i];
-          if (excess > 0) {
+          if (excess > 0 && erodibility > 0) {
             const requested = Math.min(
-              excess * (0.045 + erodibility * 0.13) * erodibility,
+              excess * (0.045 + erodibility * 0.13) * erodibility / subdiv,
               depthLimit,
               Math.max(0, height[i] - floor),
             ) * allowance;
             const before = height[i];
-            height[i] -= requested;
-            sediment[i] += before - height[i];
+            const loose = Math.min(mobile[i], requested);
+            mobile[i] -= loose;
+            const rock = Math.min(requested - loose,
+              Math.max(0, bedrock[i] - floor)) * rockFactor;
+            bedrock[i] -= rock;
+            height[i] = bedrock[i] + mobile[i];
+            const removed = Math.max(0, before - height[i]);
+            sediment[i] += removed;
+            physicalEroded += removed * volumePerSample;
           } else if (excess < 0 && depositionRate > 0) {
             const settle = Math.min(sediment[i],
-              -excess * depositionRate * 0.095) * allowance;
+              -excess * depositionRate * 0.095 / subdiv) * allowance;
             const before = height[i];
-            height[i] += settle;
-            sediment[i] -= height[i] - before;
+            mobile[i] += settle;
+            height[i] = bedrock[i] + mobile[i];
+            const actual = Math.max(0, height[i] - before);
+            sediment[i] = Math.max(0, sediment[i] - actual);
+            physicalDeposited += actual * volumePerSample;
           }
         }
       }
@@ -243,56 +311,39 @@ export function fluidGridErosion(
       // undercut riverbanks. Process each pair only once, then apply all
       // changes simultaneously to remove directional scan bias.
       if (hillslope > 0 && (t & 3) === 3) {
-        slopeMoves.fill(0);
         const threshold = Math.tan(reposeAngle) * cellMeters / elevationMeters;
-        for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
-          const i = y * m + x;
-          if (x + 1 < m) {
-            const j = i + 1;
-            const difference = height[i] - height[j];
-            const permission = materialMask
-              ? Math.min(clamp(materialMask[i]), clamp(materialMask[j])) : 1;
-            const moved = Math.sign(difference) *
-              Math.max(0, Math.abs(difference) - threshold) *
-              relaxation * permission;
-            slopeMoves[i] -= moved;
-            slopeMoves[j] += moved;
-          }
-          if (y + 1 < m) {
-            const j = i + m;
-            const difference = height[i] - height[j];
-            const permission = materialMask
-              ? Math.min(clamp(materialMask[i]), clamp(materialMask[j])) : 1;
-            const moved = Math.sign(difference) *
-              Math.max(0, Math.abs(difference) - threshold) *
-              relaxation * permission;
-            slopeMoves[i] -= moved;
-            slopeMoves[j] += moved;
-          }
-        }
-        for (let i = 0; i < length; i++) height[i] += slopeMoves[i];
+        relaxLayeredHillslope(
+          height, mobile, bedrock, m, threshold,
+          relaxation, rockFactor, floor, materialMask, slopeWorkspace,
+        );
       }
 
       // Open boundary: water/suspended sediment leave instead of forming a
       // tile-edge dam or giant erosion stripe. Accumulate actual outlet flow.
       for (let x = 0; x < m; x++) {
         for (const i of [x, (m - 1) * m + x]) {
-          water[i] *= 0.4;
-          sediment[i] *= 0.4;
+          physicalExported += sediment[i] * (1 - retainedBoundary) * volumePerSample;
+          physicalWaterExport += water[i] * (1 - retainedBoundary) * volumePerSample;
+          water[i] *= retainedBoundary;
+          sediment[i] *= retainedBoundary;
         }
       }
       for (let y = 1; y < m - 1; y++) {
         for (const i of [y * m, y * m + m - 1]) {
-          water[i] *= 0.4;
-          sediment[i] *= 0.4;
+          physicalExported += sediment[i] * (1 - retainedBoundary) * volumePerSample;
+          physicalWaterExport += water[i] * (1 - retainedBoundary) * volumePerSample;
+          water[i] *= retainedBoundary;
+          sediment[i] *= retainedBoundary;
         }
       }
-      for (let i = 0; i < length; i++)
-        water[i] *= 1 - Math.min(0.45, evaporation * 1.2);
+      for (let i = 0; i < length; i++) {
+        physicalEvaporation += water[i] * evaporationRate * volumePerSample;
+        water[i] *= 1 - evaporationRate;
+      }
       completed++;
       progress?.(Math.min(0.999, completed / numberOfSteps));
     }
-    previous = { size: m, original, height };
+    previous = { size: m, original, height, mobile, water, sediment };
     finalFlow = cumulativeFlow;
   }
 
@@ -324,9 +375,36 @@ export function fluidGridErosion(
       }
     }
   }
+  let suspendedVolumeM3 = 0, retainedWaterVolumeM3 = 0;
+  if (previous) {
+    const sampleVolume = worldMeters * worldMeters /
+      (previous.size * previous.size) * elevationMeters;
+    for (const amount of previous.sediment)
+      suspendedVolumeM3 += amount * sampleVolume;
+    for (const amount of previous.water)
+      retainedWaterVolumeM3 += amount * sampleVolume;
+  }
   progress?.(1);
   return {
     height, flow, wear, deposition, eroded, deposited,
+    // Keep historical output-grid statistics for downstream graph consumers.
     exportedSediment: Math.max(0, eroded - deposited),
+    // Actual transport volumes are tracked at each physical simulation cell.
+    sedimentBudget: {
+      erodedVolumeM3: physicalEroded,
+      depositedVolumeM3: physicalDeposited,
+      exportedVolumeM3: physicalExported,
+      suspendedVolumeM3,
+      balanceErrorM3: physicalEroded - physicalDeposited -
+        physicalExported - suspendedVolumeM3,
+    },
+    waterBudget: {
+      rainfallVolumeM3: physicalRain,
+      exportedVolumeM3: physicalWaterExport,
+      evaporatedVolumeM3: physicalEvaporation,
+      retainedVolumeM3: retainedWaterVolumeM3,
+      balanceErrorM3: physicalRain - physicalWaterExport -
+        physicalEvaporation - retainedWaterVolumeM3,
+    },
   };
 }

@@ -17,12 +17,17 @@ export function accumulateMultiFlow(
   rain: Float32Array,
   worldSizeMeters: number,
   transmissionLoss: number,
+  /** Optional per-cell D8 fractions, shared by runoff and sediment transport. */
+  fractions?: Float32Array,
 ): Float32Array {
   const { resolution: n, receiver, order, rank, area } = workspace;
   if (height.length !== n * n || rain.length !== n * n ||
       !Number.isFinite(worldSizeMeters) || worldSizeMeters <= 0) {
     throw new Error('Multi-flow drainage needs aligned height and rain grids.');
   }
+  if (fractions && fractions.length !== n * n * 8)
+    throw new Error('Multi-flow fractions require eight entries per cell.');
+  fractions?.fill(0);
   area.set(rain);
   const meters = worldSizeMeters / (n - 1);
   const loss = Math.max(0, transmissionLoss) / 400;
@@ -57,12 +62,20 @@ export function accumulateMultiFlow(
       for (let d = 0; d < 8; d++) {
         if (!weights[d]) continue;
         const dist = dxs[d] && dys[d] ? Math.SQRT2 : 1;
-        area[neighbors[d]] += area[cell] * (weights[d] / total) *
+        const share = weights[d] / total;
+        if (fractions) fractions[cell * 8 + d] = share;
+        area[neighbors[d]] += area[cell] * share *
           Math.exp(-loss * meters * dist);
       }
     } else {
       const diagonal = Math.abs(x - fallback % n) &&
         Math.abs(y - ((fallback / n) | 0));
+      if (fractions) {
+        const dx = fallback % n - x, dy = ((fallback / n) | 0) - y;
+        const d = dxs.findIndex((vx, k) => vx === dx && dys[k] === dy);
+        if (d < 0) throw new Error('Drainage fallback must be adjacent.');
+        fractions[cell * 8 + d] = 1;
+      }
       area[fallback] += area[cell] *
         Math.exp(-loss * meters * (diagonal ? Math.SQRT2 : 1));
     }

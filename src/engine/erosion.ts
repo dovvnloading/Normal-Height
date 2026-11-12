@@ -16,7 +16,7 @@ export interface ErosionSettings {
   seed: number;
   multiscale: boolean;
   /** Landscape evolution is the default; prior watershed and droplet modes remain available. */
-  method?: 'landscape' | 'watershed' | 'droplet' | 'fluid';
+  method?: 'landscape' | 'watershed' | 'droplet' | 'fluid' | 'hybrid';
   /** Long-term landscape evolution iteration count, independent of grid resolution. */
   cycles?: number;
   /** Physical scale of broad river/valley processes, in meters. */
@@ -30,6 +30,28 @@ export interface ErosionSettings {
   /** Physical dimensions for grid-independent stream-power and discharge scales. */
   worldSize?: number;
   heightScale?: number;
+  /** Initial mobile soil cover in physical meters; does not raise terrain. */
+  soilDepthMeters?: number;
+  /** Relative bedrock resistance: 0 = soft, 1 = erosion-resistant. */
+  bedrockResistance?: number;
+}
+
+/** Independently tracked transport volumes, not inferred from output pixels. */
+export interface SedimentBudget {
+  erodedVolumeM3: number;
+  depositedVolumeM3: number;
+  exportedVolumeM3: number;
+  suspendedVolumeM3: number;
+  /** Eroded - deposited - exported - suspended; near zero is conservative. */
+  balanceErrorM3: number;
+}
+/** Physical water accounting from the virtual-pipe model. */
+export interface WaterBudget {
+  rainfallVolumeM3: number;
+  exportedVolumeM3: number;
+  evaporatedVolumeM3: number;
+  retainedVolumeM3: number;
+  balanceErrorM3: number;
 }
 export interface ErosionResult {
   height: Float32Array;
@@ -39,6 +61,11 @@ export interface ErosionResult {
   eroded: number;
   deposited: number;
   exportedSediment: number;
+  /** Available for landscape and fluid models. Values are measured at simulation resolution. */
+  sedimentBudget?: SedimentBudget;
+  waterBudget?: WaterBudget;
+  /** Internal mobile material layer passed to hybrid hydraulic refinement. */
+  mobileSediment?: Float32Array;
 }
 
 export function sampleHeight(map: Float32Array, n: number, x: number, y: number): number {
@@ -224,6 +251,48 @@ export function hydraulicErosion(
   mask?: Float32Array,
   progress?: (fraction: number) => void,
 ): ErosionResult {
+  if (settings.method === 'hybrid') {
+    // Evolve the drainage network first, then refine it using moving
+    // water and sediment. Both processes share the same mobile substrate.
+    const total = settings.cycles ?? 28;
+    const landscape = landscapeErosion(
+      input, n, { ...settings, cycles: Math.max(4, Math.round(total * 0.7)) },
+      mask, fraction => progress?.(fraction * 0.55), true,
+    );
+    const fluid = fluidGridErosion(
+      landscape.height, n,
+      { ...settings, cycles: Math.max(4, Math.round(total * 0.7)) },
+      mask, fraction => progress?.(0.55 + fraction * 0.45),
+      landscape.mobileSediment,
+    );
+    const height = fluid.height;
+    const count = n * n, wear = new Float32Array(count), deposition = new Float32Array(count);
+    let eroded = 0, deposited = 0;
+    for (let i = 0; i < count; i++) {
+      const difference = height[i] - input[i];
+      if (difference < 0) {
+        wear[i] = -difference;
+        eroded -= difference;
+      } else if (difference > 0) {
+        deposition[i] = difference;
+        deposited += difference;
+      }
+    }
+    const a = landscape.sedimentBudget!, b = fluid.sedimentBudget!;
+    progress?.(1);
+    return {
+      height, flow: fluid.flow, wear, deposition, eroded, deposited,
+      exportedSediment: Math.max(0, eroded - deposited),
+      waterBudget: fluid.waterBudget,
+      sedimentBudget: {
+        erodedVolumeM3: a.erodedVolumeM3 + b.erodedVolumeM3,
+        depositedVolumeM3: a.depositedVolumeM3 + b.depositedVolumeM3,
+        exportedVolumeM3: a.exportedVolumeM3 + b.exportedVolumeM3,
+        suspendedVolumeM3: b.suspendedVolumeM3,
+        balanceErrorM3: a.balanceErrorM3 + b.balanceErrorM3,
+      },
+    };
+  }
   if (settings.method === 'fluid')
     return fluidGridErosion(input, n, settings, mask, progress);
   if (settings.method === 'droplet')

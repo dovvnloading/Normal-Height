@@ -2,6 +2,11 @@ import { clamp, Noise } from './noise';
 import type { ErosionResult, ErosionSettings } from './erosion';
 import { createDrainageWorkspace, routeDrainage } from './hydrology';
 import { accumulateMultiFlow } from './landscapeFlow';
+import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
+
+// Matches the D8 ordering used in landscapeFlow's partition fractions.
+const FLOW_DX = [-1, 0, 1, -1, 1, -1, 0, 1] as const;
+const FLOW_DY = [-1, -1, -1, 0, 0, 1, 1, 1] as const;
 
 const smooth = (a: number, b: number, value: number): number => {
   const t = clamp((value - a) / Math.max(1e-9, b - a));
@@ -96,6 +101,7 @@ export function landscapeErosion(
   settings: ErosionSettings,
   mask?: Float32Array,
   progress?: (fraction: number) => void,
+  includeMobileLayer = false,
 ): ErosionResult {
   if (!Number.isInteger(n) || n < 2 || n > 2048 ||
       input.length !== n * n || (mask && mask.length !== n * n))
@@ -132,7 +138,10 @@ export function landscapeErosion(
   const stages = desired.filter((value, i) => desired.indexOf(value) === i);
   const weights = stages.map((_, i) => stages.length === 1
     ? 1 : stages.length === 2 ? [0.58, 0.42][i] : [0.43, 0.34, 0.23][i]);
-  let previous: { resolution: number; height: Float32Array; original: Float32Array } | null = null;
+  let previous: { resolution: number; height: Float32Array; original: Float32Array; alluvium: Float32Array } | null = null;
+  let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
+  const initialSoil = Math.max(0, settings.soilDepthMeters ?? 1.5) / heightScale;
+  const rockFactor = 1 - clamp(settings.bedrockResistance ?? 0.6);
   let latestFlow: Float32Array | null = null, latestResolution = 0;
   let completedCycles = 0;
 
@@ -152,14 +161,29 @@ export function landscapeErosion(
           sample(old.original, old.resolution, sx, sy);
       }
     }
+    // Height is split into immobile rock and mobile alluvium. The original
+    // surface stays unchanged: an initial cover is taken from its own height.
+    const alluvium = new Float32Array(size), bedrock = new Float32Array(size);
+    for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
+      const i = y * m + x;
+      alluvium[i] = previous
+        ? Math.max(0, sample(previous.alluvium, previous.resolution,
+            x * (previous.resolution - 1) / (m - 1),
+            y * (previous.resolution - 1) / (m - 1)))
+        : initialSoil;
+      bedrock[i] = height[i] - alluvium[i];
+    }
     const stageMask = mask ? resample(mask, n, m) : null;
     const rain = new Float32Array(size);
     const drainage = createDrainageWorkspace(m);
     const sediment = new Float32Array(size);
+    const fractions = new Float32Array(size * 8);
     const localSediment = new Float32Array(size);
-    const creepChanges = new Float64Array(size);
+    const creep = createHillslopeWorkspace(size);
     const fanIndices = new Int32Array(5);
     const fanWeights = [0.55, 0.1125, 0.1125, 0.1125, 0.1125];
+    let stageEroded = 0, stageDeposited = 0, stageExported = 0;
+    const volumePerSample = world * world / size * heightScale;
     const stageCycles = Math.max(1, Math.round(cycles * weights[stageIndex]));
     const dt = duration * 28 / Math.max(1, cycles);
     const stageFeature = featureMeters *
@@ -197,20 +221,30 @@ export function landscapeErosion(
       if (!permission) return 0;
       const take = Math.min(amount * permission, Math.max(0, height[index] - floor));
       const before = height[index];
-      height[index] -= take;
-      return before - height[index];
+      const loose = Math.min(alluvium[index], take);
+      alluvium[index] -= loose;
+      // Bedrock resists abrasion once its initial/mobile sediment cover is gone.
+      const rock = Math.min(take - loose, Math.max(0, bedrock[index] - floor)) * rockFactor;
+      bedrock[index] -= rock;
+      height[index] = bedrock[index] + alluvium[index];
+      const actual = Math.max(0, before - height[index]);
+      stageEroded += actual;
+      return actual;
     };
     const deposit = (index: number, amount: number): number => {
       const permission = stageMask ? clamp(stageMask[index]) : 1;
       if (!permission || !(amount > 0)) return 0;
       const before = height[index];
-      height[index] += amount * permission;
-      return height[index] - before;
+      alluvium[index] += amount * permission;
+      height[index] = bedrock[index] + alluvium[index];
+      const actual = Math.max(0, height[index] - before);
+      stageDeposited += actual;
+      return actual;
     };
 
     for (let step = 0; step < stageCycles; step++) {
       routeDrainage(height, m, settings.seed + step * 173 + stageIndex * 1327, drainage);
-      const area = accumulateMultiFlow(height, drainage, rain, world, evaporation);
+      const area = accumulateMultiFlow(height, drainage, rain, world, evaporation, fractions);
       localSediment.fill(0);
       const { order, receiver, spill } = drainage;
       if (strength > 0 && rainfall > 0) {
@@ -227,7 +261,7 @@ export function landscapeErosion(
           if (head <= 0 || spill[i] - height[i] > 0.003 * relief) continue;
           const grade = head * heightScale / distance;
           if (grade <= 0.001) continue;
-          const contributingKm2 = area[i] * cell * cell / 1e6;
+          const contributingKm2 = area[i] * world * world / size / 1e6;
           const aNorm = contributingKm2 / (world * world / 1e6);
           // Small sheet runoff is not a river. This catchment threshold is
           // physical area, rather than a number of droplets or raster pixels.
@@ -298,15 +332,23 @@ export function landscapeErosion(
         for (let k = size - 1; k >= 0; k--) {
           const i = order[k], downstream = receiver[i];
           let carried = sediment[i] + localSediment[i];
-          if (downstream < 0 || carried <= 0) continue;
+          if (downstream < 0) {
+            // All water-linked sediment is processed in topological order.
+            stageExported += carried;
+            continue;
+          }
+          if (carried <= 0) continue;
           const sx = Math.abs(i % m - downstream % m);
           const sy = Math.abs(((i / m) | 0) - ((downstream / m) | 0));
           const grade = Math.max(0,
             (height[i] - height[downstream]) * heightScale /
               (cell * (sx && sy ? Math.SQRT2 : 1)));
-          const discharge = area[i];
+          // Capacity is based on *physical* rain-weighted catchment area,
+          // not an arbitrary number of contributing raster pixels.
+          // 2500 m² is a fixed coefficient reference, independent of m.
+          const dischargeReference = area[i] * world * world / size / 2500;
           const capacity = relief * 0.032 * carry *
-            Math.pow(Math.max(1, discharge), 0.56) *
+            Math.pow(Math.max(1e-8, dischargeReference), 0.56) *
             Math.pow(Math.max(0.001, grade), 0.85);
           const ponded = spill[i] > height[i] + relief * 0.0005;
           const surplus = Math.max(0, carried - (ponded ? 0 : capacity));
@@ -334,7 +376,13 @@ export function landscapeErosion(
             }
             carried -= settled;
           }
-          sediment[downstream] += carried;
+          // Exactly the same MFD fractions used for runoff direct suspended
+          // sediment to each downstream receiver; do not put it all on D8.
+          for (let d = 0; d < 8; d++) {
+            const share = fractions[i * 8 + d];
+            if (share > 0)
+              sediment[i + FLOW_DY[d] * m + FLOW_DX[d]] += carried * share;
+          }
         }
       }
 
@@ -342,32 +390,13 @@ export function landscapeErosion(
       // Only above the repose angle; an analytic gently tilted plane is
       // unchanged and cannot turn into an arbitrary grid of parallel grooves.
       if (hillslope > 0) {
-        creepChanges.fill(0);
-        const repose = Math.tan(bankAngle * 0.70);
-        for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
-          const i = y * m + x;
-          for (let direction = 0; direction < 2; direction++) {
-            const j = direction === 0 ? (x < m - 1 ? i + 1 : -1)
-              : (y < m - 1 ? i + m : -1);
-            if (j < 0) continue;
-            const difference = height[i] - height[j];
-            const slope = Math.abs(difference) * heightScale / cell;
-            if (slope <= repose) continue;
-            const permission = stageMask
-              ? Math.min(clamp(stageMask[i]), clamp(stageMask[j])) : 1;
-            if (!permission) continue;
-            const moved = Math.min(
-              Math.abs(difference) * 0.085,
-              (slope - repose) * cell / heightScale * 0.085,
-            ) * hillslope * dt * permission;
-            const signed = Math.sign(difference) * moved;
-            creepChanges[i] -= signed;
-            creepChanges[j] += signed;
-          }
-        }
-        for (let i = 0; i < size; i++) if (creepChanges[i]) {
-          height[i] += creepChanges[i];
-        }
+        // The same base layer limits both hydraulic incision and bank creep.
+        // Rock with resistance=1 cannot supply hillslope sediment.
+        const repose = Math.tan(bankAngle * 0.70) * cell / heightScale;
+        relaxLayeredHillslope(
+          height, alluvium, bedrock, m, repose,
+          0.085 * hillslope * dt, rockFactor, floor, stageMask, creep,
+        );
       }
       completedCycles++;
       progress?.(Math.min(0.999, completedCycles / cycles));
@@ -379,7 +408,10 @@ export function landscapeErosion(
     const areaM2 = cell * cell;
     for (let i = 0; i < size; i++) latestFlow[i] = finalArea[i] * areaM2 / 1e6;
     latestResolution = m;
-    previous = { resolution: m, height, original };
+    physicalEroded += stageEroded * volumePerSample;
+    physicalDeposited += stageDeposited * volumePerSample;
+    physicalExported += stageExported * volumePerSample;
+    previous = { resolution: m, height, original, alluvium };
   }
 
   // Recompose the original resolution from the last simulated river/valley
@@ -429,9 +461,40 @@ export function landscapeErosion(
       deposited -= difference;
     }
   }
+  let mobileSediment: Float32Array | undefined;
+  if (includeMobileLayer && previous) {
+    const { resolution: m, alluvium } = previous;
+    mobileSediment = new Float32Array(count);
+    let coarseMass = 0, fineMass = 0;
+    for (const value of alluvium) coarseMass += value;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = y * n + x;
+      const cover = Math.max(0, sample(alluvium, m,
+        x * (m - 1) / (n - 1), y * (m - 1) / (n - 1)));
+      mobileSediment[i] = cover;
+      fineMass += cover;
+    }
+    // Preserve the physical amount of mobile material when the hybrid
+    // stage resamples a lower-resolution river simulation.
+    if (fineMass > 0) {
+      const factor = (coarseMass / (m * m)) / (fineMass / count);
+      for (let i = 0; i < count; i++) mobileSediment[i] *= factor;
+    }
+  }
   progress?.(1);
   return {
     height: result, flow, wear, deposition, eroded, deposited,
+    mobileSediment,
+    // Legacy summary remains expressed as output-grid sample-height units.
+    // This physical budget is independently measured at simulation resolution;
+    // it is not inferred from the recomposed output heightmap.
     exportedSediment: Math.max(0, eroded - deposited),
+    sedimentBudget: {
+      erodedVolumeM3: physicalEroded,
+      depositedVolumeM3: physicalDeposited,
+      exportedVolumeM3: physicalExported,
+      suspendedVolumeM3: 0,
+      balanceErrorM3: physicalEroded - physicalDeposited - physicalExported,
+    },
   };
 }
