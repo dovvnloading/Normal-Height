@@ -2,10 +2,6 @@ name: PBR visual and physically memory-capped 2K acceptance
 
 on:
   workflow_dispatch:
-  # Explicit/branch-only QA; expensive 2K+Metal jobs should not run on
-  # every unrelated pull request after this feature merges.
-  push:
-    branches: ['fix/pbr-closure-*']
 
 permissions:
   contents: read
