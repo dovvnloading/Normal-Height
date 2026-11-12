@@ -1,5 +1,17 @@
 # Atmospheric scene & expanded meadow
 
+## Adaptive terrain geometry and close-up fidelity
+
+The 3D renderer now uses an indexed, single-mesh **8 × 8 tile grid**. Each tile is tessellated independently with power-of-two segments, starting at a source-aware 16/32/64 segments per tile. The camera's projection and tile distance determine needed density, and a deterministic priority pass spends vertices first on nearby visible land. The 3D mesh's memory budget is fixed by the user-visible **Terrain mesh fidelity** setting: Balanced 340,000 vertices, High 680,000, Ultra 970,000. A tile never exceeds 256 segments per side and cannot regenerate 2048² high-resolution data in the renderer: it samples the graph's actual source field. The source data and exported maps remain untouched.
+
+The renderer samples a monotonic bicubic Hermite reconstruction of source heights and clamps to each source cell's corner extrema to prevent ringing over steep erosion banks and authored terraces. Surface normals come from smoothed source-grid physical derivatives, not area-weighted triangles; they remain continuous when adjacent tiles have different polygon density. At LOD boundaries, high-resolution tile edges are constrained to the lower-resolution neighbour's exact polyline and the adjustment fades across a few inner rows, eliminating T-junction gaps without changing source samples.
+
+The terrain maintains one renderable/raycastable BufferGeometry and the original PBR/lighting pipeline. Its skirt is built from the actual adaptive perimeter, and expanded ground uses the same edge samples for its first apron ring, including elevation, normals, and albedo. Shader and material texture buffers are reused when only camera LOD changes. Camera movement is debounced: triangles are rebuilt after controls settle rather than on every orbit frame. New mesh statistics (`data-mesh-vertices`, `data-mesh-triangles`, `data-mesh-max-segments`) support browser QA and performance regression checks.
+
+Changing **Terrain mesh fidelity** affects only 3D presentation preferences (`normal-height.view.v1`) and never changes project graphs, seeds, 2D heightmaps, or exported geometry. At close range a 512² source cannot contain sub-pixel gullies that were never simulated; higher working resolution is required for that level of geometric fidelity. The near-field PBR shader continues to provide *shading* microdetail without pretending to add physical displacement.
+
+
+
 The 3D preview has an optional, coupled sky/lighting and landscape-context system. These features only affect **presentation**. Terrain height samples, erosion, generated PBR maps, project graphs, and exported files are unchanged.
 
 ## Artist workflow
