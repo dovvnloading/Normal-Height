@@ -401,6 +401,8 @@ export class TerrainScene {
         
         const stats = this.renderer.domElement.dataset;
         stats.meshRenderCpuMs = (performance.now() - started).toFixed(2);
+        stats.meshCameraPosition = this.camera.position.toArray().map(n => n.toFixed(6)).join(',');
+        stats.meshCameraTarget = this.controls.target.toArray().map(n => n.toFixed(6)).join(',');
         stats.meshRendererGeometries = String(this.renderer.info.memory.geometries);
         stats.meshRendererTextures = String(this.renderer.info.memory.textures);
       }
@@ -901,6 +903,19 @@ export class TerrainScene {
   }
 
   private fitCamera() {
+    // Matched reference and adaptive cases must begin from exactly the same
+    // camera transform, regardless of how many vertices their geometry has.
+    // This only runs on ?meshBenchmark=...; normal artist framing is unchanged.
+    if (this.meshBenchmark) {
+      this.controls.target.set(0, 0.28, 0);
+      this.camera.position.set(3.25, 2.4, 3.55);
+      this.camera.up.set(0, 1, 0);
+      this.camera.far = 40;
+      this.camera.updateProjectionMatrix();
+      this.controls.update();
+      this.needsRender = true;
+      return;
+    }
     const positions = this.terrain?.geometry.getAttribute('position');
     if (!positions) return;
     const exaggeration = this.settings.exaggeration;
