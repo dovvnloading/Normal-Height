@@ -97,6 +97,132 @@ not realistic geomorphology or matching a user-provided visual reference.
 
 ---
 
+## Orogenic mountain source: connected, incised valley geometry
+
+The user-supplied real topography reference has densely branching **dark
+drainage valleys** with bright high interfluves. The original Normal Height
+source generated broad uplift envelopes and the early stream-power
+equilibrium prototype in PR #31 produced light, raised channel-like patterns.
+Simply accumulating discharge or integrating downstream stream elevation
+directly into a grid did **not** construct the correct valley cross-sections.
+
+### Method and research
+
+- Cordonnier et al. (2016), [Large Scale Terrain Generation from Tectonic
+  Uplift and Fluvial Erosion](https://doi.org/10.1111/cgf.12820), couple
+  a drainage graph with uplift and construct the digital terrain via
+  landform-feature kernels.
+- Génevaux et al. (2013), [Terrain generation using procedural models
+  based on hydrology](https://doi.org/10.1145/2461912.2461996),
+  construct networks before blending and carving terrain patches.
+- Braun & Willett (2013), [Fastscape erosion methods](https://doi.org/10.1016/j.geomorph.2012.10.008),
+  provide a reference for upstream contributing area, flow connectivity,
+  and stream-power-driven geomorphology.
+
+`src/engine/streamCarving.ts` is our independent **procedural
+feature-kernel reconstruction**, not the proprietary or exact algorithms
+described above. It corrects the earlier inverted appearance by:
+
+1. Starting from the artist's classic mountain envelope as uplift/relief
+   context, while constructing a separate *routing-only* DEM with
+   low-amplitude, smooth, seed-stable geological heterogeneity at
+   four physical-relative wavelengths.
+2. Applying the existing outlet-connected priority-flood routing,
+   followed by strict downhill receiver selection where possible.
+   Accumulating area **upstream to downstream** provides continuous,
+   branching catchments, not disconnected droplet visitation dots.
+3. Sampling subcell-jittered centerline locations to avoid uniformly
+   repeating eight-way pixel angles. Every segment is connected to its
+   actual downstream receiver, including through depression spill paths.
+4. Carving **negative elevation** along those connected line segments.
+   A narrow high-contrast riverbed and a separately tapered broad valley
+   cross-section are both functions of contributing area. Overlap uses
+   maximum incision, avoiding unbounded pit depth at confluences.
+5. Attenuating cuts in effectively flat lowlands and at map boundaries,
+   preserving the authored source for unaffected slopes. Strength zero
+   reproduces the original mountain samples *bit-for-bit*.
+6. Returning one physical Float32 source DEM for viewport, export, and
+   subsequent sediment/fluid nodes. The dissection source does not
+   fabricate material mass conservation: the standard hydraulic node
+   remains a separate process for sediment removal and deposition.
+
+This improves the valley/ridge relationship while keeping `O(n²)`
+buffers; the reconstruction works up to 1024² and applies its continuous
+incision delta to the original height samples at larger export sizes.
+
+### Protecting bedrock valleys downstream
+
+The first end-to-end 384² audit revealed a critical coupling bug: the new
+source generated fine-scale incision comparable in local-height contrast to
+the supplied reference, but the default Alpine/Folded-highlands downstream
+warp and talus relaxation smoothed most of it away before export. The
+thermal operator currently relaxes all steep *solid* height differences,
+including hard-rock river walls, as if they were loose scree; this is not a
+realistic regolith model. A large domain warp also resamples one-cell-wide
+tributaries and blurs them before subsequent water transport.
+
+The **new orogenic presets** therefore begin with zero additional domain
+warp (the source already jitters the drainage graph), low hillslope-motion
+settings in the hydraulic stage, and a restrained final thermal pass with
+higher bank-repose threshold. These settings are editable: users can still
+increase warp, hillslope and scree settling, and classic non-orogenic
+presets are unchanged. This is an art-directed protection measure, not a
+claim of physically solved sediment mechanics.
+
+The Chromium test now captures the intermediate hydraulic node and
+**asserts that the final exported terrain retains at least 55% of the
+source's measured fine relief**, alongside the same signed riverbed tests.
+This prevents a green unit-test suite from hiding a downstream
+geometry-destruction regression.
+
+### Bedrock-safe sediment filtering
+
+The full-graph acceptance audit showed that lowering talus transport and
+turning off the redundant post-source warp was not sufficient: Highland
+source gullies retained only **49%** of fine relief after the landscape
+hydraulic stage. The `Landscape evolution` algorithm was simulating
+large-scale sediment exchange directly on the fine original DEM and
+therefore also smoothing mature hard-rock gullies.
+
+An explicit opt-in **Preserve incised bedrock** switch now operates at the
+*final displacement-composition* step of landscape evolution.
+The hydraulic transport simulation still runs normally, with physical
+runoff, sediment capacity and valley-scale height changes. Only the
+simulated *net displacement* is spatially filtered over roughly several
+raster cells before adding it to the **unmodified original high-frequency
+bedrock field**. This is a two-pass separable Gaussian; it does not
+stamp extra noise or claim to create new sediment. The final actual
+height differences continue to determine the reported wear/deposition
+buffers. Saved projects without this flag retain their previous
+behavior; it is enabled for the newly dissected Alpine and Highlands
+presets, and users can turn it off to study fully mobile loose material.
+
+This is an artistic two-material approximation. A fully physical model
+would explicitly transport regolith and bedrock with separate erodibility
+and armoring parameters. The user-facing choice makes that limitation
+inspectable rather than hiding it behind a cosmetic map.
+
+### Acceptance and limitations
+
+Unit checks now require **lower river centerlines relative to banks**,
+outlet-connected flow paths, deterministic seeds, non-mutating source
+inputs, and stronger fine-scale relief without elevated white river
+artifacts. Chromium attaches *untextured* old/new heightfields and
+shaded-relief evidence; the real reference is compared at the same
+resolution using multi-scale local-height statistics.
+
+A branched river network and good frequency statistics do not prove
+accurate geological formation, sediment physics or commercial-grade
+quality. This is still a raster graph with subcell jitter; it is not
+continuous D-infinity flow, tracked strata, groundwater or calibrated
+climate/geologic time. Dense gullies in the actual source reference
+may remain finer than the 1024² bounded computation. More broad uplift
+variety and reference-calibrated valley depth/width distributions can
+be developed without replacing this corrected valley geometry with
+another arbitrary random texture.
+
+---
+
 ## Multi-resolution landscape evolution (experimental)
 
 Normal Height's **Landscape evolution · multi-scale** is a new *research-backed,

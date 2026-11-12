@@ -9,6 +9,7 @@ import type {
 } from '../model/types';
 import { clamp, mix, Noise, smoothstep } from './noise';
 import { hydraulicErosion, sampleHeight, thermalErosion } from './erosion';
+import { generateOrogenicRelief } from './orogeny';
 import { sculptSpline } from './spline';
 import { validSplinePoint, MAX_SPLINE_POINTS } from '../model/splines';
 
@@ -157,7 +158,21 @@ function estimatedWorkingBytes(
   return 64 * 1024 * 1024 + buffers * resolution * resolution * Float32Array.BYTES_PER_ELEMENT;
 }
 
-function createMountains(node: TerrainNode, n: number, noise: Noise): Float32Array {
+function createMountains(
+  node: TerrainNode, n: number, noise: Noise, seed: number,
+): Float32Array {
+  if (text(node, 'profile', 'range') === 'orogenic') {
+    // Evolve the *regional uplift source*, rather than stamping a river mask
+    // onto a smooth mountain image. The normal mountain model remains
+    // separately available for exact legacy comparisons.
+    const broadNode: TerrainNode = {
+      ...node, params: { ...node.params, profile: 'range' },
+    };
+    const upliftSource = createMountains(broadNode, n, noise, seed);
+    return generateOrogenicRelief(
+      upliftSource, n, seed, number(node, 'dissection', 0.82, 0, 1),
+    ).height;
+  }
   const map = new Float32Array(n * n);
   const scale = number(node, 'scale', 3.2, 0.1, 30),
     octaves = Math.round(number(node, 'octaves', 6, 1, 10));
@@ -351,7 +366,7 @@ export function evaluateGraph(
     const noise = new Noise(seed);
     let field: WorkingField;
     if (node.bypassed && input) field = input;
-    else if (node.kind === 'mountain') field = baseField(createMountains(node, n, noise));
+    else if (node.kind === 'mountain') field = baseField(createMountains(node, n, noise, seed));
     else if (node.kind === 'noise') field = baseField(createNoise(node, n, noise));
     else {
       if (!input) throw new Error(`Connect a height input to “${node.label}”.`);
@@ -415,6 +430,7 @@ export function evaluateGraph(
               featureMeters: number(node, 'featureMeters', 140, 24, 600),
               hillslope: number(node, 'hillslope', 0.38, 0, 1),
               bankAngle: number(node, 'bankAngle', 38, 18, 80),
+              bedrockPreserve: node.params.bedrockPreserve === true,
               worldSize: project.worldSize,
               heightScale: project.heightScale,
             },

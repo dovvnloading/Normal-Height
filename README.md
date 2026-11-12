@@ -32,6 +32,30 @@ For the browser tests, run `npx playwright install chromium` once. CI installs i
 
 ### Terrain construction
 
+**Dissected orogenic range** uses the existing editable mountain uplift
+profile but adds actual **incised tributary valleys and interfluve ridges**
+to the exported heightfield. The source builds an outlet-connected,
+seeded stream tree and carves continuous, catchment-scaled riverbed and
+valley-bank feature kernels. The shallow-routing diagnostic does not
+become a raised white river line: every cut is a negative elevation
+change relative to the original source.
+
+To compare, select a Mountain range node and use
+**Landform → Dissected orogenic range** and its
+**Stream-network dissection** control. Strength zero returns the previous
+Classic alpine range exactly; explicit older profiles remain selectable.
+The Alpine watershed and Folded highlands presets use the new source,
+which can continue through existing hydraulic and thermal erosion stages.
+
+This approach is an independently written, art-directed reconstruction
+informed by published hydrology-guided terrain-feature methods
+([Génevaux et al. 2013](https://doi.org/10.1145/2461912.2461996),
+[Cordonnier et al. 2016](https://doi.org/10.1111/cgf.12820)).
+It is not a commercial Terragen/Gaea clone or a validated physical
+fluid simulation. Judge its actual grayscale Height map and terrain
+relief against the reference, not its Flow mask or material textures.
+
+
 - **Mountain range generator:** direction, width, relief, sharpness, fractal detail, and distortion. Profiles include connected alpine ranges, broad massifs, volcanic calderas, and badlands.
 - **Twelve procedural noise families:** Perlin, simplex, fractal Brownian motion, ridged multifractal, billow, turbulence, Voronoi F1, Voronoi ridges, cellular, wave, warped turbulence, and an independently designed Naki-inspired pattern.
 - **Shaping nodes:** domain warp, terrace, and height remap.

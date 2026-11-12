@@ -57,7 +57,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     category: 'Source',
     color: '#617b63',
     description:
-      'Shape a connected mountain system with a directional spine, secondary ridges, and a natural foothill falloff.',
+      'Generate sculptable regional mountain uplift, or an uplift-derived river and ridge network with physically linked stream-power relief.',
     inputs: [],
     outputs: output,
     params: [
@@ -65,9 +65,10 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         key: 'profile',
         label: 'Landform',
         type: 'select',
-        default: 'range',
+        default: 'orogenic',
         options: [
-          { value: 'range', label: 'Alpine range' },
+          { value: 'orogenic', label: 'Dissected orogenic range' },
+          { value: 'range', label: 'Classic alpine range' },
           { value: 'massif', label: 'Mountain massif' },
           { value: 'volcano', label: 'Volcanic caldera' },
           { value: 'badlands', label: 'Badlands' },
@@ -113,6 +114,16 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         'Vertical amplitude relative to the project elevation scale.',
       ),
       range('base', 'Base elevation', 0.05, 0, 0.5, 0.01, 'Elevation of the surrounding lowlands.'),
+      range(
+        'dissection',
+        'Stream-network dissection',
+        0.82,
+        0,
+        1,
+        0.02,
+        'Only for Dissected orogenic range: amount of uplift-controlled stream-power equilibrium relief. Zero preserves the classic mountain exactly; higher values expose connected tributaries and sharper watershed divides.',
+        'Structure',
+      ),
       range(
         'sharpness',
         'Ridge sharpness',
@@ -483,6 +494,14 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         'Sediment',
         '°',
       ),
+      {
+        key: 'bedrockPreserve',
+        label: 'Preserve incised bedrock',
+        type: 'toggle',
+        default: false,
+        description: 'Landscape evolution only: retain existing narrow hard-rock gullies while applying simulated broad-scale fluvial and sediment changes. A source with no bedrock detail does not gain any. Helps avoid smoothing mature mountain drainage into a blurred ridge.',
+        section: 'Sediment',
+      },
       range(
         'inertia',
         'Flow inertia',
