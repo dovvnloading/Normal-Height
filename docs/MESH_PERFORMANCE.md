@@ -18,6 +18,7 @@ Install Node ≥22.12 and dependencies:
 
 ```bash
 npm ci
+npm run build     # Build once; Playwright reuses dist/ without rebuilding
 npx playwright install chromium
 # If using MESH_BENCH_CHROME=1 in the examples below, install
 # Google Chrome stable on the machine (or: npx playwright install chrome).
@@ -74,6 +75,6 @@ For each hardware device, compare the **reference** and **adaptive** JSONs at id
 ## CI versus hardware coverage
 
 - Unit tests cover mesh plan hysteresis, source consistency, seam geometry, buffer accounting and percentile math.
-- Chromium CI covers idle camera stability, geometry disposal, bounded buffers, and no unnecessary PBR generation/upload from LOD updates.
-- CI runs a **single software-rendered benchmark smoke pair** to ensure the hardware benchmark's output format and execution path are valid.
+- **Routine push/PR CI is deliberately short**: unit tests and a single TypeScript/production build only. It does not install browsers, run Chromium, or run performance benchmarks.
+- Full Chromium, idle-camera stability, geometry disposal, PBR upload checks, and a software-rendered benchmark smoke pair are **opt-in only** via GitHub Actions → **Extended terrain QA (manual only)** → Run workflow. The longer workflow is not a production merge gate unless a reviewer explicitly requests it.
 - **Hardware sign-off requires an actual integrated and discrete GPU run**, attaching both matrix outputs and GPU/driver metadata to issue #34. No connector available in this conversation exposes such a physical GPU. Leave the issue open until that step is completed; successful CI is a software regression gate, not a hardware acceptance certificate.
