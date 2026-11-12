@@ -55,7 +55,7 @@ export function relaxLayeredHillslope(
   change.fill(0);
   // An explicit four-neighbour relaxation must remain below the diffusion
   // stability limit even at maximum artistic duration and hillslope strength.
-  const stableRate = Math.min(0.24, rate);
+  const stableRate = Math.min(0.18, rate);
 
   // Propose the same signed pairwise transfers as a simultaneous talus pass.
   // The sign is positive when material goes from this cell to the neighbour.
