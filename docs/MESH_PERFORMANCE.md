@@ -19,6 +19,8 @@ Install Node ≥22.12 and dependencies:
 ```bash
 npm ci
 npx playwright install chromium
+# If using MESH_BENCH_CHROME=1 in the examples below, install
+# Google Chrome stable on the machine (or: npx playwright install chrome).
 ```
 
 On an integrated-GPU laptop and a discrete-GPU desktop, run both the optimized and reference cases on exactly the same hardware/browser build, screen resolution, device-pixel ratio and project. Example quick pass:
