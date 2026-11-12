@@ -131,6 +131,30 @@ describe('conservative coupled fluid-grid erosion', () => {
     });
   });
 
+  it('runs a deterministic hybrid coupled landscape/fluid evolution', () => {
+    const n = 81;
+    const source = field(n, (u, v) =>
+      0.86 - 0.57 * v + 0.45 * (u - 0.53) ** 2 +
+      Math.cos(u * 12) * Math.sin(v * 9) * 0.027);
+    const settings = {
+      ...params, method: 'hybrid' as const, cycles: 12,
+      soilDepthMeters: 3, bedrockResistance: 0.55,
+    };
+    const first = hydraulicErosion(source, n, settings);
+    const again = hydraulicErosion(source, n, settings);
+    expect(first.height).toEqual(again.height);
+    expect(first.flow).toEqual(again.flow);
+    expect(first.height.every(Number.isFinite)).toBe(true);
+    expect(first.eroded).toBeGreaterThan(0);
+    expect(first.sedimentBudget).toBeDefined();
+    const budget = first.sedimentBudget!;
+    expect(Math.abs(budget.balanceErrorM3)).toBeLessThan(
+      Math.max(1, budget.erodedVolumeM3) * 0.02);
+    const blocked = hydraulicErosion(source, n, settings, new Float32Array(n * n));
+    expect(blocked.height).toEqual(source);
+    expect(blocked.eroded).toBe(0);
+  });
+
   it('preserves previous erosion methods as independent, selectable algorithms', () => {
     const n = 64, z = field(n, (x, y) =>
       0.8 - 0.6 * y + 0.28 * (x - 0.5) ** 2);
