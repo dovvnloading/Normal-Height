@@ -1,5 +1,6 @@
 import type { SplinePoint } from './splines';
 import type { SurfaceSettings } from '../materials/pbr';
+import type { SedimentBudget } from '../engine/erosion';
 
 export type NodeKind =
   | 'mountain'
@@ -66,6 +67,8 @@ export interface TerrainStats {
   eroded: number;
   deposited: number;
   exportedSediment: number;
+  /** Independently measured hydraulic transport budget, if a relevant node ran. */
+  sedimentBudget?: SedimentBudget;
 }
 export interface EvaluationResult {
   field: HeightField;
