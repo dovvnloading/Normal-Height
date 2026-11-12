@@ -431,6 +431,8 @@ export function evaluateGraph(
               hillslope: number(node, 'hillslope', 0.38, 0, 1),
               bankAngle: number(node, 'bankAngle', 38, 18, 80),
               bedrockPreserve: node.params.bedrockPreserve === true,
+              soilDepthMeters: number(node, 'soilDepthMeters', 1.5, 0, 30),
+              bedrockResistance: number(node, 'bedrockResistance', 0.6, 0, 1),
               worldSize: project.worldSize,
               heightScale: project.heightScale,
             },
