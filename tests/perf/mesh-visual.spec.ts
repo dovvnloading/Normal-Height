@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import {
-  assertHardwareRenderer, attachDataUrl, buildTerrain, canvasDataUrl, heightGrid, imageDelta,
+  assertHardwareRenderer, attachDataUrl, buildTerrain, canvasDataUrl, collectRenderErrors,
+  heightGrid, imageDelta,
   parseList, setCamera, settleMesh,
 } from './meshBench';
 import type { Quality } from './meshBench';
@@ -58,6 +59,7 @@ for (const preset of presets)
   test(`mesh visual audit: ${preset} ${resolution}² ${quality} ×${exaggeration}`,
     async ({ page }, testInfo) => {
       test.setTimeout(900_000);
+      const renderErrors = collectRenderErrors(page);
       await page.goto('/?meshBenchmark=adaptive');
       await page.getByTitle('Choose a landscape').click();
       await page.locator('.presets-modal')
@@ -188,4 +190,5 @@ for (const preset of presets)
       const disposals = Number(await canvas.getAttribute('data-mesh-dispose-count'));
       expect(builds - disposals).toBe(1);
       expect(views.length).toBe(5 + orbitSteps);
+      expect(renderErrors, 'WebGL/shader errors').toEqual([]);
     });

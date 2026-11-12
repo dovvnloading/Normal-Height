@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  accordUplands, evolveFluvialLandscape, FLUVIAL_DEFAULTS, fluvialLevels, planeFloodplains,
+  accordUplands, evolveFluvialLandscape, FLUVIAL_DEFAULTS, fluvialLevels, limitSlopes,
+  planeFloodplains,
 } from './fluvial';
 import { accumulateDrainage, createDrainageWorkspace, routeDrainage } from './hydrology';
 import { estimatedWorkingBytes, evaluateGraph, WORKING_MEMORY_BUDGET } from './index';
@@ -242,5 +243,60 @@ describe('Fluvial uplands landform in the terrain graph', () => {
     // The transient solver set is still counted.
     expect(estimatedWorkingBytes(project.graph, needed, 1024))
       .toBeGreaterThan(64 * 1024 * 1024 + 13 * 1024 * 1024 * 4);
+  });
+});
+
+describe('threshold hillslopes at physical scale', () => {
+  it('caps every neighbour difference at the critical slope, only ever lowering', () => {
+    const n = 64;
+    const z = new Float64Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+      z[y * n + x] = 0.002 * x + (x === 30 && y === 30 ? 1 : 0) + (y > 40 ? 0.3 * Math.sin(x) : 0);
+    const before = z.slice();
+    const cap = new Float64Array(n * n).fill(0.01);
+    expect(limitSlopes(z, n, cap)).toBeGreaterThan(0);
+    let worst = 0;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = y * n + x;
+      expect(z[i]).toBeLessThanOrEqual(before[i] + 1e-15);
+      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [-1, 1]]) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue;
+        const allowed = 0.01 * Math.hypot(dx, dy);
+        worst = Math.max(worst, Math.abs(z[yy * n + xx] - z[i]) - allowed);
+      }
+    }
+    expect(worst).toBeLessThan(1e-9);
+    // A gentle ramp below the cap is untouched.
+    const ramp = Float64Array.from({ length: n * n }, (_, i) => 0.004 * (i % n));
+    const copy = ramp.slice();
+    expect(limitSlopes(ramp, n, cap)).toBe(0);
+    expect(Array.from(ramp)).toEqual(Array.from(copy));
+  });
+
+  it('forms real hillslope angles: no needle forests at the project scale', () => {
+    const n = 128, worldSize = 8000, heightScale = 2400;
+    const source = upland(n);
+    const formed = evolveFluvialLandscape(source, n, {
+      strength: 1, seed: 8, worldSize, heightScale, criticalSlope: 36,
+    }).height;
+    const cell = worldSize / (n - 1);
+    const angles: number[] = [];
+    for (let y = 0; y < n; y++) for (let x = 0; x < n - 1; x++) {
+      const i = y * n + x;
+      angles.push(Math.atan(Math.abs(formed[i + 1] - formed[i]) * heightScale / cell) * 180 / Math.PI);
+    }
+    angles.sort((a, b) => a - b);
+    // Hard rock may stand up to ~1.5× steeper (cliffs); nothing beyond that.
+    expect(angles[angles.length - 1]).toBeLessThan(Math.atan(Math.tan(36 * Math.PI / 180) * 1.6) * 180 / Math.PI);
+    expect(angles[Math.floor(angles.length / 2)]).toBeLessThan(36);
+    // Without a physical scale the dimensionless solver is unchanged (no cap).
+    const free = evolveFluvialLandscape(source, n, { strength: 1, seed: 8 }).height;
+    expect(Array.from(free)).not.toEqual(Array.from(formed));
+  });
+
+  it('gives the reference-style preset a regional tile', () => {
+    expect(createProject('uplands').worldSize).toBe(36000);
+    expect(createProject('alpine').worldSize).toBe(8000);
   });
 });

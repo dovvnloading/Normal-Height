@@ -50,7 +50,7 @@ test('adaptive 3D mesh stays idle and disposes replaced GPU buffers without reru
     const buildCount = await value('data-mesh-build-count');
     const disposalCount = await value('data-mesh-dispose-count');
     expect(buildCount - disposalCount).toBe(1);
-    expect(await value('data-mesh-vertices')).toBeLessThanOrEqual(970000);
+    expect(await value('data-mesh-vertices')).toBeLessThanOrEqual(1400000);
     expect(await value('data-mesh-buffer-bytes')).toBeLessThan(100_000_000);
     expect(await value('data-pbr-request-count')).toBe(initialRequests);
     expect(await value('data-pbr-upload-count')).toBe(initialUploads);

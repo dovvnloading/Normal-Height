@@ -72,6 +72,22 @@ export async function assertHardwareRenderer(canvas: Locator) {
   return renderer;
 }
 
+/**
+ * Collect WebGL/shader errors: Three.js logs a failed shader compile and
+ * keeps running, so a broken material would otherwise pass unnoticed.
+ */
+export function collectRenderErrors(page: Page): string[] {
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if ((message.type() === 'error' || message.type() === 'warning') &&
+        /WebGL|Shader|GL_INVALID|THREE\.WebGLProgram|THREE\.WebGLRenderer/i.test(text))
+      errors.push(text.slice(0, 2000));
+  });
+  page.on('pageerror', (error) => errors.push(String(error).slice(0, 2000)));
+  return errors;
+}
+
 /** Count every Worker the page starts, by script (terrain/pbr/export). */
 export async function installWorkerCounter(page: Page) {
   await page.addInitScript(() => {

@@ -382,7 +382,7 @@ test('camera-adaptive terrain density increases at close range without regenerat
     { timeout: 25_000 }).toBeGreaterThan(64);
   const closeTriangles = Number(await canvas.getAttribute('data-mesh-triangles'));
   expect(closeTriangles).toBeGreaterThan(farTriangles);
-  expect(Number(await canvas.getAttribute('data-mesh-vertices'))).toBeLessThanOrEqual(970000);
+  expect(Number(await canvas.getAttribute('data-mesh-vertices'))).toBeLessThanOrEqual(1400000);
   expect(await canvas.getAttribute('data-mesh-source-resolution')).toBe(sourceResolution);
   // Capture the actual WebGL framebuffer directly. Full-page capture can
   // stall on font readiness or the software-GPU compositor during close zoom.

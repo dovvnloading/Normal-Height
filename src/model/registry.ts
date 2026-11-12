@@ -166,6 +166,17 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         'Structure',
       ),
       range(
+        'criticalSlope',
+        'Hillslope angle',
+        36,
+        20,
+        65,
+        1,
+        'Fluvial uplands only: the angle at which soil and rock fail, in real degrees at the project scale. No slope exceeds it (harder rock stands somewhat steeper, softer rock gentler), so ridges are straight-sided instead of needle forests.',
+        'Structure',
+        '°',
+      ),
+      range(
         'dissectionDepth',
         'Interfluve height',
         0.5,

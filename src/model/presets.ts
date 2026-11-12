@@ -9,6 +9,8 @@ export interface Preset {
   description: string;
   seed: number;
   color: string;
+  /** Physical tile width in meters (default 8 km). */
+  worldSize?: number;
   build: () => TerrainNode[];
 }
 function node(
@@ -27,9 +29,12 @@ export const PRESETS: Preset[] = [
     name: 'Dissected uplands',
     eyebrow: 'UPLIFT / RIVER NETWORKS',
     description:
-      'A broadly uplifted upland formed by stream-power erosion: branching gullies, flat-floored trunk valleys and soft-rock basins.',
+      'A 36 km region of uplifted upland formed by stream-power erosion: branching gullies at real hillslope angles, flat-floored trunk valleys and soft-rock basins.',
     seed: 48271,
     color: '#7d8a76',
+    // A regional DEM: dense dissection is only physically possible (at real
+    // slope angles) when each sample spans tens of meters.
+    worldSize: 36000,
     build: () => [
       node(
         'range',
@@ -92,7 +97,7 @@ export const PRESETS: Preset[] = [
     seed: 48271,
     color: '#748872',
     build: () => [
-      node('range', 'mountain', 0, { profile: 'fluvial', dissection: 0.86 }, 'Alpine spine'),
+      node('range', 'mountain', 0, { profile: 'fluvial', dissection: 0.86, criticalSlope: 46 }, 'Alpine spine'),
       node('warp', 'warp', 270, { strength: 0, scale: 2.8 }, 'Break the symmetry'),
       node('erosion', 'hydraulic', 540, { hillslope: 0.03, cycles: 24, bedrockPreserve: true }, 'Carve the watershed'),
       node('thermal', 'thermal', 810, { iterations: 3, talus: 0.03, strength: 0.18 }, 'Settle the scree'),
@@ -225,6 +230,7 @@ export const PRESETS: Preset[] = [
         {
           profile: 'fluvial',
           dissection: 0.70,
+          criticalSlope: 32,
           scale: 2.8,
           relief: 0.52,
           sharpness: 0.85,
@@ -262,7 +268,7 @@ export function createProject(presetId = 'alpine'): TerrainProject {
     name: preset.name,
     seed: preset.seed,
     resolution: 512,
-    worldSize: 8000,
+    worldSize: preset.worldSize ?? 8000,
     heightScale: 2400,
     presetId: preset.id,
     // A new terrain preset carries a deterministic matching procedural surface.

@@ -51,6 +51,8 @@ export interface FluvialOptions {
   ridgeSoftening?: number;
   /** Channel-initiation catchment, in output-resolution cells. */
   channelCells?: number;
+  /** Channel-initiation catchment in m² when the physical scale is known. */
+  channelHeadArea?: number;
   /** Width of planed valley floors along larger rivers, 0–1. */
   floodplain?: number;
   /** Accordant upland summits of a still-dissecting uplifted surface, 0–1. */
@@ -59,6 +61,14 @@ export interface FluvialOptions {
   drainageVariation?: number;
   /** Height of interfluve crests relative to the full steady state, 0.2–1. */
   dissectionDepth?: number;
+  /**
+   * Physical tile width and the elevation of a height of 1, in meters.
+   * With both set, hillslopes are limited to `criticalSlope` in real angle.
+   */
+  worldSize?: number;
+  heightScale?: number;
+  /** Threshold hillslope angle in degrees (soil/rock failure), 20–65. */
+  criticalSlope?: number;
 }
 
 /** Defaults shared by the engine and the node registry. */
@@ -68,7 +78,44 @@ export const FLUVIAL_DEFAULTS = {
   floodplain: 0.85,
   accordance: 0.8,
   dissectionDepth: 0.5,
+  criticalSlope: 36,
 } as const;
+
+/**
+ * Threshold hillslopes. Soil and rock fail above a critical angle, so no
+ * cell may stand higher above any neighbour than tan(angle) × distance.
+ * Two forward/backward chamfer sweeps per round propagate the limit from
+ * low ground upward, only ever lowering cells. `capPerCell` is that height
+ * per unit cell distance, per cell (harder rock may stand steeper).
+ * Returns the total lowering, so callers can tell whether it bound.
+ */
+export function limitSlopes(z: Float64Array, n: number, capPerCell: Float64Array): number {
+  let lowered = 0;
+  const cut = (i: number, limit: number) => {
+    if (limit < z[i]) { lowered += z[i] - limit; z[i] = limit; }
+  };
+  for (let round = 0; round < 2; round++) {
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = y * n + x, c = capPerCell[i], d = c * Math.SQRT2;
+      if (x > 0) cut(i, z[i - 1] + c);
+      if (y > 0) {
+        cut(i, z[i - n] + c);
+        if (x > 0) cut(i, z[i - n - 1] + d);
+        if (x < n - 1) cut(i, z[i - n + 1] + d);
+      }
+    }
+    for (let y = n - 1; y >= 0; y--) for (let x = n - 1; x >= 0; x--) {
+      const i = y * n + x, c = capPerCell[i], d = c * Math.SQRT2;
+      if (x < n - 1) cut(i, z[i + 1] + c);
+      if (y < n - 1) {
+        cut(i, z[i + n] + c);
+        if (x < n - 1) cut(i, z[i + n + 1] + d);
+        if (x > 0) cut(i, z[i + n - 1] + d);
+      }
+    }
+  }
+  return lowered;
+}
 
 const NX = [-1, 0, 1, -1, 1, -1, 0, 1] as const;
 const NY = [-1, -1, -1, 0, 0, 1, 1, 1] as const;
@@ -148,11 +195,29 @@ export function evolveFluvialLandscape(
   const lithology = clamp(options.lithology ?? FLUVIAL_DEFAULTS.lithology);
   const heterogeneity = clamp(options.heterogeneity ?? 0.5);
   const softening = clamp(options.ridgeSoftening ?? 0.3);
-  // Channels begin above ~18 cells of catchment at the output resolution,
+  // Channels begin above a critical catchment (Montgomery & Dietrich 1988),
   // varying with rock and soil: dense gullies in some regions, smooth
-  // hillslopes cut only by larger channels in others.
-  const channelArea = clamp(options.channelCells ?? 18, 1, 400) / ((n - 1) * (n - 1));
+  // hillslopes cut only by larger channels in others. With a physical scale
+  // it is a real area (default 2 ha) and never under ~4 cells; otherwise
+  // ~18 output cells.
+  const physicalHead = (options.worldSize ?? 0) > 0 && (options.heightScale ?? 0) > 0;
+  // Converts a solver slope (elevation range per tile width) to real m/m.
+  const headScale = physicalHead && options.channelCells === undefined
+    ? (high - low) * options.heightScale! / options.worldSize! : 0;
+  const channelArea = physicalHead && options.channelCells === undefined
+    ? Math.max(4 / ((n - 1) * (n - 1)),
+      clamp(options.channelHeadArea ?? 20000, 500, 500000) / (options.worldSize! * options.worldSize!))
+    : clamp(options.channelCells ?? 18, 1, 400) / ((n - 1) * (n - 1));
   const densityVariation = 1.5 * clamp(options.drainageVariation ?? lithology);
+  // Threshold hillslopes in real angle: the largest height (in this solver's
+  // units, elevation range = 1) a cell may stand above a neighbour per tile
+  // width. Only when the physical scale is known.
+  const physical = (options.worldSize ?? 0) > 0 && (options.heightScale ?? 0) > 0;
+  const criticalAngle = clamp(options.criticalSlope ?? FLUVIAL_DEFAULTS.criticalSlope, 20, 65);
+  const capPerTile = physical
+    ? Math.tan((criticalAngle * Math.PI) / 180) * options.worldSize! / ((high - low) * options.heightScale!)
+    : Infinity;
+  let finalCap: Float64Array | null = null;
   const envelope = new Float64Array(n * n);
   for (let i = 0; i < envelope.length; i++) envelope[i] = (source[i] - low) / span;
   const noise = new Noise((options.seed ^ 0x2f6b1d3a) >>> 0);
@@ -193,6 +258,13 @@ export function evolveFluvialLandscape(
       uplift[i] = (0.12 + 0.88 * target[i]) * Math.max(0.2, 1 + heterogeneity * 0.55 * detail);
     }
 
+    // Harder rock stands steeper (cliffs), soft rock fails at gentler angles.
+    const cap = physical ? new Float64Array(count) : null;
+    if (cap) for (let i = 0; i < count; i++)
+      cap[i] = capPerTile * dx * Math.pow(erodibility[i], -0.35);
+    if (cap && level === n) finalCap = cap;
+    let relief = 1;
+    const slopeHead = new Float64Array(count).fill(1);
     const workspace = createDrainageWorkspace(level);
     const routed = new Float32Array(count);
     const integral = new Float64Array(count);
@@ -204,6 +276,22 @@ export function evolveFluvialLandscape(
       for (let i = 0; i < count; i++)
         routed[i] = z[i] + (pass === 0 ? 0.35 * dx * cellHash(i, options.seed ^ level) : 0);
       routeDrainage(routed, level, options.seed + level, workspace);
+      // Channels start at smaller catchments on steeper ground (A_c·S² ≈
+      // constant; Montgomery & Dietrich 1992): steep faces carry dense chutes
+      // and couloirs, gentle slopes stay smooth. Reference slope 20°.
+      if (headScale) {
+        for (let y = 0; y < level; y++) for (let x = 0; x < level; x++) {
+          const i = y * level + x;
+          let steepest = 0;
+          for (let d = 0; d < 8; d++) {
+            const xx = x + NX[d], yy = y + NY[d];
+            if (xx < 0 || yy < 0 || xx >= level || yy >= level) continue;
+            steepest = Math.max(steepest, (z[i] - z[yy * level + xx]) * INV_DIST[d]);
+          }
+          const slope = steepest / dx * headScale;
+          slopeHead[i] = clamp((0.364 / Math.max(slope, 0.05)) ** 2, 0.15, 4);
+        }
+      }
       const { order, receiver, rank } = workspace;
       // Random-D8: drain to a downhill neighbor chosen with probability
       // proportional to slope^1.4 instead of always the steepest one. Only
@@ -246,7 +334,7 @@ export function evolveFluvialLandscape(
         // the channel-initiation area, slopes are unchannelled hillslopes
         // whose steepness stops growing as catchments shrink, so facets stay
         // planar instead of every raster cell cutting its own groove.
-        const a = Math.max(area[cell] * cellArea, initiation[cell]);
+        const a = Math.max(area[cell] * cellArea, initiation[cell] * slopeHead[cell]);
         integral[cell] = integral[parent] +
           uplift[cell] * distance / (erodibility[cell] * Math.pow(a, m));
         base[cell] = base[parent];
@@ -254,12 +342,24 @@ export function evolveFluvialLandscape(
         num += integral[cell] * rise;
         den += integral[cell] * integral[cell];
       }
-      // Least-squares 1/K so the formed surface tracks the envelope.
-      const inverseK = den > 0 && num > 0 ? num / den : 1;
+      // Least-squares 1/K so the formed surface tracks the envelope. Where
+      // threshold hillslopes bind, channels steepen (relief > 1) to carry the
+      // authored large-scale heights, as in real high-relief ranges.
+      const inverseK = (den > 0 && num > 0 ? num / den : 1) * relief;
       const step = pass === iterations - 1 ? 1 : 0.65;
       for (let i = 0; i < count; i++) {
         if (receiver[i] < 0) continue;
         z[i] += step * (base[i] + integral[i] * inverseK - z[i]);
+      }
+      if (cap && limitSlopes(z, level, cap) > 0) {
+        let formedRise = 0, targetRise = 0;
+        for (let i = 0; i < count; i++) {
+          if (receiver[i] < 0) continue;
+          formedRise += z[i] - base[i];
+          targetRise += target[i] - base[i];
+        }
+        if (formedRise > 0 && targetRise > 0)
+          relief = clamp(relief * clamp((targetRise / formedRise) ** 0.8, 0.8, 1.6), 1, 8);
       }
       if (level === n) drainage = Float32Array.from(area);
     }
@@ -300,6 +400,9 @@ export function evolveFluvialLandscape(
   }
   const floodplain = clamp(options.floodplain ?? FLUVIAL_DEFAULTS.floodplain);
   if (floodplain > 0) planeFloodplains(z!, n, drainage, floodplain, options.seed);
+  // Finishing steps only lower ground, but floor edges can expose walls:
+  // the final surface honours the threshold angle everywhere.
+  if (finalCap) limitSlopes(z!, n, finalCap);
 
   const height = new Float32Array(n * n);
   for (let i = 0; i < height.length; i++) {

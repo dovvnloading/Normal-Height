@@ -343,6 +343,47 @@ beside the river and leave walls beyond the floor untouched; accordance
 that leaves lowlands and fine relief untouched; registry defaults equal
 to engine defaults; and 2048² graphs inside the memory preflight.
 
+### Threshold hillslopes and physical scale
+
+The comparison above is scale-free: a normalised grayscale DEM has no
+angles. Rendered in 3D at the project's real scale, the first version was a
+forest of needles. On an 8 km tile with 2.4 km height scale (7.8 m per
+sample), the measured median slope was **74°**, and 78% of the surface was
+steeper than 60°. The old carved Alpine source was no better (median 74°).
+Real mountains at this resolution have median slopes around 25–35°,
+because soil and rock fail above roughly 35–45°.
+
+The solver now knows the physical scale and applies three real limits:
+
+- **Threshold hillslopes.** No cell may stand above any neighbour by more
+  than tan(critical angle) × distance (`limitSlopes`, a two-way chamfer
+  sweep that only lowers). The cap is applied in every pass, so drainage
+  forms on the limited surface; harder rock may stand up to ~1.5× steeper
+  (cliffs), softer rock gentler. Where the cap binds, channels steepen to
+  carry the authored large-scale relief, as in real high-relief ranges.
+  *Hillslope angle* is a node control (default 36°).
+- **Physical channel heads.** Channels start at a real catchment area
+  (2 ha) instead of a raster cell count, since 18 cells is 1,100 m² at
+  8 km but 22,000 m² at 36 km.
+- **Steeper ground channelises sooner.** The initiation area scales as
+  S⁻² (Montgomery & Dietrich 1992; reference slope 20°), so steep faces
+  carry dense chutes and couloirs while gentle slopes stay smooth.
+
+Dense pixel-scale dissection, as in the reference DEM, is only physically
+possible when each sample spans tens of meters, so **Dissected uplands is a
+36 km regional tile**. Alpine uses 46° hard-rock faces and Folded
+highlands 32° weathered slopes, both on 8 km tiles.
+
+| Preset (1024², full graph) | Median slope | p90 | p99 | Relief |
+|---|--:|--:|--:|--:|
+| Dissected uplands, 36 km (before: 8 km) | 26° (74°) | 38° (83°) | 43° (86°) | 1,764 m |
+| Alpine, 8 km, 46° | 35° (67°) | 47° (82°) | 55° (85°) | 1,221 m |
+| Folded highlands, 8 km, 32° | 22° | 31° | 37° | 876 m |
+
+Unit tests require every neighbour difference to respect the cap and the
+formed terrain's median slope to stay below the critical angle at real
+scale; without a physical scale the dimensionless solver is unchanged.
+
 ### Limitations
 
 - A steady state, not a transient history: no knickpoints migrating

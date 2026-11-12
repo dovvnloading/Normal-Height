@@ -21,6 +21,17 @@ export interface TerrainSampler {
   readonly resolution: number;
   height(u: number, v: number): number;
   normal(u: number, v: number): readonly [number, number, number];
+  /**
+   * Physical surface slopes (rise over run, unexaggerated) at every source
+   * sample, along +x and +z: the same Sobel gradients the vertex normals
+   * use. Shading reads them per pixel so detail never depends on the mesh.
+   */
+  slopes?(): { x: Float32Array; z: Float32Array };
+  /**
+   * Height prefiltered for mesh vertices `cellsPerVertex` source samples
+   * apart (mipmapping for geometry). Below ~1.5 it is `height` itself.
+   */
+  heightForSpacing?(cellsPerVertex: number): (u: number, v: number) => number;
 }
 
 const clamp = (value: number, min = 0, max = 1) =>
@@ -42,6 +53,71 @@ function monotoneCubic(
     (t3 - 2 * t2 + t) * m1 +
     (-2 * t3 + 3 * t2) * p2 +
     (t3 - t2) * m2;
+}
+
+/**
+ * Monotone-cubic reconstruction of a square grid over u, v ∈ [0, 1]. Mesh
+ * builds call it once per vertex, so it avoids per-call allocation. Cells
+ * whose 4×4 stencil lies inside the grid read it directly; border cells
+ * extrapolate linearly (at() gives identical values elsewhere).
+ */
+function monotoneSurface(height: Float32Array, n: number): (u: number, v: number) => number {
+  const inside = (x: number, y: number) => height[y * n + x];
+  const at = (x: number, y: number): number => {
+    const xx = clamp(x, 0, n - 1);
+    const yy = clamp(y, 0, n - 1);
+    const base = inside(xx, yy);
+    const offsetX = x - xx, offsetY = y - yy;
+    const slopeX = xx === 0
+      ? inside(1, yy) - base : xx === n - 1
+        ? base - inside(n - 2, yy) : 0;
+    const slopeY = yy === 0
+      ? inside(xx, 1) - base : yy === n - 1
+        ? base - inside(xx, n - 2) : 0;
+    return base + offsetX * slopeX + offsetY * slopeY;
+  };
+  // Cells whose 4×4 stencil lies inside the source read it directly; at() is
+  // only needed (and gives identical values elsewhere) for border cells.
+  const last = n - 1;
+  return (u: number, v: number): number => {
+    const x = clamp(u) * last, y = clamp(v) * last;
+    const ix = Math.min(n - 2, Math.floor(x));
+    const iy = Math.min(n - 2, Math.floor(y));
+    const tx = x - ix, ty = y - iy;
+    let row0: number, row1: number, row2: number, row3: number;
+    if (ix >= 1 && iy >= 1 && ix + 2 <= last && iy + 2 <= last) {
+      let i = (iy - 1) * n + ix - 1;
+      row0 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+      i += n;
+      row1 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+      i += n;
+      row2 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+      i += n;
+      row3 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+    } else {
+      row0 = monotoneCubic(
+        at(ix - 1, iy - 1), at(ix, iy - 1),
+        at(ix + 1, iy - 1), at(ix + 2, iy - 1), tx,
+      );
+      row1 = monotoneCubic(
+        at(ix - 1, iy), at(ix, iy),
+        at(ix + 1, iy), at(ix + 2, iy), tx,
+      );
+      row2 = monotoneCubic(
+        at(ix - 1, iy + 1), at(ix, iy + 1),
+        at(ix + 1, iy + 1), at(ix + 2, iy + 1), tx,
+      );
+      row3 = monotoneCubic(
+        at(ix - 1, iy + 2), at(ix, iy + 2),
+        at(ix + 1, iy + 2), at(ix + 2, iy + 2), tx,
+      );
+    }
+    const value = monotoneCubic(row0, row1, row2, row3, ty);
+    const k = iy * n + ix;
+    const a = height[k], b = height[k + 1];
+    const c = height[k + n], d = height[k + n + 1];
+    return clamp(value, Math.min(a, b, c, d), Math.max(a, b, c, d));
+  };
 }
 
 /**
@@ -110,49 +186,8 @@ export function createTerrainSampler(
     ) / 8;
   }
 
-  // Mesh builds call these once per vertex, so they avoid per-call allocation.
-  // Cells whose 4×4 stencil lies inside the source read it directly; at() is
-  // only needed (and gives identical values elsewhere) for border cells.
   const last = n - 1;
-  const sampleHeight = (u: number, v: number): number => {
-    const x = clamp(u) * last, y = clamp(v) * last;
-    const ix = Math.min(n - 2, Math.floor(x));
-    const iy = Math.min(n - 2, Math.floor(y));
-    const tx = x - ix, ty = y - iy;
-    let row0: number, row1: number, row2: number, row3: number;
-    if (ix >= 1 && iy >= 1 && ix + 2 <= last && iy + 2 <= last) {
-      let i = (iy - 1) * n + ix - 1;
-      row0 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
-      i += n;
-      row1 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
-      i += n;
-      row2 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
-      i += n;
-      row3 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
-    } else {
-      row0 = monotoneCubic(
-        at(ix - 1, iy - 1), at(ix, iy - 1),
-        at(ix + 1, iy - 1), at(ix + 2, iy - 1), tx,
-      );
-      row1 = monotoneCubic(
-        at(ix - 1, iy), at(ix, iy),
-        at(ix + 1, iy), at(ix + 2, iy), tx,
-      );
-      row2 = monotoneCubic(
-        at(ix - 1, iy + 1), at(ix, iy + 1),
-        at(ix + 1, iy + 1), at(ix + 2, iy + 1), tx,
-      );
-      row3 = monotoneCubic(
-        at(ix - 1, iy + 2), at(ix, iy + 2),
-        at(ix + 1, iy + 2), at(ix + 2, iy + 2), tx,
-      );
-    }
-    const value = monotoneCubic(row0, row1, row2, row3, ty);
-    const k = iy * n + ix;
-    const a = height[k], b = height[k + 1];
-    const c = height[k + n], d = height[k + n + 1];
-    return clamp(value, Math.min(a, b, c, d), Math.max(a, b, c, d));
-  };
+  const sampleHeight = monotoneSurface(height, n);
   const physicalGradient = (n - 1) * heightScale / worldSize;
   const normal = (u: number, v: number): readonly [number, number, number] => {
     const x = clamp(u) * last, y = clamp(v) * last;
@@ -171,7 +206,68 @@ export function createTerrainSampler(
     const inv = 1 / Math.hypot(gx, 1, gz);
     return [-gx * inv, inv, -gz * inv];
   };
-  return { resolution: n, height: sampleHeight, normal };
+  let physicalSlopes: { x: Float32Array; z: Float32Array } | null = null;
+  const slopes = () => {
+    if (!physicalSlopes) {
+      const x = new Float32Array(n * n), z = new Float32Array(n * n);
+      for (let i = 0; i < x.length; i++) {
+        x[i] = gradientX[i] * physicalGradient;
+        z[i] = gradientY[i] * physicalGradient;
+      }
+      physicalSlopes = { x, z };
+    }
+    return physicalSlopes;
+  };
+  // Prefiltered surfaces for coarse mesh tiles, built lazily per level.
+  const levels: Array<(u: number, v: number) => number> = [sampleHeight];
+  const heightForSpacing = (cellsPerVertex: number) => {
+    const level = cellsPerVertex < 1.5 ? 0
+      : Math.min(MAX_PREFILTER_LEVEL, Math.round(Math.log2(cellsPerVertex)));
+    return levels[level] ??= monotoneSurface(prefilterHeights(height, n, level), n);
+  };
+  return { resolution: n, height: sampleHeight, normal, slopes, heightForSpacing };
+}
+
+const MAX_PREFILTER_LEVEL = 4;
+
+/**
+ * The source low-passed for vertices 2^level samples apart: two separable
+ * box passes of radius 2^(level−1) (σ ≈ 0.45–0.6 of the vertex spacing),
+ * kept on the source grid so every level shares its coordinates exactly.
+ * Point-sampling full detail at coarse vertices aliases it into jagged
+ * silhouettes and large LOD pops; the prefiltered surface is what a coarse
+ * tile can actually represent, and per-pixel normals carry the detail.
+ */
+export function prefilterHeights(height: Float32Array, n: number, level: number): Float32Array {
+  if (level <= 0 || n < 3) return height;
+  const radius = Math.min(2 ** (level - 1), n - 2);
+  const width = 2 * radius + 1;
+  const padded = new Float64Array(n + 2 * radius);
+  // Odd reflection (2·edge − mirror) keeps any linear surface exactly linear
+  // at the tile border, matching the sampler's linear extrapolation; a
+  // truncated window would pull border heights toward the interior.
+  const blurLine = (source: Float32Array, out: Float32Array, start: number, stride: number) => {
+    const first = source[start], final = source[start + (n - 1) * stride];
+    for (let k = 0; k < n; k++) padded[radius + k] = source[start + k * stride];
+    for (let k = 1; k <= radius; k++) {
+      padded[radius - k] = 2 * first - source[start + k * stride];
+      padded[radius + n - 1 + k] = 2 * final - source[start + (n - 1 - k) * stride];
+    }
+    let sum = 0;
+    for (let k = 0; k < width; k++) sum += padded[k];
+    for (let k = 0; k < n; k++) {
+      out[start + k * stride] = sum / width;
+      if (k + width < padded.length) sum += padded[k + width] - padded[k];
+    }
+  };
+  let current = height;
+  for (let pass = 0; pass < 2; pass++) {
+    const rows = new Float32Array(n * n), columns = new Float32Array(n * n);
+    for (let y = 0; y < n; y++) blurLine(current, rows, y * n, 1);
+    for (let x = 0; x < n; x++) blurLine(rows, columns, x, n);
+    current = columns;
+  }
+  return current;
 }
 
 // A 512² source no longer forces a 512² mesh at full-tile distance. Base
@@ -180,6 +276,17 @@ export function createTerrainSampler(
 // DEM's fine structure when the camera approaches it.
 const baseSegments = (n: number) => n < 256 ? 8 : n < 512 ? 16 : 32;
 const vertexCost = (segments: number) => (segments + 1) * (segments + 1);
+
+/**
+ * Vertex budget per mesh fidelity. Shading detail comes from per-pixel
+ * source normals at any budget; vertices buy silhouettes, close-up relief
+ * and shadow shape. Ultra spends ~1.45× its former budget near the camera.
+ */
+export const MESH_VERTEX_BUDGET: Record<MeshQuality, number> = {
+  balanced: 340000,
+  high: 680000,
+  ultra: 1400000,
+};
 
 /**
  * Camera-space size selects per-region density. A deterministic vertex budget
@@ -202,9 +309,8 @@ export function planTerrainMesh(
   const maximum = Math.min(256, Math.max(base,
     2 ** Math.ceil(Math.log2(Math.max(1, (n - 1) / TERRAIN_TILES))) * 2,
   ));
-  const budget = quality === 'ultra' ? 970000 :
-    quality === 'balanced' ? 340000 : 680000;
-  const targetPixelSize = quality === 'ultra' ? 2.6 :
+  const budget = MESH_VERTEX_BUDGET[quality];
+  const targetPixelSize = quality === 'ultra' ? 2.1 :
     quality === 'balanced' ? 7 : 4.3;
   const focal = 0.5 * Math.max(1, viewportHeight * pixelRatio) /
     Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -370,18 +476,45 @@ export function* adaptiveTerrainGeometrySteps(
   const heightFactor = TERRAIN_SIZE * heightScale / worldSize;
   const tileAt = (x: number, y: number) =>
     plan.segments[y * TERRAIN_TILES + x];
+  // Each tile samples the source prefiltered to its own vertex spacing, so a
+  // coarse tile is the smooth surface it can represent instead of aliased
+  // point samples of full detail.
+  const surfaces = new Map<number, (u: number, v: number) => number>();
+  const surfaceFor = (segments: number) => {
+    let surface = surfaces.get(segments);
+    if (!surface) {
+      surface = sampler.heightForSpacing?.(
+        (sampler.resolution - 1) / (TERRAIN_TILES * segments)) ?? sampler.height;
+      surfaces.set(segments, surface);
+    }
+    return surface;
+  };
+  // Watertight stitching: every vertex shared between tiles is computed from
+  // the shared feature alone, so both tiles produce it identically.
+  // Tile corners (shared by up to four tiles) take the coarsest touching
+  // tile's surface; edge vertices lie on the coarser side's edge line.
+  const cornerHeight = (cx: number, cy: number): number => {
+    let coarsest = Infinity;
+    for (let y = cy - 1; y <= cy; y++) for (let x = cx - 1; x <= cx; x++)
+      if (x >= 0 && y >= 0 && x < TERRAIN_TILES && y < TERRAIN_TILES)
+        coarsest = Math.min(coarsest, tileAt(x, y));
+    return surfaceFor(coarsest)(cx / TERRAIN_TILES, cy / TERRAIN_TILES);
+  };
+  /** The edge as its `lowSegments`-segment side draws it: linear between vertices. */
   const lockedEdge = (u: number, v: number, lowSegments: number,
     origin: number, fixed: number, vertical: boolean): number => {
     const t = clamp((vertical ? v : u) * TERRAIN_TILES - origin);
     const step = Math.min(lowSegments - 1, Math.floor(t * lowSegments));
     const f = t * lowSegments - step;
-    const p0 = (origin + step / lowSegments) / TERRAIN_TILES;
-    const p1 = (origin + (step + 1) / lowSegments) / TERRAIN_TILES;
-    return vertical
-      ? sampler.height(fixed / TERRAIN_TILES, p0) * (1 - f) +
-        sampler.height(fixed / TERRAIN_TILES, p1) * f
-      : sampler.height(p0, fixed / TERRAIN_TILES) * (1 - f) +
-        sampler.height(p1, fixed / TERRAIN_TILES) * f;
+    const coarse = surfaceFor(lowSegments);
+    const point = (k: number) => {
+      if (k === 0) return vertical ? cornerHeight(fixed, origin) : cornerHeight(origin, fixed);
+      if (k === lowSegments)
+        return vertical ? cornerHeight(fixed, origin + 1) : cornerHeight(origin + 1, fixed);
+      const p = (origin + k / lowSegments) / TERRAIN_TILES;
+      return vertical ? coarse(fixed / TERRAIN_TILES, p) : coarse(p, fixed / TERRAIN_TILES);
+    };
+    return point(step) * (1 - f) + point(step + 1) * f;
   };
   const lockedNormal = (u: number, v: number, lowSegments: number,
     origin: number, fixed: number, vertical: boolean): readonly [number, number, number] => {
@@ -421,39 +554,57 @@ export function* adaptiveTerrainGeometrySteps(
   // per-vertex loop optimizes exactly as before; the generator only yields.
   const writeRow = (tx: number, ty: number, s: number, iy: number) => {
     const fade = (distance: number) => transitionFade(distance, s);
+    const surface = surfaceFor(s);
     for (let ix = 0; ix <= s; ix++) {
       const u = (tx + ix / s) / TERRAIN_TILES;
       const v = (ty + iy / s) / TERRAIN_TILES;
-      let h = sampler.height(u, v);
+      const onLeft = ix === 0, onRight = ix === s, onTop = iy === 0, onBottom = iy === s;
+      let h: number;
       let shadingNormal = sampler.normal(u, v);
+      if ((onLeft || onRight) && (onTop || onBottom)) {
+        h = cornerHeight(onLeft ? tx : tx + 1, onTop ? ty : ty + 1);
+      } else if (onLeft || onRight) {
+        const nx = onLeft ? tx - 1 : tx + 1, fixed = onLeft ? tx : tx + 1;
+        const other = nx >= 0 && nx < TERRAIN_TILES ? tileAt(nx, ty) : s;
+        h = other < s ? lockedEdge(fixed / TERRAIN_TILES, v, other, ty, fixed, true) : surface(u, v);
+      } else if (onTop || onBottom) {
+        const ny = onTop ? ty - 1 : ty + 1, fixed = onTop ? ty : ty + 1;
+        const other = ny >= 0 && ny < TERRAIN_TILES ? tileAt(tx, ny) : s;
+        h = other < s ? lockedEdge(u, fixed / TERRAIN_TILES, other, tx, fixed, false) : surface(u, v);
+      } else {
+        h = surface(u, v);
+      }
+      // Interior vertices fade from their own surface toward each coarser
+      // neighbour's edge line; boundary vertices were set exactly above.
+      const interior = !onLeft && !onRight && !onTop && !onBottom;
       if (tx > 0 && tileAt(tx - 1, ty) < s && ix < Math.max(3, s / 24)) {
         const edgeU = tx / TERRAIN_TILES;
         const amount = fade(ix);
-        h += (lockedEdge(edgeU, v, tileAt(tx - 1, ty), ty, tx, true) -
-          sampler.height(edgeU, v)) * amount;
+        if (interior) h += (lockedEdge(edgeU, v, tileAt(tx - 1, ty), ty, tx, true) -
+          surface(edgeU, v)) * amount;
         shadingNormal = transitionNormal(shadingNormal, edgeU, v, tileAt(tx - 1, ty), ty, tx, true, amount);
       }
       if (tx + 1 < TERRAIN_TILES && tileAt(tx + 1, ty) < s &&
           s - ix < Math.max(3, s / 24)) {
         const edgeU = (tx + 1) / TERRAIN_TILES;
         const amount = fade(s - ix);
-        h += (lockedEdge(edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true) -
-          sampler.height(edgeU, v)) * amount;
+        if (interior) h += (lockedEdge(edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true) -
+          surface(edgeU, v)) * amount;
         shadingNormal = transitionNormal(shadingNormal, edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true, amount);
       }
       if (ty > 0 && tileAt(tx, ty - 1) < s && iy < Math.max(3, s / 24)) {
         const edgeV = ty / TERRAIN_TILES;
         const amount = fade(iy);
-        h += (lockedEdge(u, edgeV, tileAt(tx, ty - 1), tx, ty, false) -
-          sampler.height(u, edgeV)) * amount;
+        if (interior) h += (lockedEdge(u, edgeV, tileAt(tx, ty - 1), tx, ty, false) -
+          surface(u, edgeV)) * amount;
         shadingNormal = transitionNormal(shadingNormal, u, edgeV, tileAt(tx, ty - 1), tx, ty, false, amount);
       }
       if (ty + 1 < TERRAIN_TILES && tileAt(tx, ty + 1) < s &&
           s - iy < Math.max(3, s / 24)) {
         const edgeV = (ty + 1) / TERRAIN_TILES;
         const amount = fade(s - iy);
-        h += (lockedEdge(u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false) -
-          sampler.height(u, edgeV)) * amount;
+        if (interior) h += (lockedEdge(u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false) -
+          surface(u, edgeV)) * amount;
         shadingNormal = transitionNormal(shadingNormal, u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false, amount);
       }
       const i = vertex * 3, j = vertex * 2;
@@ -515,7 +666,6 @@ export function* adaptiveTerrainGeometrySteps(
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-  geometry.setAttribute('uv2', new THREE.BufferAttribute(uvs.slice(), 2));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.userData.nhPerimeterIndices = perimeter;
   geometry.userData.nhMeshPlanKey = plan.key;

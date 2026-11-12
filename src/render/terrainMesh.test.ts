@@ -5,8 +5,8 @@ import type { HeightField } from '../model/types';
 import { buildGroundApron, TERRAIN_SIZE } from './GroundExtension';
 import {
   adaptiveTerrainGeometrySteps, advanceWithinBudget, buildAdaptiveTerrainGeometry,
-  createTerrainSampler, planTerrainMesh, planUniform512Reference, runToCompletion,
-  TERRAIN_TILES,
+  createTerrainSampler, MESH_VERTEX_BUDGET, planTerrainMesh, planUniform512Reference, prefilterHeights,
+  runToCompletion, TERRAIN_TILES,
 } from './terrainMesh';
 import type { TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 
@@ -82,8 +82,8 @@ describe('budgeted camera-adaptive terrain mesh', () => {
       1800, 8000, 1, 'ultra');
     expect(near.vertexCount).toBeGreaterThan(far.vertexCount);
     expect(near.maxSegments).toBeGreaterThan(far.maxSegments);
-    expect(near.vertexCount).toBeLessThanOrEqual(680000);
-    expect(ultra.vertexCount).toBeLessThanOrEqual(970000);
+    expect(near.vertexCount).toBeLessThanOrEqual(MESH_VERTEX_BUDGET.high);
+    expect(ultra.vertexCount).toBeLessThanOrEqual(MESH_VERTEX_BUDGET.ultra);
     expect(ultra.vertexCount).toBeGreaterThanOrEqual(near.vertexCount);
     expect(near.segments.some((value) => value < near.maxSegments)).toBe(true);
     expect(planTerrainMesh(simpleSampler, camera(0, 0.4, 0.45), 860, 1.5,
@@ -260,7 +260,7 @@ describe('fast sampler and frame-sliced LOD rebuilds', () => {
     const sliced = result.value;
     // One yield per tessellated row plus one per tile's index pass.
     expect(slices).toBe(segments.reduce((total, s) => total + s + 2, 0));
-    for (const name of ['position', 'normal', 'uv', 'uv2', 'color'])
+    for (const name of ['position', 'normal', 'uv', 'color'])
       expect(sliced.getAttribute(name).array).toEqual(whole.getAttribute(name).array);
     expect(sliced.index!.array).toEqual(whole.index!.array);
     expect(sliced.userData.nhPerimeterIndices).toEqual(whole.userData.nhPerimeterIndices);
@@ -293,5 +293,127 @@ describe('fast sampler and frame-sliced LOD rebuilds', () => {
     while (!result.done) { frames++; result = advanceWithinBudget(steps, 4, now); }
     expect(result.value).toBe('mesh');
     expect(frames).toBe(2);
+  });
+});
+
+describe('prefiltered geometry for coarse mesh tiles', () => {
+  // A smooth ramp with a one-cell checkerboard: detail no coarse tile can hold.
+  const rippled = (n: number) => field(n, (u, v) => 0.3 + 0.25 * u + 0.15 * v) as HeightField;
+  const withChecker = (n: number) => {
+    const map = rippled(n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+      map.height[y * n + x] += ((x + y) % 2 ? 0.02 : -0.02);
+    return map;
+  };
+
+  it('keeps planes exactly planar, borders included, at every level', () => {
+    const n = 65, plane = rippled(n);
+    for (const level of [1, 2, 3, 4]) {
+      const filtered = prefilterHeights(plane.height, n, level);
+      for (let i = 0; i < n * n; i++) expect(Math.abs(filtered[i] - plane.height[i])).toBeLessThan(1e-5);
+    }
+    expect(prefilterHeights(plane.height, n, 0)).toBe(plane.height);
+  });
+
+  it('removes detail finer than the vertex spacing; full detail below ~1.5 samples', () => {
+    const n = 129, map = withChecker(n);
+    const sampler = createTerrainSampler(map.height, n, 1500, 4800);
+    expect(sampler.heightForSpacing!(1)).toBe(sampler.height);
+    const coarse = sampler.heightForSpacing!(4);
+    let pointError = 0, filteredError = 0;
+    for (let j = 8; j < n - 8; j += 4) for (let i = 8; i < n - 8; i += 4) {
+      const u = i / (n - 1), v = j / (n - 1);
+      const ramp = 0.3 + 0.25 * u + 0.15 * v;
+      pointError = Math.max(pointError, Math.abs(sampler.height(u, v) - ramp));
+      filteredError = Math.max(filteredError, Math.abs(coarse(u, v) - ramp));
+    }
+    expect(pointError).toBeGreaterThan(0.015);
+    expect(filteredError).toBeLessThan(pointError * 0.1);
+  });
+
+  it('builds coarse tiles from the prefiltered surface and fine tiles at full detail', () => {
+    const n = 257, map = withChecker(n);
+    const sampler = createTerrainSampler(map.height, n, 1500, 4800);
+    const heightFactor = TERRAIN_SIZE * 1500 / 4800;
+    const deviation = (segments: number) => {
+      const geometry = buildAdaptiveTerrainGeometry(sampler,
+        fixedPlan(new Array<number>(TERRAIN_TILES ** 2).fill(segments)), 1500, 4800);
+      const positions = geometry.getAttribute('position');
+      let worst = 0;
+      for (let k = 0; k < positions.count; k++) {
+        const u = positions.getX(k) / TERRAIN_SIZE + 0.5, v = positions.getZ(k) / TERRAIN_SIZE + 0.5;
+        if (u < 0.05 || u > 0.95 || v < 0.05 || v > 0.95) continue;
+        worst = Math.max(worst, Math.abs(positions.getY(k) / heightFactor - (0.3 + 0.25 * u + 0.15 * v)));
+      }
+      geometry.dispose();
+      return worst;
+    };
+    // 8 segments per tile → 4 source samples per vertex: smooth ramp.
+    expect(deviation(8)).toBeLessThan(0.003);
+    // 64 segments → half-sample spacing: the checkerboard is kept.
+    expect(deviation(64)).toBeGreaterThan(0.015);
+  });
+
+  it('stitches tiles sampled at different prefilter levels without cracks', () => {
+    const n = 257, map = withChecker(n);
+    const sampler = createTerrainSampler(map.height, n, 1500, 4800);
+    const segments = new Array<number>(TERRAIN_TILES ** 2).fill(8);
+    segments[0] = 32;
+    const geometry = buildAdaptiveTerrainGeometry(sampler, fixedPlan(segments), 1500, 4800);
+    const positions = geometry.getAttribute('position');
+    const first = 0, second = (32 + 1) ** 2;
+    for (let y = 0; y <= 32; y++) {
+      const high = first + y * 33 + 32;
+      const step = y / 4, k = Math.floor(step), f = step - k;
+      const low0 = second + Math.min(k, 8) * 9;
+      const low1 = second + Math.min(k + 1, 8) * 9;
+      const expected = positions.getY(low0) * (1 - f) + positions.getY(low1) * f;
+      expect(positions.getY(high)).toBeCloseTo(expected, 6);
+    }
+    geometry.dispose();
+  });
+});
+
+describe('watertight adaptive mesh', () => {
+  it('draws every shared tile edge identically from both sides on a mixed plan', () => {
+    const n = 257;
+    const map = field(n, (u, v) => 0.4 + 0.2 * Math.sin(u * 9) * Math.cos(v * 7));
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+      map.height[y * n + x] += ((x * 7 + y * 13) % 5 - 2) * 0.006;
+    const sampler = createTerrainSampler(map.height, n, 1500, 4800);
+    const options = [8, 16, 32, 64];
+    const segments = Array.from({ length: TERRAIN_TILES ** 2 },
+      (_, i) => options[(i * 7 + Math.floor(i / 8) * 3) % options.length]);
+    const plan = fixedPlan(segments);
+    const geometry = buildAdaptiveTerrainGeometry(sampler, plan, 1500, 4800);
+    const y = geometry.getAttribute('position');
+    const offsets: number[] = [];
+    let total = 0;
+    for (const s of segments) { offsets.push(total); total += (s + 1) ** 2; }
+    // Height along one tile's edge, as that tile's triangles draw it.
+    const edge = (tile: number, side: 'left' | 'right' | 'top' | 'bottom') => {
+      const s = segments[tile], o = offsets[tile];
+      const index = (k: number) => side === 'left' ? o + k * (s + 1)
+        : side === 'right' ? o + k * (s + 1) + s
+          : side === 'top' ? o + k : o + s * (s + 1) + k;
+      return (t: number) => {
+        const k = Math.min(s - 1, Math.floor(t * s)), f = t * s - k;
+        return y.getY(index(k)) * (1 - f) + y.getY(index(k + 1)) * f;
+      };
+    };
+    let worst = 0;
+    for (let ty = 0; ty < TERRAIN_TILES; ty++) for (let tx = 0; tx < TERRAIN_TILES; tx++) {
+      const tile = ty * TERRAIN_TILES + tx;
+      const pairs: Array<[(t: number) => number, (t: number) => number, number]> = [];
+      if (tx + 1 < TERRAIN_TILES)
+        pairs.push([edge(tile, 'right'), edge(tile + 1, 'left'), Math.max(segments[tile], segments[tile + 1])]);
+      if (ty + 1 < TERRAIN_TILES)
+        pairs.push([edge(tile, 'bottom'), edge(tile + TERRAIN_TILES, 'top'),
+          Math.max(segments[tile], segments[tile + TERRAIN_TILES])]);
+      for (const [a, b, finest] of pairs)
+        for (let k = 0; k <= finest; k++) worst = Math.max(worst, Math.abs(a(k / finest) - b(k / finest)));
+    }
+    expect(worst).toBeLessThan(1e-6);
+    geometry.dispose();
   });
 });

@@ -10,6 +10,7 @@ import type { BudgetedStep, TerrainMeshPlan, TerrainSampler } from './terrainMes
 import { resolveSurface } from '../materials/pbr';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
+import { createSlopeTexture, createSourceNormalUniforms, installSourceNormals } from './sourceNormals';
 import { packedPreview, requestPBR } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
@@ -148,6 +149,9 @@ export class TerrainScene {
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
   private readonly nearField = createNearFieldUniforms();
+  // Per-pixel source normals: shading detail independent of mesh density.
+  private readonly sourceNormals = createSourceNormalUniforms();
+  private slopeTexture: THREE.DataTexture | null = null;
   private meadowBlendUniform = { value: 0 };
   private meadowTextureUniform: { value: THREE.Texture | null } = { value: null };
   private splinePath: readonly SplinePoint[] | null = null;
@@ -325,6 +329,7 @@ export class TerrainScene {
         }`,
       );
       installNearFieldShader(shader, this.nearField);
+      installSourceNormals(shader, this.sourceNormals);
     };
 
     this.camera.position.set(3.25, 2.4, 3.55);
@@ -632,6 +637,7 @@ export class TerrainScene {
       this.settings.expandGround !== settings.expandGround;
     this.settings = settings;
     if (scaleChanged) this.lodDirty = true;
+    this.sourceNormals.nhVerticalScale.value = settings.exaggeration;
     const azimuth = (settings.sunAzimuth * Math.PI) / 180;
     const elevation = (settings.sunElevation * Math.PI) / 180;
     this.sun.position.set(
@@ -816,6 +822,24 @@ export class TerrainScene {
     return { min: this.fieldMinimum, max: this.fieldMaximum };
   }
 
+  /**
+   * Upload the source slopes for per-pixel shading. Built once per field and
+   * tile scale: LOD rebuilds and camera motion never touch it.
+   */
+  private updateSlopeTexture() {
+    this.slopeTexture?.dispose();
+    this.slopeTexture = null;
+    const sampler = this.heightSampler;
+    const slopes = sampler?.slopes?.();
+    if (sampler && slopes) {
+      this.slopeTexture = createSlopeTexture(slopes, sampler.resolution);
+      this.sourceNormals.nhSlopeSize.value.set(sampler.resolution, sampler.resolution);
+    }
+    this.sourceNormals.nhSlopeMap.value = this.slopeTexture;
+    this.sourceNormals.nhSourceNormals.value = this.slopeTexture ? 1 : 0;
+    this.needsRender = true;
+  }
+
   /** Synchronous rebuild for a new field, tile scale or mesh quality. */
   private buildGeometry() {
     if (!this.field || !this.project) return;
@@ -832,6 +856,7 @@ export class TerrainScene {
       this.samplerScaleKey = scaleKey;
       // Never carry hysteresis state across a new erosion field or tile scale.
       this.currentMeshPlan = null;
+      this.updateSlopeTexture();
     }
     const plan = this.planCurrentMesh();
     if (!plan || !this.heightSampler) return;
@@ -1174,6 +1199,8 @@ export class TerrainScene {
     this.pbrRelease?.();
     this.pbrRelease = null;
     this.pbrTextures.forEach(texture => texture.dispose());
+    this.slopeTexture?.dispose();
+    this.slopeTexture = null;
     this.pbrTextures = [];
     cancelAnimationFrame(this.animation);
     if (!this.contextLost && this.gpuPending.length) {

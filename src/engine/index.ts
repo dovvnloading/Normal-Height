@@ -199,8 +199,11 @@ function formFluvialUplands(
   return output;
 }
 
+/** The project's physical tile width and height scale, in meters. */
+interface PhysicalScale { worldSize: number; heightScale: number }
+
 function createMountains(
-  node: TerrainNode, n: number, noise: Noise, seed: number,
+  node: TerrainNode, n: number, noise: Noise, seed: number, physical?: PhysicalScale,
 ): Float32Array {
   const landform = text(node, 'profile', 'range');
   if (landform === 'orogenic' || landform === 'fluvial') {
@@ -221,6 +224,9 @@ function createMountains(
         floodplain: number(node, 'floodplain', FLUVIAL_DEFAULTS.floodplain, 0, 1),
         accordance: number(node, 'accordance', FLUVIAL_DEFAULTS.accordance, 0, 1),
         dissectionDepth: number(node, 'dissectionDepth', FLUVIAL_DEFAULTS.dissectionDepth, 0.2, 1),
+        criticalSlope: number(node, 'criticalSlope', FLUVIAL_DEFAULTS.criticalSlope, 20, 65),
+        worldSize: physical?.worldSize,
+        heightScale: physical?.heightScale,
       });
     return generateOrogenicRelief(upliftSource, n, seed, strength).height;
   }
@@ -417,7 +423,10 @@ export function evaluateGraph(
     const noise = new Noise(seed);
     let field: WorkingField;
     if (node.bypassed && input) field = input;
-    else if (node.kind === 'mountain') field = baseField(createMountains(node, n, noise, seed));
+    else if (node.kind === 'mountain')
+      field = baseField(createMountains(node, n, noise, seed, {
+        worldSize: project.worldSize, heightScale: project.heightScale,
+      }));
     else if (node.kind === 'noise') field = baseField(createNoise(node, n, noise));
     else {
       if (!input) throw new Error(`Connect a height input to “${node.label}”.`);
