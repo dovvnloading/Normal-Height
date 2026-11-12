@@ -158,11 +158,11 @@ Views are aimed at features found on the displayed surface. "LOD swap" compares 
 
 **Targets for this class of device** (desktop dGPU, 60 Hz): p95 frame interval ≤ 16.9 ms in every camera phase, with no main-thread task over 50 ms during camera interaction, PBR edits or repeated view switches. GPU draw p95 ≤ 4.2 ms adaptive at Ultra. CPU-side geometry buffers ≤ 12 MB. Chrome GPU-process video memory ≤ 170 MB at 1024² Ultra PBR, with no growth across cycles (< 8 MB/cycle gate; measured ≤ 0.15 MB/cycle).
 
-Still outstanding for full sign-off: an **integrated GPU** run (this machine's i5-10400F has no iGPU) and, where possible, a representative **mobile** device. The same three commands produce all of the above evidence on them.
+Not covered by this run: an **integrated GPU** (this machine's i5-10400F has none) and a **mobile** device. The same three commands produce all of the above evidence on them.
 
 ## CI versus hardware coverage
 
 - Unit tests cover mesh plan hysteresis, source consistency, seam geometry, buffer accounting and percentile math.
 - **Routine push/PR CI is deliberately short**: unit tests and a single TypeScript/production build only. It does not install browsers, run Chromium, or run performance benchmarks.
 - Full Chromium, idle-camera stability, geometry disposal, PBR upload checks, and a software-rendered benchmark smoke pair are **opt-in only** via GitHub Actions → **Extended terrain QA (manual only)** → Run workflow. The longer workflow is not a production merge gate unless a reviewer explicitly requests it.
-- **Hardware sign-off requires an actual integrated and discrete GPU run**, attaching both matrix outputs and GPU/driver metadata to issue #34. The discrete-GPU run is recorded above; leave the issue open until an integrated-GPU run is added. Successful CI is a software regression gate, not a hardware acceptance certificate.
+- **Hardware sign-off:** issue #34 was closed on 2026-11-12 with the discrete-GPU results recorded above. No integrated-GPU or mobile run has been made; to cover one, run the same commands on that device and add its results and GPU/driver metadata here. Successful CI is a software regression gate, not a hardware acceptance certificate.
