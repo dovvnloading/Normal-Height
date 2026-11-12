@@ -64,6 +64,7 @@ export class TerrainScene {
   private samplerSource: Float32Array | null = null;
   private samplerScaleKey = '';
   private lodKey = '';
+  private currentMeshPlan: TerrainMeshPlan | null = null;
   private lastLODCheckMs = 0;
   private lastCameraChangeMs = 0;
   // LOD is event-driven, not recomputed at 300 ms intervals while idle.
@@ -518,6 +519,7 @@ export class TerrainScene {
       this.settings.sunElevation !== settings.sunElevation ||
       this.settings.expandGround !== settings.expandGround;
     this.settings = settings;
+    if (scaleChanged) this.lodDirty = true;
     const azimuth = (settings.sunAzimuth * Math.PI) / 180;
     const elevation = (settings.sunElevation * Math.PI) / 180;
     this.sun.position.set(
@@ -611,6 +613,7 @@ export class TerrainScene {
           this.host.clientHeight, this.renderer.getPixelRatio(),
           this.project.heightScale, this.project.worldSize,
           this.settings.exaggeration, this.settings.meshQuality,
+          this.currentMeshPlan,
         );
     this.lastMeshPlanMs = performance.now() - started;
     this.meshPlanChecks++;
@@ -631,6 +634,8 @@ export class TerrainScene {
       );
       this.samplerSource = height;
       this.samplerScaleKey = scaleKey;
+      // Never carry hysteresis state across a new erosion field or tile scale.
+      this.currentMeshPlan = null;
     }
     const plan = requestedPlan ?? this.planCurrentMesh();
     if (!plan || !this.heightSampler) return;
@@ -653,6 +658,7 @@ export class TerrainScene {
     this.terrain.scale.y = this.settings.exaggeration;
     this.scene.add(this.terrain);
     this.lodKey = plan.key;
+    this.currentMeshPlan = plan;
     this.lodDirty = false;
     this.meshBuilds++;
     const stats = this.renderer.domElement.dataset;
