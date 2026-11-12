@@ -337,6 +337,10 @@ export class TerrainScene {
     // Camera changes mark LOD dirty. Don't re-plan 3x/s while idle. When
     // auto-rotating, refresh at most every 1.5 s rather than staying stale.
     const lodNow = performance.now();
+    // Query GPU work on idle RAFs, too. A still camera may not produce any
+    // additional draw calls, but the last submitted query can finish later.
+    if (this.meshBenchmark && this.gpuPending.length)
+      this.pollGpuTimers(lodNow);
     if (this.lodDirty && this.terrain && this.field && this.project &&
         this.heightSampler && lodNow - this.lastLODCheckMs > 240 &&
         (lodNow - this.lastCameraChangeMs > 220 ||
