@@ -73,46 +73,54 @@ relief against the reference, not its Flow mask or material textures.
 
 Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automated basin routing, groundwater and GPU fluid solvers remain future work.
 
-### Experimental conservative fluid-grid erosion
+### Hydraulic erosion models
 
-An opt-in **Hydraulic fluid grid · experimental** option is available inside
-the Hydraulic erosion node's **Erosion model** selector. It simulates water
-surface height and directional flux on an eight-neighbor cell grid; suspended
-sediment moves with the water, and bed erosion/deposition and bank slippage
-change the actual terrain height. The coarse-to-fine stages run up to 512²
-fluid cells, preserving the requested output-resolution source detail.
+The Hydraulic erosion node provides five selectable models:
 
-This is an early virtual-pipe hydraulic simulator based on published
-research, not a Terragen/Gaea proprietary erosion algorithm. Compare its
-**heightmap and shaded relief**, not merely Flow, against the current default.
-No change to existing saved projects' erosion model is required.
+- **Landscape evolution · multi-scale (default):** Uses priority-flood
+  depression routing and multiple-flow-direction runoff to grow connected
+  tributaries and valleys. Suspended sediment follows **the same flow fractions
+  as runoff**. Sediment transport capacity uses rain-weighted watershed area in
+  square meters rather than a raster-dependent contributing-pixel count.
+- **Hybrid · landscape + fluid (experimental):** First develops the connected
+  drainage network, then runs local virtual-pipe hydraulic transport on the
+  evolved heightfield. The mobile soil/alluvium layer is passed between the
+  two models; the source heightfield remains unchanged.
+- **Hydraulic fluid grid · experimental:** Solves eight-neighbor water flux
+  with available-water limiting and advects suspended sediment on the same
+  signed links. Carry water, suspended material, and mobile alluvium between
+  128/256/512 simulation stages instead of discarding them when refining.
+  Finer physical cells use smaller hydraulic substeps. Physical rainfall is
+  independent of the source terrain's vertical relief.
+- **Watershed v1 · stream power:** Maintained for legacy comparisons.
+- **Legacy · particle droplets:** The deterministic older particle solver.
 
-### Multi-scale landscape evolution (experimental)
+Landscape, fluid, and hybrid modes split the terrain into a resistant bedrock
+substrate and a mobile material layer. **Mobile soil thickness** (meters) sets
+the initial cover *within* the original surface (it does not add elevation).
+**Bedrock resistance** sets how slowly exposed rock erodes after the mobile
+layer is removed. **Valley feature scale**, **Evolution steps**, **Hillslope
+transport**, and **Riverbank angle** retain their artistic terrain controls.
 
-New Hydraulic erosion nodes default to **Landscape evolution · multi-scale**.
-The algorithm uses repeated broad-to-fine evolution, routed rainfall that
-branches among downhill neighbors, catchment-based bed incision, physical
-riverbank width/angle, hillslope transport and downstream sediment deposition.
-You can adjust **Evolution steps**, **Valley feature scale** (meters),
-**Hillslope transport**, and **Riverbank angle** in the inspector.
+All models preserve the old output channels (Height, Flow, Wear, Deposit) and
+the saved project structure. Existing saved nodes with explicit methods keep
+their algorithm; missing method values still use landscape evolution. No
+automatic migration is needed.
 
-**Watershed v1 · stream power** and **Legacy · particle droplets** remain
-available for side-by-side comparison. Saved projects that explicitly specify
-one of those older models retain it; new nodes use Landscape evolution.
-The algorithm remains an artistic geomorphology approximation, **not** the
-proprietary Terragen/Gaea implementation or a validated water-flow simulation.
-Actual shape quality must be assessed from heightmap/relief output, not only
-from a branched Flow map. See [research and limitations](docs/RESEARCH.md).
+The two latest solvers expose an additional `sedimentBudget` result for
+debugging: eroded, deposited, **boundary-exported**, and **still-suspended**
+material in approximate cubic meters, with a numerical balance residual.
+These numbers are measured during transport at simulation resolution, whereas
+the preexisting `exportedSediment` scalar continues to mean net final
+heightfield change in output-grid sample units, for backward compatibility.
+Resampling and optional bedrock-preservation filtering mean the two measures
+should not be confused or expected to match exactly.
 
-### Watershed-driven hydraulic erosion (previous solver)
+The fluid and hybrid options remain **experimental artistic erosion models**,
+not calibrated geophysical simulations. Visual quality should be judged using
+the actual Height and shaded-relief maps, not the Flow channel alone. See
+[hydrological design and limitations](docs/RESEARCH.md).
 
-**Default: Connected watershed / stream power.** A priority-flood pass starts at the open tile boundary and guarantees outlet-connected flow directions, even when the source elevation contains enclosed basins. Downstream receivers are adjusted to favor actual steepest descent while preserving an acyclic routing graph. Rainfall accumulates from every upstream contributing cell, with a physically scaled travel-distance transmission loss. Channel incision responds to contributing area and local physical slope (a stream-power law), while sediment capacity, erosion, downstream transport, over-capacity deposition, and exported sediment are accounted for explicitly. Multi-scale duration first works dominant drainage, then finer tributaries. This creates a connected river hierarchy instead of unrelated random trails.
-
-**Optional: Legacy droplet simulation.** Switch the Hydraulic erosion node's **Erosion model** to **Legacy · particle droplets** to compare with the original seeded particle algorithm; the existing controls, maps, masks, seeds, and saved v1 graph structure remain supported. Previously saved erosion nodes without a model choice now use the watershed default; choose the legacy option for exact old-model comparisons.
-
-Thermal weathering still redistributes loose material on excessive slopes. Flow, wear, and deposition remain genuine computed buffers available in the map and graph, not painted overlays.
-
-**Physical scope:** The new solver is a drainage-area/stream-power **landscape-evolution approximation** with artistic erodibility and duration constants, not a calibrated rainfall-runoff model, fluid dynamics, groundwater or real geological time. Grid-constrained D8 routing and the tile's open boundary remain visible limitations. See [hydrology and validation notes](docs/RESEARCH.md).
 
 ### Procedural PBR material studio (feature branch)
 
