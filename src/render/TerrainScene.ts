@@ -78,6 +78,13 @@ export class TerrainScene {
   private pbrUploads = 0;
   private lastMeshBuildMs = 0;
   private lastMeshPlanMs = 0;
+  // Optional hardware timing. WebGL2 EXT_disjoint_timer_query_webgl2 is
+  // queried only in the explicit benchmark URL mode; never fake GPU timings
+  // using CPU submission or requestAnimationFrame intervals.
+  private gpuTimer: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null = null;
+  private gpuPending: WebGLQuery[] = [];
+  private gpuDurationsMs: number[] = [];
+  private lastGpuPublishMs = 0;
   private readonly skirtMaterial = new THREE.MeshStandardMaterial({
     color: '#5b6054',
     roughness: 1,
@@ -165,6 +172,11 @@ export class TerrainScene {
     host.appendChild(this.renderer.domElement);
     this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
+    if (this.meshBenchmark) {
+      const gl = this.renderer.getContext();
+      this.gpuTimer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
+      this.renderer.domElement.dataset.meshGpuTimerSupported = String(!!this.gpuTimer);
+    }
     this.scene.background = new THREE.Color('#cbd2cf');
     this.scene.fog = new THREE.Fog('#cbd2cf', 7, 15);
 
@@ -369,8 +381,24 @@ export class TerrainScene {
       seconds - this.lastWeatherFrame >= this.weatherInterval;
     if (this.needsRender || this.controls.autoRotate || weatherFrame) {
       const started = performance.now();
-      this.renderer.render(this.scene, this.camera);
+      const gl = this.meshBenchmark && this.gpuTimer
+        ? this.renderer.getContext() : null;
+      let gpuQuery: WebGLQuery | null = null;
+      if (gl && this.gpuTimer && this.gpuPending.length < 4) {
+        gpuQuery = gl.createQuery();
+        if (gpuQuery) gl.beginQuery(this.gpuTimer.TIME_ELAPSED_EXT, gpuQuery);
+      }
+      try {
+        this.renderer.render(this.scene, this.camera);
+      } finally {
+        if (gpuQuery && gl && this.gpuTimer) {
+          gl.endQuery(this.gpuTimer.TIME_ELAPSED_EXT);
+          this.gpuPending.push(gpuQuery);
+        }
+      }
       if (this.meshBenchmark) {
+        this.pollGpuTimers(performance.now());
+        
         const stats = this.renderer.domElement.dataset;
         stats.meshRenderCpuMs = (performance.now() - started).toFixed(2);
         stats.meshRendererGeometries = String(this.renderer.info.memory.geometries);
@@ -390,6 +418,33 @@ export class TerrainScene {
       this.needsRender = false;
     }
   };
+
+  /** Drain completed GPU queries without synchronously waiting for the GPU. */
+  private pollGpuTimers(now: number) {
+    const ext = this.gpuTimer;
+    if (!ext || this.contextLost) return;
+    const gl = this.renderer.getContext();
+    const disjoint = Boolean(gl.getParameter(ext.GPU_DISJOINT_EXT));
+    while (this.gpuPending.length &&
+        gl.getQueryParameter(this.gpuPending[0], gl.QUERY_RESULT_AVAILABLE)) {
+      const query = this.gpuPending.shift()!;
+      if (!disjoint) {
+        const elapsedNs = Number(gl.getQueryParameter(query, gl.QUERY_RESULT));
+        if (Number.isFinite(elapsedNs) && elapsedNs >= 0) {
+          this.gpuDurationsMs.push(elapsedNs / 1e6);
+          if (this.gpuDurationsMs.length > 2048)
+            this.gpuDurationsMs.splice(0, this.gpuDurationsMs.length - 2048);
+        }
+      }
+      gl.deleteQuery(query);
+    }
+    if (now - this.lastGpuPublishMs >= 900) {
+      this.lastGpuPublishMs = now;
+      const data = this.renderer.domElement.dataset;
+      data.meshGpuSampleCount = String(this.gpuDurationsMs.length);
+      data.meshGpuSamples = JSON.stringify(this.gpuDurationsMs.slice(-512));
+    }
+  }
 
   update(field: HeightField, project: TerrainProject, settings: ViewSettings) {
     const previousBase = this.minimumElevation * this.settings.exaggeration;
@@ -931,6 +986,12 @@ export class TerrainScene {
     this.pbrTextures.forEach(texture => texture.dispose());
     this.pbrTextures = [];
     cancelAnimationFrame(this.animation);
+    if (!this.contextLost && this.gpuPending.length) {
+      const gl = this.renderer.getContext();
+      for (const query of this.gpuPending) gl.deleteQuery(query);
+    }
+    this.gpuPending = [];
+    this.gpuDurationsMs = [];
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.atmosphere?.dispose();
