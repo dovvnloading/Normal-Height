@@ -205,6 +205,7 @@ export class GroundExtension {
   private meadow: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
   private apron: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
   private geometryKey = '';
+  private meadowGeometryKey = '';
   private lastTerrainGeometry: THREE.BufferGeometry | null = null;
 
   constructor(private readonly scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
@@ -245,14 +246,11 @@ export class GroundExtension {
       field.resolution, project.worldSize, project.heightScale, settings.exaggeration,
     ].join('/') : 'empty';
     const key = [fieldKey, horizonExtent].join('|');
-    // A new field object requires a fresh conforming border even if its
-    // resolution and parameter values are unchanged.
-    const currentField = this.lastField;
-    if (key !== this.geometryKey || field !== currentField ||
-        (terrain?.geometry ?? null) !== this.lastTerrainGeometry) {
-      this.geometryKey = key;
-      this.lastField = field;
-      this.lastTerrainGeometry = terrain?.geometry ?? null;
+    const meadowKey = `${horizonExtent}/${Boolean(field)}`;
+    // Only the apron depends on adaptive terrain topology. Rebuilding its
+    // matching edge must not dispose/reallocate the entire meadow mesh.
+    if (meadowKey !== this.meadowGeometryKey) {
+      this.meadowGeometryKey = meadowKey;
       this.meadow?.geometry.dispose();
       const geometry = meadowGeometry(horizonExtent, !!field);
       if (!this.meadow) {
@@ -261,7 +259,16 @@ export class GroundExtension {
         this.meadow.receiveShadow = true;
         this.scene.add(this.meadow);
       } else this.meadow.geometry = geometry;
-
+    }
+    // A new field or LOD mesh requires an updated conforming border even if
+    // the source resolution and visual settings haven't changed.
+    const terrainGeometry = terrain?.geometry ?? null;
+    if (key !== this.geometryKey || field !== this.lastField ||
+        terrainGeometry !== this.lastTerrainGeometry ||
+        (this.apron && base !== this.lastBase)) {
+      this.geometryKey = key;
+      this.lastField = field;
+      this.lastTerrainGeometry = terrainGeometry;
       if (this.apron) {
         this.scene.remove(this.apron);
         this.apron.geometry.dispose();
@@ -276,9 +283,6 @@ export class GroundExtension {
         this.apron.receiveShadow = true;
         this.scene.add(this.apron);
       }
-    } else if (this.apron && base !== this.lastBase && field && project) {
-      this.apron.geometry.dispose();
-      this.apron.geometry = buildGroundApron(field, project, settings.exaggeration, base, horizonExtent, terrain);
     }
     this.lastBase = base;
     if (this.meadow) {
