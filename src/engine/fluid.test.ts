@@ -96,6 +96,12 @@ describe('conservative coupled fluid-grid erosion', () => {
       expect(Number.isFinite(budget.balanceErrorM3)).toBe(true);
       expect(Math.abs(budget.balanceErrorM3)).toBeLessThan(
         Math.max(1, budget.erodedVolumeM3) * 0.015);
+      const water = out.waterBudget!;
+      expect(water.rainfallVolumeM3).toBeGreaterThan(0);
+      expect(water.exportedVolumeM3).toBeGreaterThan(0);
+      expect(water.retainedVolumeM3).toBeGreaterThanOrEqual(0);
+      expect(Math.abs(water.balanceErrorM3)).toBeLessThan(
+        water.rainfallVolumeM3 * 0.002);
     }
   });
 
@@ -127,6 +133,13 @@ describe('conservative coupled fluid-grid erosion', () => {
       depositedVolumeM3: 0,
       exportedVolumeM3: 0,
       suspendedVolumeM3: 0,
+      balanceErrorM3: 0,
+    });
+    expect(out.waterBudget).toMatchObject({
+      rainfallVolumeM3: 0,
+      exportedVolumeM3: 0,
+      evaporatedVolumeM3: 0,
+      retainedVolumeM3: 0,
       balanceErrorM3: 0,
     });
   });
