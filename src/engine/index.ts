@@ -11,6 +11,8 @@ import { clamp, mix, Noise, smoothstep } from './noise';
 import { hydraulicErosion, sampleHeight, thermalErosion } from './erosion';
 import type { SedimentBudget } from './erosion';
 import { generateOrogenicRelief } from './orogeny';
+import { evolveFluvialLandscape, FLUVIAL_DEFAULTS, FLUVIAL_MAX_RESOLUTION } from './fluvial';
+import type { FluvialOptions } from './fluvial';
 import { sculptSpline } from './spline';
 import { validSplinePoint, MAX_SPLINE_POINTS } from '../model/splines';
 
@@ -137,10 +139,10 @@ function thumbnail(values: Float32Array, n: number): Float32Array {
   return small;
 }
 
-const WORKING_MEMORY_BUDGET = 512 * 1024 * 1024;
+export const WORKING_MEMORY_BUDGET = 512 * 1024 * 1024;
 
 /** Conservative preflight, including cached branches, diagnostic routes and workspace overhead. */
-function estimatedWorkingBytes(
+export function estimatedWorkingBytes(
   graph: TerrainGraph,
   needed: Set<string>,
   resolution: number,
@@ -157,13 +159,51 @@ function estimatedWorkingBytes(
   }
   for (const edge of graph.edges)
     if (needed.has(edge.target) && edge.sourceHandle && edge.sourceHandle !== 'height') buffers++;
-  return 64 * 1024 * 1024 + buffers * resolution * resolution * Float32Array.BYTES_PER_ELEMENT;
+  const reserve = 64 * 1024 * 1024;
+  const cell = resolution * resolution * Float32Array.BYTES_PER_ELEMENT;
+  const settled = reserve + buffers * cell;
+  // Fluvial uplands hold a transient Float64/routing working set (~144 B
+  // per solver cell, solver capped at 1024², plus full-size resampling
+  // buffers above that). It is freed when the source node finishes, before
+  // downstream nodes allocate, so it peaks beside the reserved fields only.
+  let transient = 0;
+  for (const node of graph.nodes)
+    if (needed.has(node.id) && node.kind === 'mountain' && node.params.profile === 'fluvial') {
+      const solver = Math.min(resolution, FLUVIAL_MAX_RESOLUTION);
+      transient = Math.max(transient, solver * solver * 144 +
+        (resolution > FLUVIAL_MAX_RESOLUTION ? 3 * cell : 0));
+    }
+  return transient > 0 ? Math.max(settled, reserve + 13 * cell + transient) : settled;
+}
+
+/**
+ * Fluvial uplands at any resolution. Above FLUVIAL_MAX_RESOLUTION the
+ * landscape is formed at that resolution and its relief change is resampled
+ * onto the full-size source, as the orogenic carving does; extra export
+ * samples are not claimed as additional erosion.
+ */
+function formFluvialUplands(
+  source: Float32Array, n: number, options: FluvialOptions,
+): Float32Array {
+  if (n <= FLUVIAL_MAX_RESOLUTION) return evolveFluvialLandscape(source, n, options).height;
+  const m = FLUVIAL_MAX_RESOLUTION;
+  const coarse = new Float32Array(m * m);
+  for (let y = 0; y < m; y++) for (let x = 0; x < m; x++)
+    coarse[y * m + x] = sampleHeight(source, n, (x * (n - 1)) / (m - 1), (y * (n - 1)) / (m - 1));
+  const formed = evolveFluvialLandscape(coarse, m, options).height;
+  for (let i = 0; i < formed.length; i++) formed[i] -= coarse[i];
+  const output = new Float32Array(n * n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
+    output[y * n + x] = source[y * n + x] +
+      sampleHeight(formed, m, (x * (m - 1)) / (n - 1), (y * (m - 1)) / (n - 1));
+  return output;
 }
 
 function createMountains(
   node: TerrainNode, n: number, noise: Noise, seed: number,
 ): Float32Array {
-  if (text(node, 'profile', 'range') === 'orogenic') {
+  const landform = text(node, 'profile', 'range');
+  if (landform === 'orogenic' || landform === 'fluvial') {
     // Evolve the *regional uplift source*, rather than stamping a river mask
     // onto a smooth mountain image. The normal mountain model remains
     // separately available for exact legacy comparisons.
@@ -171,9 +211,18 @@ function createMountains(
       ...node, params: { ...node.params, profile: 'range' },
     };
     const upliftSource = createMountains(broadNode, n, noise, seed);
-    return generateOrogenicRelief(
-      upliftSource, n, seed, number(node, 'dissection', 0.82, 0, 1),
-    ).height;
+    const strength = number(node, 'dissection', 0.82, 0, 1);
+    if (landform === 'fluvial')
+      return formFluvialUplands(upliftSource, n, {
+        strength,
+        seed,
+        concavity: number(node, 'concavity', FLUVIAL_DEFAULTS.concavity, 0.3, 0.7),
+        lithology: number(node, 'lithology', FLUVIAL_DEFAULTS.lithology, 0, 1),
+        floodplain: number(node, 'floodplain', FLUVIAL_DEFAULTS.floodplain, 0, 1),
+        accordance: number(node, 'accordance', FLUVIAL_DEFAULTS.accordance, 0, 1),
+        dissectionDepth: number(node, 'dissectionDepth', FLUVIAL_DEFAULTS.dissectionDepth, 0.2, 1),
+      });
+    return generateOrogenicRelief(upliftSource, n, seed, strength).height;
   }
   const map = new Float32Array(n * n);
   const scale = number(node, 'scale', 3.2, 0.1, 30),

@@ -59,7 +59,8 @@ describe('orogenic stream-network terrain source', () => {
     const project = createProject('alpine');
     project.resolution = 96;
     const source = project.graph.nodes.find(node => node.id === 'range')!;
-    expect(source.params.profile).toBe('orogenic');
+    // Presets now default to Fluvial uplands; saved orogenic graphs still route.
+    source.params.profile = 'orogenic';
     const evolved = evaluateGraph(project, { resolution: 96, previewNodeId: 'range' }).field.height;
     source.params.profile = 'range';
     const classic = evaluateGraph(project, { resolution: 96, previewNodeId: 'range' }).field.height;

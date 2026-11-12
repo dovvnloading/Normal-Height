@@ -53,6 +53,7 @@ export const NODE_ICON_NAMES: Partial<Record<NodeKind, TerrainIconName>> = {
   output: 'terrain-output',
 };
 export const PRESET_ICON_NAMES: Record<string, TerrainIconName> = {
+  uplands: 'folded-highlands',
   alpine: 'alpine-watershed',
   massif: 'granite-massif',
   badlands: 'desert-badlands',

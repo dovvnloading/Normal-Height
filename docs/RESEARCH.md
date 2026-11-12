@@ -260,6 +260,119 @@ another arbitrary random texture.
 
 ---
 
+## Fluvial uplands: relief formed by uplift and stream-power erosion
+
+Compared numerically with the real DEM reference, the carved orogenic
+source still read as a valley network drawn onto a smooth envelope:
+fine relief was 2–3× too weak, curvature was strongly skewed toward
+grooves cut into round hills (Laplacian skew +0.92 against −0.05 for the
+real terrain), most of the tile was a flat lowland, and every channel was
+the same thin line. In real uplands the drainage *forms* the surface. The
+**Fluvial uplands** landform (`src/engine/fluvial.ts`, mountain node,
+now the default landform and used by the Dissected uplands, Alpine and
+Folded highlands presets) does that.
+
+### Method
+
+1. **Steady-state stream power on a self-consistent network.** For the
+   detachment-limited law dz/dt = U − K·A^m·S (slope exponent 1), the
+   steady state is S = U / (K·A^m). Route drainage (priority flood), then
+   integrate that slope upstream from the outlets:
+   z_i = z_receiver + U_i·d_i / (K_i·A_i^m). Reroute on the new surface
+   and repeat until network and surface agree. This is the state that
+   implicit time stepping (Braun & Willett 2013) converges to, reached
+   in 4–14 routing passes per resolution level instead of hundreds of
+   time steps.
+2. **Artist control.** Uplift follows the classic range envelope; the
+   erodibility K is fitted by least squares each pass so the formed
+   surface tracks the envelope's large-scale shape.
+3. **Coarse to fine.** Levels 128 → 256 → 512 → 1024: trunk rivers
+   organise first; tributaries emerge at each finer scale.
+4. **Raster-free channel courses.** Random-D8 receivers (Fairfield &
+   Leymarie 1991): each cell drains to a downhill, earlier-ranked
+   neighbour with probability ∝ slope^1.4, which keeps the graph acyclic
+   but removes valleys locked to the eight grid directions.
+5. **Channel initiation.** Below a critical catchment (Montgomery &
+   Dietrich 1988), slopes are hillslopes, not channels; the area varies
+   smoothly with a seeded soil/rock field, giving densely gullied
+   regions beside smoother ones. Seeded lithology also varies K: hard
+   rugged uplands, soft gentle basins, and perched basins behind hard-rock
+   gorges.
+6. **Finishing steps for real uplands** (geomorphic, not simulated
+   processes):
+   - *Upland accordance*: only the broad component of the surface is
+     compressed above its upland level (monotonic, C¹ at the knee), so
+     interfluve summits reach a common level as on an uplifted surface
+     rivers are still cutting into.
+   - *Interfluve height*: relative to the broad surface, only crests are
+     lowered; valleys keep their full incision, so channels read as
+     crisp incisions into smoother slopes, not coral-like ridges.
+   - *Valley floors*: rivers above 0.2% of the tile plane flat floors
+     whose width grows with √area (hydraulic geometry, Leopold &
+     Maddock 1953), blending into the walls through a concave toe slope.
+     Floors only ever lower the surface and tilt downstream with their
+     river, so they still drain.
+
+Strength (Stream-network dissection) 0 returns the classic range exactly.
+Above 1024² the landscape is formed at 1024² and its relief change is
+resampled onto the full-size source.
+
+### Comparison with the real DEM reference (1024², min–max normalised)
+
+| Measure | Reference DEM | Before: Alpine (carved) | Dissected uplands |
+|---|--:|--:|--:|
+| Mid-scale relief σ4 / σ8 (÷ range) | 0.030 / 0.037 | 0.017 / 0.024 | 0.028 / 0.038 |
+| Fine relief σ1 / σ2 (÷ range) | 0.026 / 0.023 | 0.009 / 0.011 | 0.015 / 0.018 |
+| Curvature (Laplacian) skew | −0.05 | +0.92 | +0.17 |
+| Relief around channels (15-cell window) | 0.28 | 0.15 | 0.20 |
+| Median elevation | 0.49 | 0.16 | 0.36 |
+| Raster direction bias (peak / mean) | 1.07 | 1.14 | 1.04 |
+| Flat area | 4% | 18% | 1.4% |
+
+The full Dissected uplands pipeline runs in ~10.5 s at 1024² in Node
+(the previous Alpine pipeline: ~13.5 s).
+
+### Validation
+
+Unit tests check: exact identity at zero strength; determinism and
+non-mutation; zero interior pits at steady state; the fitted slope–area
+exponent within ±0.12 of the configured concavity (S ∝ U·A^−m);
+channels lower than their surroundings; broad structure consistent
+between 128² and 256²; floodplains that only lower the surface, are flat
+beside the river and leave walls beyond the floor untouched; accordance
+that leaves lowlands and fine relief untouched; registry defaults equal
+to engine defaults; and 2048² graphs inside the memory preflight.
+
+### Limitations
+
+- A steady state, not a transient history: no knickpoints migrating
+  through time, no capture events, no glacial or arid processes.
+- Accordance, interfluve height and valley floors are geomorphically
+  motivated finishing steps tuned against one real reference, not
+  simulated hillslope, lateral-migration or sediment physics. Real
+  basins and lakes fill with sediment; this stage does not deposit (the
+  downstream landscape node does), so flat area remains below the
+  reference's.
+- Random-D8 is still an eight-neighbour raster model; rivers do not
+  meander.
+- Pixel-scale roughness stays below the reference's, part of which is
+  sensor noise and compression in that image.
+
+References: Braun & Willett (2013),
+[doi:10.1016/j.geomorph.2012.10.008](https://doi.org/10.1016/j.geomorph.2012.10.008);
+Whipple & Tucker (1999), stream-power incision model,
+[doi:10.1029/1999JB900120](https://doi.org/10.1029/1999JB900120);
+Fairfield & Leymarie (1991), random eight-node drainage,
+[doi:10.1029/90WR02658](https://doi.org/10.1029/90WR02658);
+Montgomery & Dietrich (1988), channel initiation,
+[doi:10.1038/336232a0](https://doi.org/10.1038/336232a0);
+Leopold & Maddock (1953), hydraulic geometry,
+[doi:10.3133/pp252](https://doi.org/10.3133/pp252);
+Cordonnier et al. (2016),
+[doi:10.1111/cgf.12820](https://doi.org/10.1111/cgf.12820).
+
+---
+
 ## Multi-resolution landscape evolution (experimental)
 
 Normal Height's **Landscape evolution · multi-scale** is a new *research-backed,

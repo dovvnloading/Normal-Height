@@ -23,6 +23,37 @@ function node(
 }
 export const PRESETS: Preset[] = [
   {
+    id: 'uplands',
+    name: 'Dissected uplands',
+    eyebrow: 'UPLIFT / RIVER NETWORKS',
+    description:
+      'A broadly uplifted upland formed by stream-power erosion: branching gullies, flat-floored trunk valleys and soft-rock basins.',
+    seed: 48271,
+    color: '#7d8a76',
+    build: () => [
+      node(
+        'range',
+        'mountain',
+        0,
+        {
+          profile: 'fluvial',
+          width: 1.4,
+          dissection: 1,
+          concavity: 0.56,
+          lithology: 0.75,
+          floodplain: 0.85,
+          accordance: 1,
+          dissectionDepth: 0.5,
+        },
+        'Uplifted upland',
+      ),
+      node('warp', 'warp', 270, { strength: 0, scale: 2.8 }, 'Break the symmetry'),
+      node('erosion', 'hydraulic', 540, { hillslope: 0.03, cycles: 24, bedrockPreserve: true }, 'Carve the watershed'),
+      node('thermal', 'thermal', 810, { iterations: 3, talus: 0.03, strength: 0.18 }, 'Settle the scree'),
+      node('output', 'output', 1080, {}, 'Terrain output'),
+    ],
+  },
+  {
     id: 'river-gorge',
     name: 'River-cut highlands',
     eyebrow: 'SPLINES / WATERSHED',
@@ -61,7 +92,7 @@ export const PRESETS: Preset[] = [
     seed: 48271,
     color: '#748872',
     build: () => [
-      node('range', 'mountain', 0, { profile: 'orogenic', dissection: 0.86 }, 'Alpine spine'),
+      node('range', 'mountain', 0, { profile: 'fluvial', dissection: 0.86 }, 'Alpine spine'),
       node('warp', 'warp', 270, { strength: 0, scale: 2.8 }, 'Break the symmetry'),
       node('erosion', 'hydraulic', 540, { hillslope: 0.03, cycles: 24, bedrockPreserve: true }, 'Carve the watershed'),
       node('thermal', 'thermal', 810, { iterations: 3, talus: 0.03, strength: 0.18 }, 'Settle the scree'),
@@ -192,7 +223,7 @@ export const PRESETS: Preset[] = [
         'mountain',
         0,
         {
-          profile: 'orogenic',
+          profile: 'fluvial',
           dissection: 0.70,
           scale: 2.8,
           relief: 0.52,

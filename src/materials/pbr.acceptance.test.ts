@@ -28,7 +28,7 @@ describe('PBR issue acceptance regressions', () => {
   it('initializes and round-trips the biome for every scene preset (#12)', () => {
     const expected: Record<string, string> = {
       'river-gorge': 'alpine', alpine: 'alpine', massif: 'alpine',
-      badlands: 'arid', volcano: 'volcanic', highlands: 'alpine',
+      badlands: 'arid', volcano: 'volcanic', highlands: 'alpine', uplands: 'alpine',
     };
     expect(PRESETS.map((preset) => preset.id).sort()).toEqual(Object.keys(expected).sort());
     const field = analyticField(64);
