@@ -2,6 +2,7 @@ import { clamp, Noise } from './noise';
 import type { ErosionResult, ErosionSettings } from './erosion';
 import { createDrainageWorkspace, routeDrainage } from './hydrology';
 import { accumulateMultiFlow } from './landscapeFlow';
+import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
 
 // Matches the D8 ordering used in landscapeFlow's partition fractions.
 const FLOW_DX = [-1, 0, 1, -1, 1, -1, 0, 1] as const;
@@ -178,7 +179,7 @@ export function landscapeErosion(
     const sediment = new Float32Array(size);
     const fractions = new Float32Array(size * 8);
     const localSediment = new Float32Array(size);
-    const creepChanges = new Float64Array(size);
+    const creep = createHillslopeWorkspace(size);
     const fanIndices = new Int32Array(5);
     const fanWeights = [0.55, 0.1125, 0.1125, 0.1125, 0.1125];
     let stageEroded = 0, stageDeposited = 0, stageExported = 0;
@@ -389,40 +390,13 @@ export function landscapeErosion(
       // Only above the repose angle; an analytic gently tilted plane is
       // unchanged and cannot turn into an arbitrary grid of parallel grooves.
       if (hillslope > 0) {
-        creepChanges.fill(0);
-        const repose = Math.tan(bankAngle * 0.70);
-        for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
-          const i = y * m + x;
-          for (let direction = 0; direction < 2; direction++) {
-            const j = direction === 0 ? (x < m - 1 ? i + 1 : -1)
-              : (y < m - 1 ? i + m : -1);
-            if (j < 0) continue;
-            const difference = height[i] - height[j];
-            const slope = Math.abs(difference) * heightScale / cell;
-            if (slope <= repose) continue;
-            const permission = stageMask
-              ? Math.min(clamp(stageMask[i]), clamp(stageMask[j])) : 1;
-            if (!permission) continue;
-            const moved = Math.min(
-              Math.abs(difference) * 0.085,
-              (slope - repose) * cell / heightScale * 0.085,
-            ) * hillslope * dt * permission;
-            const signed = Math.sign(difference) * moved;
-            creepChanges[i] -= signed;
-            creepChanges[j] += signed;
-          }
-        }
-        for (let i = 0; i < size; i++) if (creepChanges[i]) {
-          const change = creepChanges[i];
-          if (change < 0) {
-            const loosened = Math.min(alluvium[i], -change);
-            alluvium[i] -= loosened;
-            bedrock[i] -= -change - loosened;
-          } else {
-            alluvium[i] += change;
-          }
-          height[i] = bedrock[i] + alluvium[i];
-        }
+        // The same base layer limits both hydraulic incision and bank creep.
+        // Rock with resistance=1 cannot supply hillslope sediment.
+        const repose = Math.tan(bankAngle * 0.70) * cell / heightScale;
+        relaxLayeredHillslope(
+          height, alluvium, bedrock, m, repose,
+          0.085 * hillslope * dt, rockFactor, floor, stageMask, creep,
+        );
       }
       completedCycles++;
       progress?.(Math.min(0.999, completedCycles / cycles));
