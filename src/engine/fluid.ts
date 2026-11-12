@@ -37,8 +37,7 @@ function resizeConservativeDensity(
   for (const value of source) before += value;
   for (const value of out) after += value;
   if (after <= 0) return out;
-  const multiplier = (before / ((n - 1) * (n - 1))) /
-    (after / ((m - 1) * (m - 1)));
+  const multiplier = (before / (n * n)) / (after / (m * m));
   for (let i = 0; i < out.length; i++) out[i] *= multiplier;
   return out;
 }
@@ -150,7 +149,7 @@ export function fluidGridErosion(
     const sediment = previous
       ? resizeConservativeDensity(previous.sediment, previous.size, m)
       : new Float32Array(length);
-    const volumePerSample = cellMeters * cellMeters * elevationMeters;
+    const volumePerSample = worldMeters * worldMeters / length * elevationMeters;
     const subdiv = substeps[stage];
     const retainedBoundary = Math.pow(0.4, 1 / subdiv);
     const evaporationRate = 1 - Math.pow(
@@ -392,7 +391,8 @@ export function fluidGridErosion(
   }
   let suspendedVolumeM3 = 0;
   if (previous) {
-    const sampleVolume = (worldMeters / (previous.size - 1)) ** 2 * elevationMeters;
+    const sampleVolume = worldMeters * worldMeters /
+      (previous.size * previous.size) * elevationMeters;
     for (const amount of previous.sediment)
       suspendedVolumeM3 += amount * sampleVolume;
   }
