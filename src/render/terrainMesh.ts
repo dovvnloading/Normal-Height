@@ -81,8 +81,23 @@ export function createTerrainSampler(
   // Sobel derivatives reject single-diagonal triangle artifacts while
   // preserving genuine source-height gradients. One source texel of support,
   // with a continuous bilinear reconstruction between source samples.
+  // In-range at(x, y) is exactly height[y * n + x], so interior texels read the
+  // array directly with the same arithmetic; only the border extrapolates.
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
     const i = y * n + x;
+    if (x > 0 && y > 0 && x < n - 1 && y < n - 1) {
+      gradientX[i] = (
+        height[i - n + 1] - height[i - n - 1] +
+        2 * (height[i + 1] - height[i - 1]) +
+        height[i + n + 1] - height[i + n - 1]
+      ) / 8;
+      gradientY[i] = (
+        height[i + n - 1] - height[i - n - 1] +
+        2 * (height[i + n] - height[i - n]) +
+        height[i + n + 1] - height[i - n + 1]
+      ) / 8;
+      continue;
+    }
     gradientX[i] = (
       at(x + 1, y - 1) - at(x - 1, y - 1) +
       2 * (at(x + 1, y) - at(x - 1, y)) +
@@ -95,47 +110,64 @@ export function createTerrainSampler(
     ) / 8;
   }
 
-  const coordinates = (u: number, v: number) => {
-    const x = clamp(u) * (n - 1), y = clamp(v) * (n - 1);
+  // Mesh builds call these once per vertex, so they avoid per-call allocation.
+  // Cells whose 4×4 stencil lies inside the source read it directly; at() is
+  // only needed (and gives identical values elsewhere) for border cells.
+  const last = n - 1;
+  const sampleHeight = (u: number, v: number): number => {
+    const x = clamp(u) * last, y = clamp(v) * last;
     const ix = Math.min(n - 2, Math.floor(x));
     const iy = Math.min(n - 2, Math.floor(y));
-    return { ix, iy, tx: x - ix, ty: y - iy };
-  };
-  const sampleHeight = (u: number, v: number): number => {
-    const { ix, iy, tx, ty } = coordinates(u, v);
-    const row0 = monotoneCubic(
-      at(ix - 1, iy - 1), at(ix, iy - 1),
-      at(ix + 1, iy - 1), at(ix + 2, iy - 1), tx,
-    );
-    const row1 = monotoneCubic(
-      at(ix - 1, iy), at(ix, iy),
-      at(ix + 1, iy), at(ix + 2, iy), tx,
-    );
-    const row2 = monotoneCubic(
-      at(ix - 1, iy + 1), at(ix, iy + 1),
-      at(ix + 1, iy + 1), at(ix + 2, iy + 1), tx,
-    );
-    const row3 = monotoneCubic(
-      at(ix - 1, iy + 2), at(ix, iy + 2),
-      at(ix + 1, iy + 2), at(ix + 2, iy + 2), tx,
-    );
+    const tx = x - ix, ty = y - iy;
+    let row0: number, row1: number, row2: number, row3: number;
+    if (ix >= 1 && iy >= 1 && ix + 2 <= last && iy + 2 <= last) {
+      let i = (iy - 1) * n + ix - 1;
+      row0 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+      i += n;
+      row1 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+      i += n;
+      row2 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+      i += n;
+      row3 = monotoneCubic(height[i], height[i + 1], height[i + 2], height[i + 3], tx);
+    } else {
+      row0 = monotoneCubic(
+        at(ix - 1, iy - 1), at(ix, iy - 1),
+        at(ix + 1, iy - 1), at(ix + 2, iy - 1), tx,
+      );
+      row1 = monotoneCubic(
+        at(ix - 1, iy), at(ix, iy),
+        at(ix + 1, iy), at(ix + 2, iy), tx,
+      );
+      row2 = monotoneCubic(
+        at(ix - 1, iy + 1), at(ix, iy + 1),
+        at(ix + 1, iy + 1), at(ix + 2, iy + 1), tx,
+      );
+      row3 = monotoneCubic(
+        at(ix - 1, iy + 2), at(ix, iy + 2),
+        at(ix + 1, iy + 2), at(ix + 2, iy + 2), tx,
+      );
+    }
     const value = monotoneCubic(row0, row1, row2, row3, ty);
-    const a = inside(ix, iy), b = inside(ix + 1, iy);
-    const c = inside(ix, iy + 1), d = inside(ix + 1, iy + 1);
+    const k = iy * n + ix;
+    const a = height[k], b = height[k + 1];
+    const c = height[k + n], d = height[k + n + 1];
     return clamp(value, Math.min(a, b, c, d), Math.max(a, b, c, d));
-  };
-  const sampleGradient = (values: Float32Array, u: number, v: number) => {
-    const { ix, iy, tx, ty } = coordinates(u, v);
-    const i = iy * n + ix;
-    return values[i] * (1 - tx) * (1 - ty) +
-      values[i + 1] * tx * (1 - ty) +
-      values[i + n] * (1 - tx) * ty +
-      values[i + n + 1] * tx * ty;
   };
   const physicalGradient = (n - 1) * heightScale / worldSize;
   const normal = (u: number, v: number): readonly [number, number, number] => {
-    const gx = sampleGradient(gradientX, u, v) * physicalGradient;
-    const gz = sampleGradient(gradientY, u, v) * physicalGradient;
+    const x = clamp(u) * last, y = clamp(v) * last;
+    const ix = Math.min(n - 2, Math.floor(x));
+    const iy = Math.min(n - 2, Math.floor(y));
+    const tx = x - ix, ty = y - iy;
+    const i = iy * n + ix;
+    const gx = (gradientX[i] * (1 - tx) * (1 - ty) +
+      gradientX[i + 1] * tx * (1 - ty) +
+      gradientX[i + n] * (1 - tx) * ty +
+      gradientX[i + n + 1] * tx * ty) * physicalGradient;
+    const gz = (gradientY[i] * (1 - tx) * (1 - ty) +
+      gradientY[i + 1] * tx * (1 - ty) +
+      gradientY[i + n] * (1 - tx) * ty +
+      gradientY[i + n + 1] * tx * ty) * physicalGradient;
     const inv = 1 / Math.hypot(gx, 1, gz);
     return [-gx * inv, inv, -gz * inv];
   };
@@ -267,6 +299,39 @@ export interface TerrainMeshGeometry extends THREE.BufferGeometry {
   };
 }
 
+/** Drive a resumable build to completion in one call. */
+export function runToCompletion<T>(steps: Iterator<unknown, T, undefined>): T {
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+export type BudgetedStep<T> = { done: true; value: T } | { done: false };
+
+/**
+ * Advance a resumable build until it finishes or this frame's CPU budget is
+ * spent. At least one step always runs, so a build can never stall forever.
+ */
+export function advanceWithinBudget<T>(
+  steps: Iterator<unknown, T, undefined>,
+  budgetMs: number,
+  now: () => number = () => performance.now(),
+): BudgetedStep<T> {
+  const started = now();
+  do {
+    const step = steps.next();
+    if (step.done) return { done: true, value: step.value };
+  } while (now() - started < budgetMs);
+  return { done: false };
+}
+
+/** Smoothstep weight of a stitched edge's correction into a tile interior. */
+const transitionFade = (distance: number, segments: number) => {
+  const influence = 1 - clamp(distance / Math.max(3, Math.round(segments / 24)));
+  return influence * influence * (3 - 2 * influence);
+};
+
 /**
  * Stitch a finer tile boundary to its coarser neighbour's exact edge *line*.
  * The correction fades into the first few interior rows, eliminating cracks
@@ -278,6 +343,21 @@ export function buildAdaptiveTerrainGeometry(
   heightScale: number,
   worldSize: number,
 ): THREE.BufferGeometry {
+  return runToCompletion(adaptiveTerrainGeometrySteps(sampler, plan, heightScale, worldSize));
+}
+
+/**
+ * The same build as buildAdaptiveTerrainGeometry, resumable after every
+ * tessellated row. A camera-driven LOD refresh is spread over several frames
+ * (see advanceWithinBudget) instead of blocking one frame for 50–120 ms at
+ * Ultra; the finished geometry is identical to a synchronous build.
+ */
+export function* adaptiveTerrainGeometrySteps(
+  sampler: TerrainSampler,
+  plan: TerrainMeshPlan,
+  heightScale: number,
+  worldSize: number,
+): Generator<void, THREE.BufferGeometry, undefined> {
   if (plan.segments.length !== TERRAIN_TILES * TERRAIN_TILES)
     throw new Error('Adaptive terrain plan must cover all tiles.');
   const positions = new Float32Array(plan.vertexCount * 3);
@@ -337,17 +417,11 @@ export function buildAdaptiveTerrainGeometry(
       normal[2] + (coarse[2] - actual[2]) * amount,
     ];
   };
-  for (let ty = 0; ty < TERRAIN_TILES; ty++) for (let tx = 0; tx < TERRAIN_TILES; tx++) {
-    const tile = ty * TERRAIN_TILES + tx;
-    const s = plan.segments[tile];
-    if (!Number.isInteger(s) || s < 2 || s > 256 || (s & (s - 1)))
-      throw new Error('Adaptive terrain segments must be powers of two within bounds.');
-    offsets[tile] = vertex;
-    const fade = (distance: number) => {
-      const influence = 1 - clamp(distance / Math.max(3, Math.round(s / 24)));
-      return influence * influence * (3 - 2 * influence);
-    };
-    for (let iy = 0; iy <= s; iy++) for (let ix = 0; ix <= s; ix++) {
+  // One row of one tile. Kept as a plain function (not generator code) so the
+  // per-vertex loop optimizes exactly as before; the generator only yields.
+  const writeRow = (tx: number, ty: number, s: number, iy: number) => {
+    const fade = (distance: number) => transitionFade(distance, s);
+    for (let ix = 0; ix <= s; ix++) {
       const u = (tx + ix / s) / TERRAIN_TILES;
       const v = (ty + iy / s) / TERRAIN_TILES;
       let h = sampler.height(u, v);
@@ -392,14 +466,28 @@ export function buildAdaptiveTerrainGeometry(
       uvs[j] = u; uvs[j + 1] = 1 - v;
       vertex++;
     }
+  };
+  const writeIndices = (start: number, s: number) => {
     const row = s + 1;
-    const start = offsets[tile];
     for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
       const a = start + y * row + x, b = a + 1;
       const c = a + row, d = c + 1;
       indices[triangle++] = a; indices[triangle++] = c; indices[triangle++] = b;
       indices[triangle++] = b; indices[triangle++] = c; indices[triangle++] = d;
     }
+  };
+  for (let ty = 0; ty < TERRAIN_TILES; ty++) for (let tx = 0; tx < TERRAIN_TILES; tx++) {
+    const tile = ty * TERRAIN_TILES + tx;
+    const s = plan.segments[tile];
+    if (!Number.isInteger(s) || s < 2 || s > 256 || (s & (s - 1)))
+      throw new Error('Adaptive terrain segments must be powers of two within bounds.');
+    offsets[tile] = vertex;
+    for (let iy = 0; iy <= s; iy++) {
+      writeRow(tx, ty, s, iy);
+      yield;
+    }
+    writeIndices(offsets[tile], s);
+    yield;
   }
   const perimeter: number[] = [];
   // Counter-clockwise in XZ when viewed from above; never duplicate corners.

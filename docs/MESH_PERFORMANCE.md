@@ -6,6 +6,7 @@ Issue: [#34](https://github.com/dovvnloading/Normal-Height/issues/34). The [adap
 
 - Mesh LOD is **event-driven**. No 300 ms plan recalculation takes place when the camera is motionless. Camera motion triggers a settling/debouncing interval and a bounded mesh plan refresh; auto-rotation is checked periodically. Rebuilds happen only for a changed plan.
 - Per-tile **LOD hysteresis** prevents oscillating between resolutions on small camera movements across power-of-two thresholds.
+- Camera-driven LOD rebuilds are **sliced across frames**: at most `MESH_SLICE_BUDGET_MS` (4 ms) of main-thread CPU per frame, with the previous mesh left on screen until the new one is complete, so a rebuild never blocks a frame. The sliced result is identical to a one-shot build (unit-tested). Rebuilds caused by a new field, tile scale or mesh-quality change remain synchronous. `data-mesh-build-ms` is the last build's total CPU time, `data-mesh-build-slice-ms` the largest share of it spent in a single frame, and `data-mesh-build-frames` how many frames it took.
 - A reproducible `?meshBenchmark=uniform512` reference uses 64 segments per tile (8 × 8), exactly **524,288 triangles**, with the *same interpolation, material shaders and physical normal generation* as `?meshBenchmark=adaptive`. Both start from the same camera transform. This isolates the cost of adaptive geometry topology, rather than pretending the reference is identical to the pre-PR #33 renderer.
 - Diagnostic canvas attributes track `data-mesh-plan-checks`, `data-mesh-build-count`, `data-mesh-dispose-count`, `data-mesh-buffer-bytes`, `data-pbr-request-count`, `data-pbr-upload-count`, `data-mesh-plan-ms`, `data-mesh-build-ms`, `data-mesh-render-cpu-ms`, `data-mesh-renderer-geometries`, `data-mesh-renderer-textures`, and benchmark camera position/target.
 - An **optional WebGL2 timer query** collects elapsed GPU draw-submission command time when `EXT_disjoint_timer_query_webgl2` is present. Queries are polled asynchronously; invalid/disjoint samples are excluded. If unsupported, the report says *unavailable*—never zero.
@@ -46,6 +47,14 @@ npm run test:mesh-perf
 
 The full matrix is **48 tests** (4 grid sizes × 3 mesh qualities × 2 materials × 2 topologies), so allow hardware-dependent time and disk space. Test both `MESH_BENCH_EXAGGERATION=1` and `MESH_BENCH_EXAGGERATION=1.8` in separate runs. Use `MESH_BENCH_VIDEO=1` for videos and inspect the still captures for ridge silhouettes, nearby gullies, terrain/meadow boundary and zoom jumps.
 
+Each test opens its own visible Chrome window for about 10–25 seconds, so the full matrix takes over the screen for roughly 11 minutes per exaggeration on a desktop GPU. Playwright clears `mesh-benchmark-results/` at the start of every run, so copy `mesh-benchmark-results/summary/` elsewhere before the next run. Summarise one or more summary directories (for example one per exaggeration) into Markdown with:
+
+```bash
+npm run report:mesh-perf -- path/to/summary-ex1 path/to/summary-ex1.8 > report.md
+```
+
+The report lists every case, compares adaptive against the uniform reference, and checks the gates below; it exits with status 2 if any case misses them.
+
 Hardware is required by default. If the browser reports SwiftShader/llvmpipe or the GPU renderer is hidden, the **hardware-mode test fails** to prevent falsely declaring real GPU validation. Record the device GPU name, driver, OS, browser build, display refresh rate and power mode before comparing.
 
 For a *non-hardware* CI smoke run that only verifies the recording pipeline:
@@ -70,11 +79,40 @@ For each hardware device, compare the **reference** and **adaptive** JSONs at id
 4. **Visual quality:** visually inspect silhouettes on hard mountain ridges, steep cliffs, river banks, tile seams, expanded-ground transition, and both normal/1.8× exaggeration. No new T-junction holes, normal seams, oscillation, popping, persistent serration or fake elevation changes.
 5. **Data fidelity:** worker-generated Float32 field stays identical while only camera/LOD/material view settings change. Source 128² cannot display real sub-sample detail regardless of tessellation.
 
-**Proposed initial targets (not yet certified on hardware):** p95 RAF interval under 33.3 ms during camera interactions on a supported desktop GPU at High, no recurrent >250 ms stalls after warmup, no leaks/redundant PBR uploads, and stable silhouettes. Hardware measurements should determine final per-device budgets. A per-test orbit p95 can be automatically gated by `MESH_BENCH_MAX_RAF_P95_MS=33.3`, but do not label the target achieved until a real run passes.
+**Targets** (checked by `npm run report:mesh-perf`): p95 RAF interval ≤ 33.3 ms in every camera phase, no main-thread task > 250 ms, exactly one live terrain mesh, CPU-side geometry buffers < 100 MB, and no PBR re-upload caused by camera motion. Met on the desktop dGPU below for every quality, field size, material and exaggeration; on that device frame pacing is also vsync-locked (p95 ≤ 16.9 ms) with no long tasks at all. A per-test orbit p95 can additionally be gated with `MESH_BENCH_MAX_RAF_P95_MS=33.3`.
+
+## Hardware results
+
+### Desktop dGPU: NVIDIA GeForce RTX 3060 Ti (2026-11-12)
+
+Windows 11 (26200), driver 610.88 (32.0.16.1088), Chrome stable via ANGLE/Direct3D 11, Intel i5-10400F, 1920×1080 at 60 Hz, 1440×1000 viewport at DPR 1. `EXT_disjoint_timer_query_webgl2` was available, so GPU draw times are real timer-query measurements. Full reports: [before](benchmarks/rtx-3060-ti-2026-11-12-before.md) (48 cases at 1×) and [after](benchmarks/rtx-3060-ti-2026-11-12-after.md) (96 cases at 1× and 1.8×).
+
+**Finding.** Before the fix, every camera-driven LOD rebuild ran in one piece on the main thread. At Ultra this took 70–126 ms, so a double-click focus (or the zoom that precedes it) dropped 3–7 frames: 512² and 1024² Ultra missed the 33.3 ms p95 target (66.6–116.7 ms), and 256² Ultra had a 121 ms stall. 14 of 48 cases dropped at least one frame. GPU time was never the problem.
+
+**Fix.** Rebuilds are sliced across frames (above). Separately, the height sampler reads interior source texels directly instead of through bounds-checked closures (identical values, unit-tested against the original implementation): sampling is ~2.7× faster, creating the sampler for a new field is ~8–12× faster (1024²: ~190 → ~16 ms), clay vertex colours are a constant fill instead of a per-vertex sRGB conversion, and the field's min/max is computed once per field rather than on every rebuild.
+
+| Case (1×, adaptive) | Worst frame, before → after (ms) | Worst main-thread task, before → after (ms) | Rebuild CPU, before → after (ms) | Worst single frame of the rebuild (ms) / frames |
+|---|--:|--:|--:|--:|
+| 256² Ultra clay | 116.7 → 16.8 | 121 → none | 117 → 40 | 8.2 / 9 |
+| 256² Ultra PBR | 66.6 → 16.8 | 73 → none | 71 → 35 | 7.2 / 8 |
+| 512² Ultra clay | 100.1 → 16.8 | 114 → none | 109 → 45 | 13.3 / 9 |
+| 512² Ultra PBR | 66.7 → 16.9 | 80 → none | 75 → 42 | 5.8 / 10 |
+| 1024² Ultra clay | 116.7 → 16.9 | 126 → none | 124 → 42 | 6.4 / 10 |
+| 1024² Ultra PBR | 116.6 → 16.8 | 118 → none | 116 → 41 | 9.0 / 9 |
+
+After the fix, across all 96 cases (Balanced/High/Ultra × 128²–1024² × clay/PBR × adaptive/uniform × 1×/1.8×):
+
+- **Frame pacing:** p95 RAF interval ≤ 16.9 ms in every phase of every case; no main-thread long task (> 50 ms) anywhere. The only frame ≥ 33 ms was a single 33.4 ms interval in the uniform reference (128² High clay, 1.8×, focus), which performs no rebuild.
+- **GPU draw time (p95):** adaptive 1.06–3.41 ms clay and 1.19–4.19 ms PBR, against 3.04–5.97 ms and 4.00–6.91 ms for the 524,288-triangle uniform reference: roughly half the GPU time at matched cameras.
+- **Memory/lifetime:** exactly one live terrain mesh after every run, at most 5 live geometries, CPU-side geometry buffers ≤ 12.0 MB adaptive (20.6 MB uniform reference), no PBR re-uploads from camera motion.
+- **Synchronous builds** (new field or quality change) are 2–3× faster, e.g. 1024² High 199 → 71 ms and the uniform reference 267 → 109 ms; they still block for that one frame.
+- **Visual check:** captured ridge, near-cliff and expanded-ground frames at 1.8× show continuous silhouettes and no cracks, seams or apron gaps. Geometry is bit-identical to the pre-fix build, so tessellation output is unchanged.
+
+Still outstanding for full sign-off: an **integrated GPU** run (this machine's i5-10400F has no iGPU) and, where possible, a representative **mobile** device, plus OS-profiler VRAM numbers.
 
 ## CI versus hardware coverage
 
 - Unit tests cover mesh plan hysteresis, source consistency, seam geometry, buffer accounting and percentile math.
 - **Routine push/PR CI is deliberately short**: unit tests and a single TypeScript/production build only. It does not install browsers, run Chromium, or run performance benchmarks.
 - Full Chromium, idle-camera stability, geometry disposal, PBR upload checks, and a software-rendered benchmark smoke pair are **opt-in only** via GitHub Actions → **Extended terrain QA (manual only)** → Run workflow. The longer workflow is not a production merge gate unless a reviewer explicitly requests it.
-- **Hardware sign-off requires an actual integrated and discrete GPU run**, attaching both matrix outputs and GPU/driver metadata to issue #34. No connector available in this conversation exposes such a physical GPU. Leave the issue open until that step is completed; successful CI is a software regression gate, not a hardware acceptance certificate.
+- **Hardware sign-off requires an actual integrated and discrete GPU run**, attaching both matrix outputs and GPU/driver metadata to issue #34. The discrete-GPU run is recorded above; leave the issue open until an integrated-GPU run is added. Successful CI is a software regression gate, not a hardware acceptance certificate.

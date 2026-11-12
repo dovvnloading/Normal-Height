@@ -3,10 +3,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, terrainColor } from './maps';
 import {
-  buildAdaptiveTerrainGeometry, createTerrainSampler, planTerrainMesh,
-  planUniform512Reference,
+  adaptiveTerrainGeometrySteps, advanceWithinBudget, createTerrainSampler, planTerrainMesh,
+  planUniform512Reference, runToCompletion,
 } from './terrainMesh';
-import type { TerrainMeshPlan, TerrainSampler } from './terrainMesh';
+import type { BudgetedStep, TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 import { resolveSurface } from '../materials/pbr';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
@@ -20,6 +20,28 @@ import { applyPackedPBRMaterial } from './pbrMaterial';
 import { geometryBufferBytes } from './meshDiagnostics';
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
+
+/**
+ * Main-thread CPU spent per frame on a camera-driven LOD rebuild. An Ultra
+ * rebuild costs 50–120 ms in one piece (3–7 dropped frames at 60 Hz); sliced,
+ * the old mesh stays on screen until the new one is complete.
+ */
+export const MESH_SLICE_BUDGET_MS = 4;
+
+interface BuiltTerrainMesh {
+  geometry: THREE.BufferGeometry;
+  /** The surface material the vertex colours were written for. */
+  colorMaterial: ViewSettings['material'];
+}
+
+interface PendingTerrainMesh {
+  plan: TerrainMeshPlan;
+  sampler: TerrainSampler;
+  steps: Generator<void, BuiltTerrainMesh, undefined>;
+  cpuMs: number;
+  maxSliceMs: number;
+  frames: number;
+}
 
 function bilinear(values: Float32Array, n: number, u: number, v: number) {
   const x = clamp(u) * (n - 1),
@@ -65,6 +87,12 @@ export class TerrainScene {
   private samplerScaleKey = '';
   private lodKey = '';
   private currentMeshPlan: TerrainMeshPlan | null = null;
+  // Camera-driven LOD refreshes are built a slice per frame, never in one stall.
+  private pendingMesh: PendingTerrainMesh | null = null;
+  // Source min/max are needed on every rebuild; scan each height array once.
+  private rangeSource: Float32Array | null = null;
+  private fieldMinimum = 0;
+  private fieldMaximum = 0;
   private lastLODCheckMs = 0;
   private lastCameraChangeMs = 0;
   // LOD is event-driven, not recomputed at 300 ms intervals while idle.
@@ -348,12 +376,9 @@ export class TerrainScene {
       this.lastLODCheckMs = lodNow;
       this.lodDirty = false;
       const plan = this.planCurrentMesh();
-      if (plan && plan.key !== this.lodKey) {
-        this.buildGeometry(plan);
-        this.renderer.shadowMap.needsUpdate = true;
-        this.needsRender = true;
-      }
+      if (plan) this.scheduleMesh(plan);
     }
+    if (this.pendingMesh) this.advancePendingMesh();
     // Enable the additional shader evaluation only when its physical wavelength
     // can influence screen pixels. This is a display-only uniform; orbit/zoom
     // never invalidates the erosion field or regenerates the PBR worker maps.
@@ -674,7 +699,9 @@ export class TerrainScene {
           this.host.clientHeight, this.renderer.getPixelRatio(),
           this.project.heightScale, this.project.worldSize,
           this.settings.exaggeration, this.settings.meshQuality,
-          this.currentMeshPlan,
+          // Hysteresis is anchored to the mesh being converged to, so small
+          // camera moves don't restart an in-progress sliced build.
+          this.pendingMesh?.plan ?? this.currentMeshPlan,
         );
     this.lastMeshPlanMs = performance.now() - started;
     this.meshPlanChecks++;
@@ -684,9 +711,91 @@ export class TerrainScene {
     return plan;
   }
 
-  private buildGeometry(requestedPlan?: TerrainMeshPlan) {
+  /** Start (or keep) the sliced build that brings the displayed mesh to `plan`. */
+  private scheduleMesh(plan: TerrainMeshPlan) {
+    if (plan.key === this.lodKey) {
+      // The camera came back to the displayed LOD; drop any obsolete build.
+      this.pendingMesh = null;
+      return;
+    }
+    if (this.pendingMesh?.plan.key === plan.key || !this.heightSampler || !this.project) return;
+    this.pendingMesh = {
+      plan,
+      sampler: this.heightSampler,
+      steps: this.terrainMeshSteps(
+        this.heightSampler, plan, this.project.heightScale, this.project.worldSize,
+      ),
+      cpuMs: 0,
+      maxSliceMs: 0,
+      frames: 0,
+    };
+  }
+
+  /** Spend at most one budgeted slice of this frame on the pending LOD mesh. */
+  private advancePendingMesh() {
+    const job = this.pendingMesh!;
+    // A new field or tile scale replaces the sampler; that path rebuilds
+    // synchronously, so a build for the old sampler is obsolete.
+    if (job.sampler !== this.heightSampler || !this.field || !this.project) {
+      this.pendingMesh = null;
+      return;
+    }
+    const started = performance.now();
+    let step: BudgetedStep<BuiltTerrainMesh>;
+    try {
+      step = advanceWithinBudget(job.steps, MESH_SLICE_BUDGET_MS);
+    } catch (error) {
+      this.pendingMesh = null;
+      throw error;
+    }
+    job.frames++;
+    if (!step.done) {
+      const elapsed = performance.now() - started;
+      job.cpuMs += elapsed;
+      job.maxSliceMs = Math.max(job.maxSliceMs, elapsed);
+      return;
+    }
+    this.pendingMesh = null;
+    this.installTerrain(job.plan, step.value);
+    const elapsed = performance.now() - started;
+    this.publishBuildStats(job.cpuMs + elapsed, Math.max(job.maxSliceMs, elapsed), job.frames);
+    this.renderer.shadowMap.needsUpdate = true;
+    this.needsRender = true;
+  }
+
+  /** Geometry, then vertex colours: resumable so LOD refreshes can be sliced. */
+  private *terrainMeshSteps(
+    sampler: TerrainSampler, plan: TerrainMeshPlan, heightScale: number, worldSize: number,
+  ): Generator<void, BuiltTerrainMesh, undefined> {
+    const geometry = yield* adaptiveTerrainGeometrySteps(sampler, plan, heightScale, worldSize);
+    const colorMaterial = this.settings.material;
+    yield* this.colorSteps(geometry);
+    return { geometry, colorMaterial };
+  }
+
+  /** Source min/max, computed once per height array rather than per LOD rebuild. */
+  private fieldRange(): { min: number; max: number } {
+    const height = this.field!.height;
+    if (this.rangeSource !== height) {
+      let min = Infinity,
+        max = -Infinity;
+      for (const value of height) {
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+      this.rangeSource = height;
+      this.fieldMinimum = min;
+      this.fieldMaximum = max;
+    }
+    return { min: this.fieldMinimum, max: this.fieldMaximum };
+  }
+
+  /** Synchronous rebuild for a new field, tile scale or mesh quality. */
+  private buildGeometry() {
     if (!this.field || !this.project) return;
     const started = performance.now();
+    // This supersedes any camera-driven LOD build still in progress.
+    this.pendingMesh = null;
     const { resolution: n, height } = this.field;
     const scaleKey = `${this.project.worldSize}/${this.project.heightScale}`;
     if (this.samplerSource !== height || this.samplerScaleKey !== scaleKey) {
@@ -698,16 +807,26 @@ export class TerrainScene {
       // Never carry hysteresis state across a new erosion field or tile scale.
       this.currentMeshPlan = null;
     }
-    const plan = requestedPlan ?? this.planCurrentMesh();
+    const plan = this.planCurrentMesh();
     if (!plan || !this.heightSampler) return;
-    const geometry = buildAdaptiveTerrainGeometry(
+    const built = runToCompletion(this.terrainMeshSteps(
       this.heightSampler, plan, this.project.heightScale, this.project.worldSize,
-    );
+    ));
+    this.lodDirty = false;
+    this.installTerrain(plan, built);
+    const elapsed = performance.now() - started;
+    this.publishBuildStats(elapsed, elapsed, 1);
+  }
+
+  /** Swap a finished mesh in, with its skirt, support and meadow boundary. */
+  private installTerrain(plan: TerrainMeshPlan, built: BuiltTerrainMesh) {
+    if (!this.field || !this.project) return;
+    const { geometry } = built;
+    const n = this.field.resolution;
     const positions = geometry.getAttribute('position');
     const scale = TERRAIN_SIZE * this.project.heightScale / this.project.worldSize;
-    this.minimumElevation = 0;
-    for (const value of height)
-      this.minimumElevation = Math.min(this.minimumElevation, value * scale);
+    // min(value * scale) === min(value) * scale for the positive tile scale.
+    this.minimumElevation = Math.min(0, this.fieldRange().min * scale);
     if (this.terrain) {
       this.scene.remove(this.terrain);
       this.terrain.geometry.dispose();
@@ -720,7 +839,6 @@ export class TerrainScene {
     this.scene.add(this.terrain);
     this.lodKey = plan.key;
     this.currentMeshPlan = plan;
-    this.lodDirty = false;
     this.meshBuilds++;
     const stats = this.renderer.domElement.dataset;
     stats.meshVertices = String(plan.vertexCount);
@@ -729,7 +847,9 @@ export class TerrainScene {
     stats.meshQuality = this.settings.meshQuality;
     stats.meshSourceResolution = String(n);
     this.spacingUniform.value = Math.max(0.001, TERRAIN_SIZE * 100 / this.project.worldSize);
-    this.updateColors();
+    // Colours were written while building; only a material switch since then
+    // (possible during a sliced build) needs them rewritten.
+    if (built.colorMaterial !== this.settings.material) this.updateColors();
     // A tessellation-only update must not rerun or reupload unchanged PBR maps.
     this.updatePBRTextures();
 
@@ -766,8 +886,6 @@ export class TerrainScene {
     this.groundExtension?.update(
       this.field, this.project, this.settings, this.minimumElevation, this.terrain,
     );
-    this.lastMeshBuildMs = performance.now() - started;
-    stats.meshBuildMs = this.lastMeshBuildMs.toFixed(2);
     stats.meshBuildCount = String(this.meshBuilds);
     stats.meshDisposeCount = String(this.meshDisposals);
     stats.meshBufferBytes = String(geometryBufferBytes(
@@ -776,26 +894,50 @@ export class TerrainScene {
     ));
   }
 
+  /**
+   * Total CPU of the last terrain build, the largest share of it spent in any
+   * one frame, and how many frames it was spread across.
+   */
+  private publishBuildStats(totalMs: number, maxSliceMs: number, frames: number) {
+    this.lastMeshBuildMs = totalMs;
+    const stats = this.renderer.domElement.dataset;
+    stats.meshBuildMs = this.lastMeshBuildMs.toFixed(2);
+    stats.meshBuildSliceMs = maxSliceMs.toFixed(2);
+    stats.meshBuildFrames = String(frames);
+  }
+
   private updateColors() {
     if (!this.terrain || !this.field || !this.project || this.settings.material === 'pbr') return;
-    const geometry = this.terrain.geometry;
-    const colors = geometry.getAttribute('color');
+    runToCompletion(this.colorSteps(this.terrain.geometry));
+    if (this.groundExtension) this.groundExtension.syncBoundary(this.terrain, this.settings.exaggeration);
+  }
+
+  /** Vertex colours for the current material, resumable every 1024 vertices. */
+  private *colorSteps(geometry: THREE.BufferGeometry): Generator<void, void, undefined> {
+    if (!this.field || !this.project || this.settings.material === 'pbr') return;
+    const material = this.settings.material;
+    const colors = geometry.getAttribute('color') as THREE.BufferAttribute;
     const positions = geometry.getAttribute('position');
     const normals = geometry.getAttribute('normal');
-    let min = Infinity,
-      max = -Infinity;
-    for (const value of this.field.height) {
-      min = Math.min(min, value);
-      max = Math.max(max, value);
-    }
+    const { min, max } = this.fieldRange();
     const heightUnits = (TERRAIN_SIZE * this.project.heightScale) / this.project.worldSize;
     const color = new THREE.Color();
+    if (material === 'clay') {
+      // One constant colour: convert it from sRGB once, not once per vertex.
+      color.setRGB(0.61, 0.64, 0.56, THREE.SRGBColorSpace);
+      const array = colors.array;
+      for (let i = 0; i < array.length; i += 3) {
+        array[i] = color.r;
+        array[i + 1] = color.g;
+        array[i + 2] = color.b;
+      }
+      colors.needsUpdate = true;
+      return;
+    }
     for (let i = 0; i < positions.count; i++) {
       const h = positions.getY(i) / heightUnits;
       const elevation = (h - min) / Math.max(0.0001, max - min);
-      if (this.settings.material === 'clay') {
-        color.setRGB(0.61, 0.64, 0.56, THREE.SRGBColorSpace);
-      } else if (this.settings.material === 'height') {
+      if (material === 'height') {
         const t = clamp(h);
         color.setRGB(t, t, t, THREE.SRGBColorSpace);
       } else {
@@ -811,9 +953,9 @@ export class TerrainScene {
         color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
       }
       colors.setXYZ(i, color.r, color.g, color.b);
+      if ((i & 1023) === 1023) yield;
     }
     colors.needsUpdate = true;
-    if (this.groundExtension) this.groundExtension.syncBoundary(this.terrain, this.settings.exaggeration);
   }
 
   /** Off-thread material synthesis is shared with 2D and never reruns erosion. */
@@ -999,6 +1141,7 @@ export class TerrainScene {
 
   dispose() {
     this.disposed = true;
+    this.pendingMesh = null;
     ++this.pbrGeneration;
     this.pbrRelease?.();
     this.pbrRelease = null;

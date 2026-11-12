@@ -4,8 +4,9 @@ import { createProject } from '../model/presets';
 import type { HeightField } from '../model/types';
 import { buildGroundApron, TERRAIN_SIZE } from './GroundExtension';
 import {
-  buildAdaptiveTerrainGeometry, createTerrainSampler,
-  planTerrainMesh, planUniform512Reference, TERRAIN_TILES,
+  adaptiveTerrainGeometrySteps, advanceWithinBudget, buildAdaptiveTerrainGeometry,
+  createTerrainSampler, planTerrainMesh, planUniform512Reference, runToCompletion,
+  TERRAIN_TILES,
 } from './terrainMesh';
 import type { TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 
@@ -162,5 +163,135 @@ describe('budgeted camera-adaptive terrain mesh', () => {
       expect(apronPositions.getZ(i)).toBeCloseTo(positions.getZ(j), 5);
     }
     apron.dispose(); geometry.dispose(); mesh.material.dispose();
+  });
+});
+
+/**
+ * The original, closure-based sampler (PR #33). The production sampler reads
+ * interior texels directly for speed; it must return exactly these values.
+ */
+function referenceSampler(height: Float32Array, n: number, heightScale: number, worldSize: number) {
+  const clamp01 = (value: number, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+  const slope = (left: number, right: number) =>
+    left * right <= 0 ? 0 : (2 * left * right) / (left + right);
+  const cubic = (p0: number, p1: number, p2: number, p3: number, t: number) => {
+    const t2 = t * t, t3 = t2 * t;
+    const m1 = slope(p1 - p0, p2 - p1), m2 = slope(p2 - p1, p3 - p2);
+    return (2 * t3 - 3 * t2 + 1) * p1 + (t3 - 2 * t2 + t) * m1 +
+      (-2 * t3 + 3 * t2) * p2 + (t3 - t2) * m2;
+  };
+  const inside = (x: number, y: number) => height[y * n + x];
+  const at = (x: number, y: number) => {
+    const xx = clamp01(x, 0, n - 1), yy = clamp01(y, 0, n - 1);
+    const base = inside(xx, yy);
+    const slopeX = xx === 0 ? inside(1, yy) - base : xx === n - 1 ? base - inside(n - 2, yy) : 0;
+    const slopeY = yy === 0 ? inside(xx, 1) - base : yy === n - 1 ? base - inside(xx, n - 2) : 0;
+    return base + (x - xx) * slopeX + (y - yy) * slopeY;
+  };
+  const gradientX = new Float32Array(n * n), gradientY = new Float32Array(n * n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    gradientX[y * n + x] = (at(x + 1, y - 1) - at(x - 1, y - 1) +
+      2 * (at(x + 1, y) - at(x - 1, y)) + at(x + 1, y + 1) - at(x - 1, y + 1)) / 8;
+    gradientY[y * n + x] = (at(x - 1, y + 1) - at(x - 1, y - 1) +
+      2 * (at(x, y + 1) - at(x, y - 1)) + at(x + 1, y + 1) - at(x + 1, y - 1)) / 8;
+  }
+  const coordinates = (u: number, v: number) => {
+    const x = clamp01(u) * (n - 1), y = clamp01(v) * (n - 1);
+    const ix = Math.min(n - 2, Math.floor(x)), iy = Math.min(n - 2, Math.floor(y));
+    return { ix, iy, tx: x - ix, ty: y - iy };
+  };
+  const heightAt = (u: number, v: number) => {
+    const { ix, iy, tx, ty } = coordinates(u, v);
+    const rows = [-1, 0, 1, 2].map((dy) => cubic(at(ix - 1, iy + dy), at(ix, iy + dy),
+      at(ix + 1, iy + dy), at(ix + 2, iy + dy), tx));
+    const value = cubic(rows[0], rows[1], rows[2], rows[3], ty);
+    const a = inside(ix, iy), b = inside(ix + 1, iy);
+    const c = inside(ix, iy + 1), d = inside(ix + 1, iy + 1);
+    return clamp01(value, Math.min(a, b, c, d), Math.max(a, b, c, d));
+  };
+  const gradient = (values: Float32Array, u: number, v: number) => {
+    const { ix, iy, tx, ty } = coordinates(u, v);
+    const i = iy * n + ix;
+    return values[i] * (1 - tx) * (1 - ty) + values[i + 1] * tx * (1 - ty) +
+      values[i + n] * (1 - tx) * ty + values[i + n + 1] * tx * ty;
+  };
+  const physical = (n - 1) * heightScale / worldSize;
+  const normalAt = (u: number, v: number) => {
+    const gx = gradient(gradientX, u, v) * physical, gz = gradient(gradientY, u, v) * physical;
+    const inv = 1 / Math.hypot(gx, 1, gz);
+    return [-gx * inv, inv, -gz * inv];
+  };
+  return { height: heightAt, normal: normalAt };
+}
+
+describe('fast sampler and frame-sliced LOD rebuilds', () => {
+  // Rough, non-smooth terrain so every monotone-cubic branch is exercised.
+  const rough = (n: number) => field(n, (u, v) =>
+    0.5 + 0.3 * Math.sin(u * 23.1) * Math.cos(v * 17.3) +
+    0.08 * Math.sin((u * 311 + v * 173) * 1.7) - (u > 0.6 && v < 0.3 ? 0.21 : 0));
+
+  it('returns exactly the original sampler values, including border extrapolation', () => {
+    for (const n of [4, 17, 64]) {
+      const map = rough(n);
+      const fast = createTerrainSampler(map.height, n, 1700, 5200);
+      const reference = referenceSampler(map.height, n, 1700, 5200);
+      const coordinates = [0, 1e-7, 0.5 / (n - 1), 1 / (n - 1), 0.0123, 0.25, 0.4999, 0.5,
+        0.73, 1 - 1.5 / (n - 1), 1 - 1 / (n - 1), 0.999999, 1, -0.2, 1.3];
+      for (const u of coordinates) for (const v of coordinates) {
+        // Equal as numbers (=== treats +0 and -0 alike), not merely close.
+        expect(fast.height(u, v) === reference.height(u, v)).toBe(true);
+        const a = fast.normal(u, v), b = reference.normal(u, v);
+        for (let axis = 0; axis < 3; axis++) expect(a[axis] === b[axis]).toBe(true);
+      }
+    }
+  });
+
+  it('builds the identical mesh whether run at once or a row at a time', () => {
+    const n = 65, map = rough(n);
+    const sampler = createTerrainSampler(map.height, n, 1500, 4800);
+    // Unequal neighbours exercise every stitched-edge transition.
+    const segments = new Array<number>(TERRAIN_TILES ** 2).fill(16);
+    segments[0] = 64; segments[9] = 128; segments[10] = 32; segments[63] = 8;
+    const plan = fixedPlan(segments);
+    const whole = buildAdaptiveTerrainGeometry(sampler, plan, 1500, 4800);
+    const steps = adaptiveTerrainGeometrySteps(sampler, plan, 1500, 4800);
+    let slices = 0, result = steps.next();
+    while (!result.done) { slices++; result = steps.next(); }
+    const sliced = result.value;
+    // One yield per tessellated row plus one per tile's index pass.
+    expect(slices).toBe(segments.reduce((total, s) => total + s + 2, 0));
+    for (const name of ['position', 'normal', 'uv', 'uv2', 'color'])
+      expect(sliced.getAttribute(name).array).toEqual(whole.getAttribute(name).array);
+    expect(sliced.index!.array).toEqual(whole.index!.array);
+    expect(sliced.userData.nhPerimeterIndices).toEqual(whole.userData.nhPerimeterIndices);
+    expect(sliced.userData.nhMeshPlanKey).toBe(plan.key);
+    expect(sliced.boundingSphere!.radius).toBe(whole.boundingSphere!.radius);
+    expect(runToCompletion(adaptiveTerrainGeometrySteps(sampler, plan, 1500, 4800))
+      .getAttribute('position').array).toEqual(whole.getAttribute('position').array);
+    whole.dispose(); sliced.dispose();
+  });
+
+  it('spends at most the frame budget per call yet always makes progress', () => {
+    let clock = 0, ran = 0;
+    function* work(count: number, costMs: number): Generator<void, string, undefined> {
+      for (let i = 0; i < count; i++) { clock += costMs; ran++; yield; }
+      return 'mesh';
+    }
+    const now = () => clock;
+    const steps = work(10, 1);
+    expect(advanceWithinBudget(steps, 4, now)).toEqual({ done: false });
+    expect(ran).toBe(4);
+    // A single step costlier than the budget still runs, one per call.
+    const slow = work(2, 25);
+    ran = 0;
+    expect(advanceWithinBudget(slow, 4, now)).toEqual({ done: false });
+    expect(ran).toBe(1);
+    expect(advanceWithinBudget(slow, 0, now)).toEqual({ done: false });
+    expect(ran).toBe(2);
+    expect(advanceWithinBudget(slow, 4, now)).toEqual({ done: true, value: 'mesh' });
+    let frames = 1, result = advanceWithinBudget(steps, 4, now);
+    while (!result.done) { frames++; result = advanceWithinBudget(steps, 4, now); }
+    expect(result.value).toBe('mesh');
+    expect(frames).toBe(2);
   });
 });

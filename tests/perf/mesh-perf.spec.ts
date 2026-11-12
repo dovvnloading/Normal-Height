@@ -109,6 +109,10 @@ async function telemetry(canvas: Locator) {
       meshDisposals: number('meshDisposeCount'),
       lastMeshPlanCpuMs: number('meshPlanMs'),
       lastMeshBuildCpuMs: number('meshBuildMs'),
+      // A camera-driven LOD rebuild is sliced across frames: the largest
+      // single-frame share is what can cause a visible hitch.
+      lastMeshBuildMaxSliceMs: number('meshBuildSliceMs'),
+      lastMeshBuildFrames: number('meshBuildFrames'),
       lastRenderSubmissionCpuMs: number('meshRenderCpuMs'),
       pbrRequests: number('pbrRequestCount'),
       pbrUploads: number('pbrUploadCount'),
