@@ -10,6 +10,7 @@ export const VIEW_STORAGE_KEY = 'normal-height.view.v1';
 export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   material: 'pbr',
   nearFieldDetail: true,
+  meshQuality: 'high',
   sunAzimuth: 315,
   sunElevation: 38,
   exaggeration: 1,
@@ -51,6 +52,9 @@ export function parseViewSettings(value: unknown): ViewSettings {
   const input = value as Record<string, unknown>;
   if (['pbr', 'alpine', 'clay', 'height'].includes(String(input.material))) {
     result.material = input.material as ViewSettings['material'];
+  }
+  if (['balanced', 'high', 'ultra'].includes(String(input.meshQuality))) {
+    result.meshQuality = input.meshQuality as ViewSettings['meshQuality'];
   }
   for (const [key, [minimum, maximum]] of Object.entries(ranges)) {
     const setting = input[key];

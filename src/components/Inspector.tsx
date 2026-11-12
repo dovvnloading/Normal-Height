@@ -382,6 +382,24 @@ export function Inspector({
               />
               <ParamControl
                 definition={{
+                  key: 'meshQuality',
+                  label: 'Terrain mesh fidelity',
+                  type: 'select',
+                  default: 'high',
+                  description: 'Adaptive preview-only geometry. High is the default; Ultra spends more polygons on visible cliffs and gullies without increasing the full-tile polygon count indefinitely. Never changes exported heightfields.',
+                  options: [
+                    { value: 'balanced', label: 'Balanced · faster' },
+                    { value: 'high', label: 'High · adaptive' },
+                    { value: 'ultra', label: 'Ultra · close-up' },
+                  ],
+                }}
+                value={settings.meshQuality}
+                onChange={v => onSettingsChange({
+                  ...settings, meshQuality: v as ViewSettings['meshQuality'],
+                })}
+              />
+              <ParamControl
+                definition={{
                   key: 'contours',
                   label: 'Contour lines',
                   type: 'toggle',

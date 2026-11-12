@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
-import { alpineMaterialVariation, sampleSlope, terrainColor } from './maps';
+import { alpineMaterialVariation, terrainColor } from './maps';
+import {
+  buildAdaptiveTerrainGeometry, createTerrainSampler, planTerrainMesh,
+} from './terrainMesh';
+import type { TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 import { resolveSurface } from '../materials/pbr';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
@@ -54,6 +58,12 @@ export class TerrainScene {
   private lastPBRSurface = '';
   private pbrRelease: (() => void) | null = null;
   private pbrGeneration = 0;
+  private heightSampler: TerrainSampler | null = null;
+  private samplerSource: Float32Array | null = null;
+  private samplerScaleKey = '';
+  private lodKey = '';
+  private lastLODCheckMs = 0;
+  private lastCameraChangeMs = 0;
   private readonly skirtMaterial = new THREE.MeshStandardMaterial({
     color: '#5b6054',
     roughness: 1,
@@ -255,6 +265,7 @@ export class TerrainScene {
     this.controls.update();
     this.controls.addEventListener('change', () => {
       this.needsRender = true;
+      this.lastCameraChangeMs = performance.now();
     });
     this.controls.addEventListener('start', () => {
       this.cameraAdjusted = true;
@@ -286,6 +297,7 @@ export class TerrainScene {
     // Keep the default and reset views fitted when the dock changes size, while
     // retaining an artist's orbit, pan, or zoom once they have adjusted it.
     if (this.terrain && !this.cameraAdjusted) this.fitCamera();
+    this.lastLODCheckMs = 0;
     this.needsRender = true;
   }
 
@@ -294,6 +306,20 @@ export class TerrainScene {
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
+    // Rebuild only after camera motion settles. A stable LOD signature and a
+    // strict vertex budget prevent per-frame allocations and zoom thrashing.
+    const lodNow = performance.now();
+    if (this.terrain && this.field && this.project && this.heightSampler &&
+        lodNow - this.lastCameraChangeMs > 220 &&
+        lodNow - this.lastLODCheckMs > 300) {
+      this.lastLODCheckMs = lodNow;
+      const plan = this.planCurrentMesh();
+      if (plan && plan.key !== this.lodKey) {
+        this.buildGeometry(plan);
+        this.renderer.shadowMap.needsUpdate = true;
+        this.needsRender = true;
+      }
+    }
     // Enable the additional shader evaluation only when its physical wavelength
     // can influence screen pixels. This is a display-only uniform; orbit/zoom
     // never invalidates the erosion field or regenerates the PBR worker maps.
@@ -346,7 +372,8 @@ export class TerrainScene {
     const geometryChanged =
       this.field !== field ||
       this.project?.worldSize !== project.worldSize ||
-      this.project?.heightScale !== project.heightScale;
+      this.project?.heightScale !== project.heightScale ||
+      this.settings.meshQuality !== settings.meshQuality;
     const paletteChanged = this.settings.material !== settings.material;
     const surfaceChanged = JSON.stringify(this.project?.surface ?? null) !==
       JSON.stringify(project.surface ?? null) || this.project?.seed !== project.seed;
@@ -550,32 +577,38 @@ export class TerrainScene {
     }
   }
 
-  private buildGeometry() {
+  /** The original heightfield remains authoritative for every LOD. */
+  private planCurrentMesh(): TerrainMeshPlan | null {
+    if (!this.heightSampler || !this.project) return null;
+    return planTerrainMesh(
+      this.heightSampler, this.camera,
+      this.host.clientHeight, this.renderer.getPixelRatio(),
+      this.project.heightScale, this.project.worldSize,
+      this.settings.exaggeration, this.settings.meshQuality,
+    );
+  }
+
+  private buildGeometry(requestedPlan?: TerrainMeshPlan) {
     if (!this.field || !this.project) return;
     const { resolution: n, height } = this.field;
-    const segments = Math.min(n - 1, 511);
-    const geometry = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, segments, segments);
-    geometry.rotateX(-Math.PI / 2);
+    const scaleKey = `${this.project.worldSize}/${this.project.heightScale}`;
+    if (this.samplerSource !== height || this.samplerScaleKey !== scaleKey) {
+      this.heightSampler = createTerrainSampler(
+        height, n, this.project.heightScale, this.project.worldSize,
+      );
+      this.samplerSource = height;
+      this.samplerScaleKey = scaleKey;
+    }
+    const plan = requestedPlan ?? this.planCurrentMesh();
+    if (!plan || !this.heightSampler) return;
+    const geometry = buildAdaptiveTerrainGeometry(
+      this.heightSampler, plan, this.project.heightScale, this.project.worldSize,
+    );
     const positions = geometry.getAttribute('position');
-    const scale = (TERRAIN_SIZE * this.project.heightScale) / this.project.worldSize;
+    const scale = TERRAIN_SIZE * this.project.heightScale / this.project.worldSize;
     this.minimumElevation = 0;
     for (const value of height)
       this.minimumElevation = Math.min(this.minimumElevation, value * scale);
-    for (let y = 0; y <= segments; y++)
-      for (let x = 0; x <= segments; x++) {
-        positions.setY(
-          y * (segments + 1) + x,
-          bilinear(height, n, x / segments, y / segments) * scale,
-        );
-      }
-    geometry.setAttribute(
-      'color',
-      new THREE.BufferAttribute(new Float32Array(positions.count * 3), 3),
-    );
-    geometry.computeVertexNormals();
-    // Required by material AO shaders in viewers that sample a second UV set.
-    geometry.setAttribute('uv2', geometry.getAttribute('uv').clone());
-    geometry.computeBoundingSphere();
     if (this.terrain) {
       this.scene.remove(this.terrain);
       this.terrain.geometry.dispose();
@@ -585,49 +618,37 @@ export class TerrainScene {
     this.terrain.castShadow = true;
     this.terrain.scale.y = this.settings.exaggeration;
     this.scene.add(this.terrain);
-    this.spacingUniform.value = Math.max(0.001, (TERRAIN_SIZE * 100) / this.project.worldSize);
+    this.lodKey = plan.key;
+    const stats = this.renderer.domElement.dataset;
+    stats.meshVertices = String(plan.vertexCount);
+    stats.meshTriangles = String(plan.triangleCount);
+    stats.meshMaxSegments = String(plan.maxSegments);
+    stats.meshQuality = this.settings.meshQuality;
+    stats.meshSourceResolution = String(n);
+    this.spacingUniform.value = Math.max(0.001, TERRAIN_SIZE * 100 / this.project.worldSize);
     this.updateColors();
+    // A tessellation-only update must not rerun or reupload unchanged PBR maps.
     this.updatePBRTextures();
 
-    const boundary: number[] = [];
-    for (let x = 0; x <= segments; x++) boundary.push(x);
-    for (let y = 1; y <= segments; y++) boundary.push(y * (segments + 1) + segments);
-    for (let x = segments - 1; x >= 0; x--) boundary.push(segments * (segments + 1) + x);
-    for (let y = segments - 1; y > 0; y--) boundary.push(y * (segments + 1));
-    const skirtVertices: number[] = [];
+    const boundary = geometry.userData.nhPerimeterIndices as number[];
+    const skirtVertices = new Float32Array(boundary.length * 18);
     const skirtBottom = this.minimumElevation - 0.002 / this.settings.exaggeration;
     for (let i = 0; i < boundary.length; i++) {
-      const a = boundary[i],
-        b = boundary[(i + 1) % boundary.length];
-      const ax = positions.getX(a),
-        ay = positions.getY(a),
-        az = positions.getZ(a);
-      const bx = positions.getX(b),
-        by = positions.getY(b),
-        bz = positions.getZ(b);
-      skirtVertices.push(
-        ax,
-        ay,
-        az,
-        ax,
-        skirtBottom,
-        az,
-        bx,
-        by,
-        bz,
-        bx,
-        by,
-        bz,
-        ax,
-        skirtBottom,
-        az,
-        bx,
-        skirtBottom,
-        bz,
-      );
+      const a = boundary[i], b = boundary[(i + 1) % boundary.length];
+      const ax = positions.getX(a), ay = positions.getY(a), az = positions.getZ(a);
+      const bx = positions.getX(b), by = positions.getY(b), bz = positions.getZ(b);
+      const k = i * 18;
+      skirtVertices.set([
+        ax, ay, az,
+        ax, skirtBottom, az,
+        bx, by, bz,
+        bx, by, bz,
+        ax, skirtBottom, az,
+        bx, skirtBottom, bz,
+      ], k);
     }
     const skirtGeometry = new THREE.BufferGeometry();
-    skirtGeometry.setAttribute('position', new THREE.Float32BufferAttribute(skirtVertices, 3));
+    skirtGeometry.setAttribute('position', new THREE.BufferAttribute(skirtVertices, 3));
     skirtGeometry.computeVertexNormals();
     if (this.skirt) {
       this.scene.remove(this.skirt);
@@ -639,7 +660,9 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
-    this.groundExtension?.update(this.field, this.project, this.settings, this.minimumElevation, this.terrain);
+    this.groundExtension?.update(
+      this.field, this.project, this.settings, this.minimumElevation, this.terrain,
+    );
   }
 
   private updateColors() {
@@ -648,7 +671,6 @@ export class TerrainScene {
     const colors = geometry.getAttribute('color');
     const positions = geometry.getAttribute('position');
     const normals = geometry.getAttribute('normal');
-    const n = this.field.resolution;
     let min = Infinity,
       max = -Infinity;
     for (const value of this.field.height) {
@@ -660,24 +682,16 @@ export class TerrainScene {
     for (let i = 0; i < positions.count; i++) {
       const h = positions.getY(i) / heightUnits;
       const elevation = (h - min) / Math.max(0.0001, max - min);
-      const px = Math.round((positions.getX(i) / TERRAIN_SIZE + 0.5) * (n - 1));
-      const py = Math.round((positions.getZ(i) / TERRAIN_SIZE + 0.5) * (n - 1));
       if (this.settings.material === 'clay') {
         color.setRGB(0.61, 0.64, 0.56, THREE.SRGBColorSpace);
       } else if (this.settings.material === 'height') {
         const t = clamp(h);
         color.setRGB(t, t, t, THREE.SRGBColorSpace);
       } else {
-        const physicalSlope = sampleSlope(
-          this.field,
-          Math.max(0, Math.min(n - 1, px)),
-          Math.max(0, Math.min(n - 1, py)),
-          this.project.worldSize,
-          this.project.heightScale,
-        );
+        // Full-source Sobel normals already include the physical slope.
         const rgb = terrainColor(
           elevation,
-          (physicalSlope.up + normals.getY(i)) * 0.5,
+          normals.getY(i),
           alpineMaterialVariation(
             positions.getX(i) / TERRAIN_SIZE + 0.5,
             positions.getZ(i) / TERRAIN_SIZE + 0.5,

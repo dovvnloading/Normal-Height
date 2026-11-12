@@ -31,11 +31,16 @@ export function buildGroundApron(
   exaggeration: number,
   flatY: number,
   extent: number,
+  terrain?: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null,
 ): THREE.BufferGeometry {
   // Match the 3D tile's tessellation exactly, eliminating border cracks on
   // high-frequency heightfields and at reduced working mesh resolutions.
+  const sourceIndices = terrain?.geometry.userData.nhPerimeterIndices as number[] | undefined;
+  const sourcePositions = terrain?.geometry.getAttribute('position');
   const segments = Math.max(1, Math.min(511, field.resolution - 1));
-  const count = segments * 4;
+  // The adaptive surface's outer edge can contain different numbers of
+  // segments per side. Use its exact indices, not an assumed square grid.
+  const count = sourceIndices?.length ?? segments * 4;
   // Extra near-edge rings stop high-frequency erosion from stretching into
   // visible radial grooves. Each ring is shared by its neighboring triangles.
   const levels = [0, 0.035, 0.075, 0.14, 0.24, 0.38, 0.55, 0.75, 1];
@@ -50,13 +55,22 @@ export function buildGroundApron(
   // samples, rather than smoothing each side independently, prevents creases
   // that shoot radially outward from the tile's four corners.
   const edge = Array.from({ length: count }, (_, i) => {
+    if (sourceIndices && sourcePositions) {
+      const source = sourceIndices[i];
+      return {
+        x: sourcePositions.getX(source),
+        z: sourcePositions.getZ(source),
+        height: sourcePositions.getY(source) /
+          (TERRAIN_SIZE * project.heightScale / project.worldSize),
+      };
+    }
     const side = Math.floor(i / segments);
-    const s = (i % segments) / segments;
+    const fraction = (i % segments) / segments;
     let x = 0, z = 0;
-    if (side === 0) { x = -HALF + s * TERRAIN_SIZE; z = -HALF; }
-    if (side === 1) { x = HALF; z = -HALF + s * TERRAIN_SIZE; }
-    if (side === 2) { x = HALF - s * TERRAIN_SIZE; z = HALF; }
-    if (side === 3) { x = -HALF; z = HALF - s * TERRAIN_SIZE; }
+    if (side === 0) { x = -HALF + fraction * TERRAIN_SIZE; z = -HALF; }
+    if (side === 1) { x = HALF; z = -HALF + fraction * TERRAIN_SIZE; }
+    if (side === 2) { x = HALF - fraction * TERRAIN_SIZE; z = HALF; }
+    if (side === 3) { x = -HALF; z = HALF - fraction * TERRAIN_SIZE; }
     return { x, z, height: bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5) };
   });
   const offsets: Array<[number, number]> = [
@@ -191,6 +205,7 @@ export class GroundExtension {
   private meadow: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
   private apron: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null = null;
   private geometryKey = '';
+  private lastTerrainGeometry: THREE.BufferGeometry | null = null;
 
   constructor(private readonly scene: THREE.Scene, renderer: THREE.WebGLRenderer) {
     this.texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
@@ -233,9 +248,11 @@ export class GroundExtension {
     // A new field object requires a fresh conforming border even if its
     // resolution and parameter values are unchanged.
     const currentField = this.lastField;
-    if (key !== this.geometryKey || field !== currentField) {
+    if (key !== this.geometryKey || field !== currentField ||
+        (terrain?.geometry ?? null) !== this.lastTerrainGeometry) {
       this.geometryKey = key;
       this.lastField = field;
+      this.lastTerrainGeometry = terrain?.geometry ?? null;
       this.meadow?.geometry.dispose();
       const geometry = meadowGeometry(horizonExtent, !!field);
       if (!this.meadow) {
@@ -252,7 +269,7 @@ export class GroundExtension {
       }
       if (field && project) {
         this.apron = new THREE.Mesh(
-          buildGroundApron(field, project, settings.exaggeration, base, horizonExtent),
+          buildGroundApron(field, project, settings.exaggeration, base, horizonExtent, terrain),
           this.apronMaterial,
         );
         this.apron.name = 'Terrain to meadow transition';
@@ -261,7 +278,7 @@ export class GroundExtension {
       }
     } else if (this.apron && base !== this.lastBase && field && project) {
       this.apron.geometry.dispose();
-      this.apron.geometry = buildGroundApron(field, project, settings.exaggeration, base, horizonExtent);
+      this.apron.geometry = buildGroundApron(field, project, settings.exaggeration, base, horizonExtent, terrain);
     }
     this.lastBase = base;
     if (this.meadow) {
@@ -289,12 +306,13 @@ export class GroundExtension {
     const edgeCount = destination.userData.edgeVertexCount as number;
     const levels = destination.userData.edgeLevels as number[];
     if (!edgeCount || !levels) return;
-    const segments = edgeCount / 4;
     const sourcePositions = terrain.geometry.getAttribute('position');
     const sourceNormals = terrain.geometry.getAttribute('normal');
     const sourceColors = terrain.geometry.getAttribute('color');
+    const sourceIndices = terrain.geometry.userData.nhPerimeterIndices as number[] | undefined;
+    const segments = edgeCount / 4;
     const sourceSegments = Math.round(Math.sqrt(sourcePositions.count)) - 1;
-    if (sourceSegments !== segments) return;
+    if (sourceIndices ? sourceIndices.length !== edgeCount : sourceSegments !== segments) return;
     const edgeColors = destination.getAttribute('nhEdgeAlbedo');
     const normalColors = destination.getAttribute('normal');
     const originalNormals = destination.getAttribute('nhOriginalNormal');
@@ -306,15 +324,19 @@ export class GroundExtension {
     const boundaryNormal = new THREE.Vector3();
     const computedNormal = new THREE.Vector3();
     for (let i = 0; i < edgeCount; i++) {
-      const side = Math.floor(i / segments);
-      const step = i % segments;
-      const ix = side === 1 ? segments : side === 3 ? 0
-        : side === 2 ? segments - step : step;
-      const iy = side === 0 ? 0 : side === 2 ? segments
-        : side === 3 ? segments - step : step;
-      const sourceIndex = iy * (segments + 1) + ix;
-      const textureX = Math.round((ix / segments) * (size - 1));
-      const textureY = Math.round((iy / segments) * (size - 1));
+      let sourceIndex: number;
+      if (sourceIndices) sourceIndex = sourceIndices[i];
+      else {
+        const side = Math.floor(i / segments);
+        const step = i % segments;
+        const ix = side === 1 ? segments : side === 3 ? 0
+          : side === 2 ? segments - step : step;
+        const iy = side === 0 ? 0 : side === 2 ? segments
+          : side === 3 ? segments - step : step;
+        sourceIndex = iy * (segments + 1) + ix;
+      }
+      const textureX = Math.round((sourcePositions.getX(sourceIndex) / TERRAIN_SIZE + 0.5) * (size - 1));
+      const textureY = Math.round((sourcePositions.getZ(sourceIndex) / TERRAIN_SIZE + 0.5) * (size - 1));
       const offset = (textureY * size + textureX) * 4;
       if (pixels && size > 1 && offset >= 0 && offset + 2 < pixels.length) {
         sample.setRGB(pixels[offset] / 255, pixels[offset + 1] / 255,

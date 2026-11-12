@@ -638,7 +638,16 @@ export function TerrainViewport({
 
   const change = (patch: Partial<ViewSettings>) => onSettingsChange({ ...settings, ...patch });
   const progressPercent = Math.max(0, Math.min(100, progress <= 1 ? progress * 100 : progress));
-  const meshResolution = field ? Math.min(512, field.resolution) : 0;
+  const [meshTriangles, setMeshTriangles] = useState(0);
+  useEffect(() => {
+    const canvas = hostRef.current?.querySelector('canvas');
+    if (!canvas) return;
+    const refresh = () => setMeshTriangles(Number(canvas.dataset.meshTriangles) || 0);
+    refresh();
+    const observer = new MutationObserver(refresh);
+    observer.observe(canvas, { attributes: true, attributeFilter: ['data-mesh-triangles'] });
+    return () => observer.disconnect();
+  }, [field, attempt]);
 
   return (
     <section className="nh-viewport" aria-label="Terrain preview">
@@ -765,9 +774,11 @@ export function TerrainViewport({
               </div>
               <div
                 className="nh-scene-resolution"
-                title="Actual mesh resolution; the heightfield retains its full simulation resolution"
+                title="Adaptive triangle count from the current camera view. Original heightfields and exports remain at their full source resolution."
               >
-                {meshResolution}² mesh
+                {meshTriangles > 0
+                  ? `${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(meshTriangles)} tris · ${settings.meshQuality}`
+                  : 'Adaptive mesh'}
               </div>
             </>
           )}

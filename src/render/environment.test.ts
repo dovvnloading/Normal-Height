@@ -5,7 +5,7 @@ import { skyLighting } from './Atmosphere';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 
 const settings: ViewSettings = {
-  material: 'pbr', nearFieldDetail: true, sunAzimuth: 315, sunElevation: 38, exaggeration: 1,
+  material: 'pbr', nearFieldDetail: true, meshQuality: 'high', sunAzimuth: 315, sunElevation: 38, exaggeration: 1,
   contours: false, wireframe: false, autoRotate: false,
   skyEnabled: true, skyTurbidity: 4.5, skyRayleigh: 2.2, skyExposure: 1,
   cloudCoverage: 0.42, cloudSpeed: 0.35, cloudShadowStrength: 0.72,
