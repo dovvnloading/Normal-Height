@@ -370,6 +370,11 @@ export class GroundExtension {
     normalColors.needsUpdate = true;
   }
 
+  /** Read-only geometry inspection for budget reporting; never retain it. */
+  get apronGeometry(): THREE.BufferGeometry | null {
+    return this.apron?.geometry ?? null;
+  }
+
   /** Shared color map lets the tile's perimeter seamlessly fade to meadow. */
   get grassMap(): THREE.Texture {
     return this.texture;
