@@ -100,6 +100,7 @@ export function landscapeErosion(
   settings: ErosionSettings,
   mask?: Float32Array,
   progress?: (fraction: number) => void,
+  includeMobileLayer = false,
 ): ErosionResult {
   if (!Number.isInteger(n) || n < 2 || n > 2048 ||
       input.length !== n * n || (mask && mask.length !== n * n))
@@ -486,9 +487,30 @@ export function landscapeErosion(
       deposited -= difference;
     }
   }
+  let mobileSediment: Float32Array | undefined;
+  if (includeMobileLayer && previous) {
+    const { resolution: m, alluvium } = previous;
+    mobileSediment = new Float32Array(count);
+    let coarseMass = 0, fineMass = 0;
+    for (const value of alluvium) coarseMass += value;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = y * n + x;
+      const cover = Math.max(0, sample(alluvium, m,
+        x * (m - 1) / (n - 1), y * (m - 1) / (n - 1)));
+      mobileSediment[i] = cover;
+      fineMass += cover;
+    }
+    // Preserve the physical amount of mobile material when the hybrid
+    // stage resamples a lower-resolution river simulation.
+    if (fineMass > 0) {
+      const factor = (coarseMass / (m * m)) / (fineMass / count);
+      for (let i = 0; i < count; i++) mobileSediment[i] *= factor;
+    }
+  }
   progress?.(1);
   return {
     height: result, flow, wear, deposition, eroded, deposited,
+    mobileSediment,
     // Legacy summary remains expressed as output-grid sample-height units.
     // This physical budget is independently measured at simulation resolution;
     // it is not inferred from the recomposed output heightmap.
