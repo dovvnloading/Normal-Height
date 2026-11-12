@@ -265,6 +265,27 @@ export function buildAdaptiveTerrainGeometry(
       : sampler.height(p0, fixed / TERRAIN_TILES) * (1 - f) +
         sampler.height(p1, fixed / TERRAIN_TILES) * f;
   };
+  const lockedNormal = (u: number, v: number, lowSegments: number,
+    origin: number, fixed: number, vertical: boolean): readonly [number, number, number] => {
+    const t = clamp((vertical ? v : u) * TERRAIN_TILES - origin);
+    const step = Math.min(lowSegments - 1, Math.floor(t * lowSegments));
+    const f = t * lowSegments - step;
+    const p0 = (origin + step / lowSegments) / TERRAIN_TILES;
+    const p1 = (origin + (step + 1) / lowSegments) / TERRAIN_TILES;
+    const a = vertical
+      ? sampler.normal(fixed / TERRAIN_TILES, p0)
+      : sampler.normal(p0, fixed / TERRAIN_TILES);
+    const b = vertical
+      ? sampler.normal(fixed / TERRAIN_TILES, p1)
+      : sampler.normal(p1, fixed / TERRAIN_TILES);
+    // Deliberately *not* normalized: GPU interpolation must exactly match the
+    // coarser tile's linearly interpolated vertex normals along the same edge.
+    return [
+      a[0] * (1 - f) + b[0] * f,
+      a[1] * (1 - f) + b[1] * f,
+      a[2] * (1 - f) + b[2] * f,
+    ];
+  };
   for (let ty = 0; ty < TERRAIN_TILES; ty++) for (let tx = 0; tx < TERRAIN_TILES; tx++) {
     const tile = ty * TERRAIN_TILES + tx;
     const s = plan.segments[tile];
@@ -279,34 +300,53 @@ export function buildAdaptiveTerrainGeometry(
       const u = (tx + ix / s) / TERRAIN_TILES;
       const v = (ty + iy / s) / TERRAIN_TILES;
       let h = sampler.height(u, v);
+      const surfaceNormal = sampler.normal(u, v);
+      let nx = surfaceNormal[0], ny = surfaceNormal[1], nz = surfaceNormal[2];
+      const applyNormalTransition = (
+        edgeU: number, edgeV: number, neighbourSegments: number,
+        origin: number, fixed: number, vertical: boolean, amount: number,
+      ) => {
+        const coarse = lockedNormal(edgeU, edgeV, neighbourSegments, origin, fixed, vertical);
+        const actual = sampler.normal(edgeU, edgeV);
+        nx += (coarse[0] - actual[0]) * amount;
+        ny += (coarse[1] - actual[1]) * amount;
+        nz += (coarse[2] - actual[2]) * amount;
+      };
       if (tx > 0 && tileAt(tx - 1, ty) < s && ix < Math.max(3, s / 24)) {
         const edgeU = tx / TERRAIN_TILES;
+        const amount = fade(ix);
         h += (lockedEdge(edgeU, v, tileAt(tx - 1, ty), ty, tx, true) -
-          sampler.height(edgeU, v)) * fade(ix);
+          sampler.height(edgeU, v)) * amount;
+        applyNormalTransition(edgeU, v, tileAt(tx - 1, ty), ty, tx, true, amount);
       }
       if (tx + 1 < TERRAIN_TILES && tileAt(tx + 1, ty) < s &&
           s - ix < Math.max(3, s / 24)) {
         const edgeU = (tx + 1) / TERRAIN_TILES;
+        const amount = fade(s - ix);
         h += (lockedEdge(edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true) -
-          sampler.height(edgeU, v)) * fade(s - ix);
+          sampler.height(edgeU, v)) * amount;
+        applyNormalTransition(edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true, amount);
       }
       if (ty > 0 && tileAt(tx, ty - 1) < s && iy < Math.max(3, s / 24)) {
         const edgeV = ty / TERRAIN_TILES;
+        const amount = fade(iy);
         h += (lockedEdge(u, edgeV, tileAt(tx, ty - 1), tx, ty, false) -
-          sampler.height(u, edgeV)) * fade(iy);
+          sampler.height(u, edgeV)) * amount;
+        applyNormalTransition(u, edgeV, tileAt(tx, ty - 1), tx, ty, false, amount);
       }
       if (ty + 1 < TERRAIN_TILES && tileAt(tx, ty + 1) < s &&
           s - iy < Math.max(3, s / 24)) {
         const edgeV = (ty + 1) / TERRAIN_TILES;
+        const amount = fade(s - iy);
         h += (lockedEdge(u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false) -
-          sampler.height(u, edgeV)) * fade(s - iy);
+          sampler.height(u, edgeV)) * amount;
+        applyNormalTransition(u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false, amount);
       }
       const i = vertex * 3, j = vertex * 2;
       positions[i] = (u - 0.5) * TERRAIN_SIZE;
       positions[i + 1] = h * heightFactor;
       positions[i + 2] = (v - 0.5) * TERRAIN_SIZE;
-      const normal = sampler.normal(u, v);
-      normals[i] = normal[0]; normals[i + 1] = normal[1]; normals[i + 2] = normal[2];
+      normals[i] = nx; normals[i + 1] = ny; normals[i + 2] = nz;
       uvs[j] = u; uvs[j + 1] = 1 - v;
       vertex++;
     }
