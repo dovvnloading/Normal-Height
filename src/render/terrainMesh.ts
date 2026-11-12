@@ -286,6 +286,19 @@ export function buildAdaptiveTerrainGeometry(
       a[2] * (1 - f) + b[2] * f,
     ];
   };
+  const transitionNormal = (
+    normal: readonly [number, number, number],
+    edgeU: number, edgeV: number, neighbourSegments: number,
+    origin: number, fixed: number, vertical: boolean, amount: number,
+  ): readonly [number, number, number] => {
+    const coarse = lockedNormal(edgeU, edgeV, neighbourSegments, origin, fixed, vertical);
+    const actual = sampler.normal(edgeU, edgeV);
+    return [
+      normal[0] + (coarse[0] - actual[0]) * amount,
+      normal[1] + (coarse[1] - actual[1]) * amount,
+      normal[2] + (coarse[2] - actual[2]) * amount,
+    ];
+  };
   for (let ty = 0; ty < TERRAIN_TILES; ty++) for (let tx = 0; tx < TERRAIN_TILES; tx++) {
     const tile = ty * TERRAIN_TILES + tx;
     const s = plan.segments[tile];
@@ -300,24 +313,13 @@ export function buildAdaptiveTerrainGeometry(
       const u = (tx + ix / s) / TERRAIN_TILES;
       const v = (ty + iy / s) / TERRAIN_TILES;
       let h = sampler.height(u, v);
-      const surfaceNormal = sampler.normal(u, v);
-      let nx = surfaceNormal[0], ny = surfaceNormal[1], nz = surfaceNormal[2];
-      const applyNormalTransition = (
-        edgeU: number, edgeV: number, neighbourSegments: number,
-        origin: number, fixed: number, vertical: boolean, amount: number,
-      ) => {
-        const coarse = lockedNormal(edgeU, edgeV, neighbourSegments, origin, fixed, vertical);
-        const actual = sampler.normal(edgeU, edgeV);
-        nx += (coarse[0] - actual[0]) * amount;
-        ny += (coarse[1] - actual[1]) * amount;
-        nz += (coarse[2] - actual[2]) * amount;
-      };
+      let shadingNormal = sampler.normal(u, v);
       if (tx > 0 && tileAt(tx - 1, ty) < s && ix < Math.max(3, s / 24)) {
         const edgeU = tx / TERRAIN_TILES;
         const amount = fade(ix);
         h += (lockedEdge(edgeU, v, tileAt(tx - 1, ty), ty, tx, true) -
           sampler.height(edgeU, v)) * amount;
-        applyNormalTransition(edgeU, v, tileAt(tx - 1, ty), ty, tx, true, amount);
+        shadingNormal = transitionNormal(shadingNormal, edgeU, v, tileAt(tx - 1, ty), ty, tx, true, amount);
       }
       if (tx + 1 < TERRAIN_TILES && tileAt(tx + 1, ty) < s &&
           s - ix < Math.max(3, s / 24)) {
@@ -325,14 +327,14 @@ export function buildAdaptiveTerrainGeometry(
         const amount = fade(s - ix);
         h += (lockedEdge(edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true) -
           sampler.height(edgeU, v)) * amount;
-        applyNormalTransition(edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true, amount);
+        shadingNormal = transitionNormal(shadingNormal, edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true, amount);
       }
       if (ty > 0 && tileAt(tx, ty - 1) < s && iy < Math.max(3, s / 24)) {
         const edgeV = ty / TERRAIN_TILES;
         const amount = fade(iy);
         h += (lockedEdge(u, edgeV, tileAt(tx, ty - 1), tx, ty, false) -
           sampler.height(u, edgeV)) * amount;
-        applyNormalTransition(u, edgeV, tileAt(tx, ty - 1), tx, ty, false, amount);
+        shadingNormal = transitionNormal(shadingNormal, u, edgeV, tileAt(tx, ty - 1), tx, ty, false, amount);
       }
       if (ty + 1 < TERRAIN_TILES && tileAt(tx, ty + 1) < s &&
           s - iy < Math.max(3, s / 24)) {
@@ -340,13 +342,15 @@ export function buildAdaptiveTerrainGeometry(
         const amount = fade(s - iy);
         h += (lockedEdge(u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false) -
           sampler.height(u, edgeV)) * amount;
-        applyNormalTransition(u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false, amount);
+        shadingNormal = transitionNormal(shadingNormal, u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false, amount);
       }
       const i = vertex * 3, j = vertex * 2;
       positions[i] = (u - 0.5) * TERRAIN_SIZE;
       positions[i + 1] = h * heightFactor;
       positions[i + 2] = (v - 0.5) * TERRAIN_SIZE;
-      normals[i] = nx; normals[i + 1] = ny; normals[i + 2] = nz;
+      normals[i] = shadingNormal[0];
+      normals[i + 1] = shadingNormal[1];
+      normals[i + 2] = shadingNormal[2];
       uvs[j] = u; uvs[j + 1] = 1 - v;
       vertex++;
     }
