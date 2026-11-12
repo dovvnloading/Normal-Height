@@ -106,12 +106,12 @@ describe('budgeted camera-adaptive terrain mesh', () => {
       const low1 = second + Math.min(k + 1, 16) * 17;
       const expected = positions.getY(low0) * (1 - f) + positions.getY(low1) * f;
       expect(positions.getY(high)).toBeCloseTo(expected, 5);
-      if (y % 4 === 0) {
-        const low = second + y / 4 * 17;
-        for (let axis = 0; axis < 3; axis++)
-          expect(normals.getComponent(high, axis)).toBeCloseTo(
-            normals.getComponent(low, axis), 6,
-          );
+      // Fine-edge normals must match the interpolation of coarse-edge
+      // normals even between shared vertices (no lighting seams).
+      for (let axis = 0; axis < 3; axis++) {
+        const expectedNormal = normals.getComponent(low0, axis) * (1 - f) +
+          normals.getComponent(low1, axis) * f;
+        expect(normals.getComponent(high, axis)).toBeCloseTo(expectedNormal, 5);
       }
     }
     expect(geometry.index!.count).toBe(fixedPlan(segments).triangleCount * 3);
