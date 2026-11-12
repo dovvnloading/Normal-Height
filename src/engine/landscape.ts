@@ -139,6 +139,7 @@ export function landscapeErosion(
   let previous: { resolution: number; height: Float32Array; original: Float32Array; alluvium: Float32Array } | null = null;
   let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
   const initialSoil = Math.max(0, settings.soilDepthMeters ?? 1.5) / heightScale;
+  const rockFactor = 1 - clamp(settings.bedrockResistance ?? 0.6);
   let latestFlow: Float32Array | null = null, latestResolution = 0;
   let completedCycles = 0;
 
@@ -220,7 +221,9 @@ export function landscapeErosion(
       const before = height[index];
       const loose = Math.min(alluvium[index], take);
       alluvium[index] -= loose;
-      bedrock[index] -= take - loose;
+      // Bedrock resists abrasion once its initial/mobile sediment cover is gone.
+      const rock = Math.min(take - loose, Math.max(0, bedrock[index] - floor)) * rockFactor;
+      bedrock[index] -= rock;
       height[index] = bedrock[index] + alluvium[index];
       const actual = Math.max(0, before - height[index]);
       stageEroded += actual;
