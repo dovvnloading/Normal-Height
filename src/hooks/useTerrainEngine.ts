@@ -23,6 +23,10 @@ export function useTerrainEngine(
   automatic: boolean,
 ) {
   const [result, setResult] = useState<EvaluationResult | null>(null);
+  // Preserve the physical parameters of the field currently on screen. Project
+  // edits can arrive before its replacement worker finishes (or after Cancel).
+  const [completedProject, setCompletedProject] = useState<TerrainProject | null>(null);
+  const [completedPreviewNodeId, setCompletedPreviewNodeId] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [stage, setStage] = useState('Preparing terrain');
@@ -58,6 +62,8 @@ export function useTerrainEngine(
         setStage(message.stage);
       } else if (message.type === 'result') {
         setResult(message.result);
+        setCompletedProject(snapshot);
+        setCompletedPreviewNodeId(preview);
         setCompletedSignature(key);
         setBusy(false);
         setProgress(1);
@@ -114,6 +120,8 @@ export function useTerrainEngine(
   }, []);
   return {
     result,
+    completedProject,
+    completedPreviewNodeId,
     busy,
     progress,
     stage,
