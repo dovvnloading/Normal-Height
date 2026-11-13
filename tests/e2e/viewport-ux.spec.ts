@@ -254,7 +254,8 @@ test.describe('terrain viewport UX', () => {
     await expect(first).not.toHaveAttribute('transform', initial!);
     const moved = await first.getAttribute('transform');
     expect(moved).toContain('translate(');
-    expect(Number(moved?.match(/translate\\(([-\d.]+)/)?.[1] ?? '0')).toBeGreaterThan(310);
+    const xAfter = Number(moved?.split('translate(')[1]?.split(' ')[0] ?? '0');
+    expect(xAfter).toBeGreaterThan(310);
   });
 
   test('stacks split panes on narrow screens and preserves the workspace controls', async ({ page }) => {
