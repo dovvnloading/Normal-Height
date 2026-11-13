@@ -254,7 +254,8 @@ export class TerrainScene {
     if (!this.field || !this.project || !this.terrain) return;
     const position = new THREE.Vector3(
       (point.u - 0.5) * TERRAIN_SIZE,
-      bilinear(this.field.height, this.field.resolution, point.u, point.v) *
+      (this.heightSampler?.height(point.u, point.v) ??
+        bilinear(this.field.height, this.field.resolution, point.u, point.v)) *
         TERRAIN_SIZE * this.project.heightScale / this.project.worldSize * this.settings.exaggeration,
       (point.v - 0.5) * TERRAIN_SIZE,
     );
