@@ -1291,7 +1291,7 @@ export function TerrainViewport({
                 <button
                   type="button"
                   aria-label="View terrain from above"
-                  title="Top view"
+                  title="Orthographic top-down view"
                   onClick={() => sceneRef.current?.topView()}
                 >
                   <Grid2X2 size={16} />
