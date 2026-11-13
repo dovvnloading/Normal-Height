@@ -184,6 +184,8 @@ function MapCanvas({
   wipe,
   overlayChannel,
   overlayOpacity,
+  cameraFocus,
+  cameraBearing,
 }: {
   field: HeightField | null;
   channel: MapChannel;
@@ -203,6 +205,8 @@ function MapCanvas({
   wipe: number;
   overlayChannel: MapChannel | null;
   overlayOpacity: number;
+  cameraFocus: TerrainPoint | null;
+  cameraBearing: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -644,10 +648,25 @@ function MapCanvas({
           }
         }}
       />
-      {(hoverPoint || inspectionPoints.length > 0) && (
+      {(hoverPoint || inspectionPoints.length > 0 || cameraFocus) && (
         <svg className="nh-inspection-overlay" aria-hidden="true"
           style={{ left: layerLeft, top: layerTop, width: layerSize, height: layerSize }}
           viewBox="0 0 1000 1000" preserveAspectRatio="none">
+          {cameraFocus && (
+            <g className="nh-map-camera-focus" transform={`translate(${cameraFocus.u * 1000}
+              ${cameraFocus.v * 1000})`}>
+              <title>3D camera orbit focus and viewing direction</title>
+              <g transform={`rotate(${-cameraBearing})`}>
+                <path d="M 0 10 V 36 M -5 29 L 0 36 L 5 29" stroke="#62adcd"
+                  strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                  fill="none" vectorEffect="non-scaling-stroke" />
+              </g>
+              <circle cx="0" cy="0" r="8" fill="#3c7187" stroke="#f5f7f0"
+                strokeWidth="3" vectorEffect="non-scaling-stroke" />
+              <text x="14" y="-14" fontSize="22" fontWeight="bold" fill="#ffffff"
+                stroke="#2a5265" strokeWidth="4" paintOrder="stroke">3D</text>
+            </g>
+          )}
           {inspectionPoints.length >= 2 && (
             <line x1={inspectionPoints[0].u * 1000} y1={inspectionPoints[0].v * 1000}
               x2={inspectionPoints[1].u * 1000} y2={inspectionPoints[1].v * 1000}
@@ -980,6 +999,7 @@ export function TerrainViewport({
     } catch { return 50; }
   });
   const [cameraHeading, setCameraHeading] = useState(0);
+  const [cameraFocus, setCameraFocus] = useState<TerrainPoint | null>(null);
   const [bookmarks, setBookmarks] = useState<CameraBookmark[]>(readCameraBookmarks);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [compactSplit, setCompactSplit] = useState(
@@ -1029,7 +1049,13 @@ export function TerrainViewport({
     if (!hostRef.current) return;
     try {
       sceneRef.current = new TerrainScene(hostRef.current, settingsRef.current, setSceneError,
-        theme, (next) => setCameraHeading((current) => Math.abs(next - current) >= 1 ? next : current));
+        theme, (next, focus) => {
+          setCameraHeading((current) => Math.abs(next - current) >= 1 ? next : current);
+          setCameraFocus((current) =>
+            (!current && !focus) || (current && focus &&
+              Math.abs(current.u - focus.u) < 0.001 &&
+              Math.abs(current.v - focus.v) < 0.001) ? current : focus);
+        });
       setSceneError(null);
     } catch (error) {
       setSceneError(
@@ -1409,7 +1435,9 @@ export function TerrainViewport({
                 ? baseline : null}
               compareKind={compareKind} wipe={wipe}
               overlayChannel={effectiveMode === 'compare' ? null : overlayChannel}
-              overlayOpacity={overlayOpacity} />
+              overlayOpacity={overlayOpacity}
+              cameraFocus={effectiveMode === 'split' ? cameraFocus : null}
+              cameraBearing={cameraHeading} />
             {effectiveMode !== 'compare' && <MapLegend field={field} channel={channel} project={project} />}
           </div>
         )}
