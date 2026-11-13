@@ -620,7 +620,7 @@ function MapCanvas({
               stroke="#ffe7a8" strokeWidth="2.6" vectorEffect="non-scaling-stroke" />
           )}
           {inspectionPoints.map((p, index) => (
-            <g key={index}>
+            <g key={index} className="nh-inspect-pin">
               <circle cx={p.u * 1000} cy={p.v * 1000} r="10" fill="#edbc6b"
                 stroke="#2e3b36" strokeWidth="3" vectorEffect="non-scaling-stroke" />
               <text x={p.u * 1000 + 16} y={p.v * 1000 - 16} fill="#fff"
@@ -1100,6 +1100,7 @@ export function TerrainViewport({
           <button
             type="button"
             className={effectiveMode === '3d' ? 'active' : ''}
+            aria-label="3D terrain"
             aria-pressed={effectiveMode === '3d'}
             disabled={!!sceneError}
             onClick={() => onViewModeChange('3d')}
@@ -1110,6 +1111,7 @@ export function TerrainViewport({
           <button
             type="button"
             className={effectiveMode === '2d' ? 'active' : ''}
+            aria-label="2D map"
             aria-pressed={effectiveMode === '2d'}
             onClick={() => onViewModeChange('2d')}
           >
@@ -1119,6 +1121,7 @@ export function TerrainViewport({
           <button
             type="button"
             className={effectiveMode === 'split' ? 'active' : ''}
+            aria-label="Split"
             aria-pressed={effectiveMode === 'split'}
             disabled={!!sceneError}
             title="Compare 3D terrain and 2D map"
@@ -1128,6 +1131,7 @@ export function TerrainViewport({
             <span>Split</span>
           </button>
           <button type="button" className={effectiveMode === 'compare' ? 'active' : ''}
+            aria-label="Compare"
             aria-pressed={effectiveMode === 'compare'} disabled={!baseline || !field}
             title={baseline ? 'Compare the pinned baseline with the current terrain' :
               'Pin a terrain baseline first'}
