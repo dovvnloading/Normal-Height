@@ -19,6 +19,9 @@ heightfield samples, rerun erosion, or change project exports.
 - In 2D, wheel zoom is anchored at the cursor, drag pans, Home fits, +/- zoom,
   and a two-finger gesture supports pinch. Your map zoom/pan is retained across
   2D/3D mode switches and stored separately from the terrain project.
+- In Split, a cyan **3D** focus marker shows the true orbit target on the 2D map;
+  its arrow indicates the camera's position relative to that target. Off-tile
+  camera targets are hidden rather than falsely clamped to a map edge.
 - The **Map overlays** menu composites one optional diagnostic field
   (slope/flow/wear/deposition/normals) at user-controlled opacity.
 
