@@ -98,15 +98,24 @@ export default function App() {
   const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | null>(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
-  // Crossing into a narrow viewport closes the temporary drawers. Users can
-  // still explicitly reopen either one without a resize fighting their choice.
+  // Sidebars become temporary overlays at different breakpoints. Close each
+  // only when crossing into its overlay layout; otherwise a panel opened on
+  // desktop can cover the viewport's toolbar after a browser resize.
   useEffect(() => {
-    const compact = window.matchMedia('(max-width: 760px)');
-    const onChange = (event: MediaQueryListEvent) => {
+    const libraryOverlay = window.matchMedia('(max-width: 1050px)');
+    const bothOverlays = window.matchMedia('(max-width: 760px)');
+    const hideLibrary = (event: MediaQueryListEvent) => {
+      if (event.matches) setLeftOpen(false);
+    };
+    const hideBoth = (event: MediaQueryListEvent) => {
       if (event.matches) { setLeftOpen(false); setRightOpen(false); }
     };
-    compact.addEventListener('change', onChange);
-    return () => compact.removeEventListener('change', onChange);
+    libraryOverlay.addEventListener('change', hideLibrary);
+    bothOverlays.addEventListener('change', hideBoth);
+    return () => {
+      libraryOverlay.removeEventListener('change', hideLibrary);
+      bothOverlays.removeEventListener('change', hideBoth);
+    };
   }, []);
   const [graphRatio, setGraphRatio] = useState(36);
   const [viewportFocus, setViewportFocus] = useState(false);
