@@ -201,10 +201,15 @@ export class TerrainScene {
     const field = this.field, project = this.project;
     const locate = (point: TerrainPoint, out: THREE.Object3D) => {
       if (!field || !project) return;
-      const y = bilinear(field.height, field.resolution, point.u, point.v) *
+      const surface = this.heightSampler?.height(point.u, point.v) ??
+        bilinear(field.height, field.resolution, point.u, point.v);
+      const y = surface *
         TERRAIN_SIZE * project.heightScale / project.worldSize * this.settings.exaggeration;
+      // Keep a real terrain-relative base height, then apply only a few
+      // screen pixels of clearance when the camera frame changes.
+      out.userData.nhBaseElevation = y;
       out.position.set(
-        (point.u - 0.5) * TERRAIN_SIZE, y + 0.03, (point.v - 0.5) * TERRAIN_SIZE,
+        (point.u - 0.5) * TERRAIN_SIZE, y, (point.v - 0.5) * TERRAIN_SIZE,
       );
     };
     this.hoverMarker.visible = !!field && !!hover;
@@ -227,7 +232,8 @@ export class TerrainScene {
         const v = pinned[0].v * (1 - t) + pinned[1].v * t;
         positions.push(new THREE.Vector3(
           (u - 0.5) * TERRAIN_SIZE,
-          bilinear(field.height, field.resolution, u, v) * scale + 0.024,
+          (this.heightSampler?.height(u, v) ??
+            bilinear(field.height, field.resolution, u, v)) * scale + 0.0005,
           (v - 0.5) * TERRAIN_SIZE,
         ));
       }
@@ -529,6 +535,8 @@ export class TerrainScene {
       const pixelRadius = i === 0 ? 4 : 5;
       const radius = THREE.MathUtils.clamp(worldPerPixel * pixelRadius, 0.0001, 0.06);
       marker.scale.setScalar(radius / baseRadius);
+      marker.position.y = Number(marker.userData.nhBaseElevation ?? marker.position.y) +
+        THREE.MathUtils.clamp(worldPerPixel * 2, 0.0001, 0.025);
     }
   }
 
