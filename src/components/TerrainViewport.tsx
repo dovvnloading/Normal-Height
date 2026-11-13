@@ -885,18 +885,26 @@ function MapLegend({
         empty: false,
       };
     }
+    if (channel === 'basecolor')
+      return { label: 'PBR base color · sRGB', start: '', end: '', empty: true };
+    if (channel === 'splat')
+      return { label: 'Weights · R rock · G soil · B vegetation · A snow',
+        start: '', end: '', empty: true };
+    if (channel === 'orm')
+      return { label: 'Packed ORM · R occlusion · G roughness · B metallic',
+        start: '', end: '', empty: true };
     if ([
-      'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
+      'roughness', 'ao', 'curvature',
       'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
     ].includes(channel)) {
-      return { label: channel === 'splat' ? 'R rock · G soil · B vegetation · A snow'
-        : channel === 'orm' ? 'R occlusion · G roughness · B metallic'
-          : CHANNELS.find(c => c.value === channel)?.label ?? 'PBR map',
+      return {
+        label: CHANNELS.find(c => c.value === channel)?.label ?? 'PBR map',
         start: channel === 'curvature' ? 'Concave' :
           MATERIAL_WEIGHT_INDEX[channel] !== undefined ? '0%' : '0',
         end: channel === 'curvature' ? 'Convex' :
           MATERIAL_WEIGHT_INDEX[channel] !== undefined ? '100%' : '1',
-        empty: false };
+        empty: false,
+      };
     }
     let max = 0;
     const diagnostic = field[channel as 'flow' | 'wear' | 'deposition'];
