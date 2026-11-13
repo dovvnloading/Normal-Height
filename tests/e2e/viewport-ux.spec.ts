@@ -52,7 +52,7 @@ test.describe('terrain viewport UX', () => {
     await page.mouse.click(left + mapSize * 0.70, top + mapSize * 0.68);
     await expect(page.locator('.nh-profile-chart')).toBeVisible();
     await expect(page.locator('.nh-measure-results')).toContainText('Distance');
-    await expect(page.locator('.nh-inspection-overlay g > circle')).toHaveCount(2);
+    await expect(page.locator('.nh-inspect-pin > circle')).toHaveCount(2);
     await page.getByRole('button', { name: 'Clear sample points' }).click();
     await expect(page.locator('.nh-profile-chart')).toHaveCount(0);
   });
@@ -74,7 +74,7 @@ test.describe('terrain viewport UX', () => {
     await page.getByRole('button', { name: 'Save current view' }).click();
     await expect(page.locator('.nh-bookmark-item')).toHaveCount(1);
     await page.getByRole('button', { name: 'Face E' }).click();
-    await page.locator('.nh-bookmark-item').getByRole('button', { name: 'View 1' }).click();
+    await page.locator('.nh-bookmark-item').getByRole('button', { name: 'View 1', exact: true }).click();
     await page.getByRole('button', { name: '2D map', exact: true }).click();
     await page.getByRole('button', { name: 'Map overlays' }).click();
     await page.getByRole('combobox', { name: 'Overlay channel' }).selectOption('flow');
