@@ -1308,8 +1308,6 @@ export class TerrainScene {
     this.controls.target.fromArray(state.target);
     this.orthographic = false;
     this.renderer.domElement.dataset.projection = 'perspective';
-    this.orthographic = false;
-    this.renderer.domElement.dataset.projection = 'perspective';
     this.cameraAdjusted = true;
     this.cameraView = 'perspective';
     this.controls.update();
@@ -1327,6 +1325,8 @@ export class TerrainScene {
       this.controls.target.y + delta.y,
       this.controls.target.z + Math.cos(radians) * radius,
     );
+    this.orthographic = false;
+    this.renderer.domElement.dataset.projection = 'perspective';
     this.cameraAdjusted = true;
     this.cameraView = 'perspective';
     this.controls.update();
