@@ -1080,7 +1080,10 @@ export function TerrainViewport({
   interactions.current = { tool, choosePoint };
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
-  const effectiveMode = sceneError ? '2d' : viewMode;
+  // A WebGL failure disables only modes that require 3D. Compare is an
+  // entirely 2D analysis mode and must remain usable on software-only devices.
+  const effectiveMode = sceneError && (viewMode === '3d' || viewMode === 'split')
+    ? '2d' : viewMode;
   useEffect(() => {
     // These contextual popovers belong to a specific viewport. Never leave a
     // hidden 3D menu open while switching to 2D/Compare and then resurrect it.
