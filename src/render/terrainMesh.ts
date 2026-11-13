@@ -295,7 +295,7 @@ export const MESH_VERTEX_BUDGET: Record<MeshQuality, number> = {
  */
 export function planTerrainMesh(
   sampler: TerrainSampler,
-  camera: THREE.PerspectiveCamera,
+  camera: THREE.PerspectiveCamera | THREE.OrthographicCamera,
   viewportHeight: number,
   pixelRatio: number,
   heightScale: number,
@@ -312,8 +312,14 @@ export function planTerrainMesh(
   const budget = MESH_VERTEX_BUDGET[quality];
   const targetPixelSize = quality === 'ultra' ? 2.1 :
     quality === 'balanced' ? 7 : 4.3;
-  const focal = 0.5 * Math.max(1, viewportHeight * pixelRatio) /
-    Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  // Orthographic top-down views have a uniform pixel-to-world ratio, unlike
+  // perspective views where projected tile size changes with depth.
+  const orthographic = camera instanceof THREE.OrthographicCamera;
+  const focal = orthographic
+    ? Math.max(1, viewportHeight * pixelRatio) /
+      Math.max(0.001, camera.top - camera.bottom)
+    : 0.5 * Math.max(1, viewportHeight * pixelRatio) /
+      Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   const tileWidth = TERRAIN_SIZE / TERRAIN_TILES;
   const terrainScale = TERRAIN_SIZE * heightScale / worldSize;
   const segments = new Array<number>(TERRAIN_TILES * TERRAIN_TILES).fill(base);
@@ -337,7 +343,7 @@ export function planTerrainMesh(
         Math.abs(projected.x) < 1.55 && Math.abs(projected.y) < 1.55);
     if (!visible) continue;
     const distance = Math.max(0.03, camera.position.distanceTo(point));
-    const tilePixels = (focal * tileWidth) / distance;
+    const tilePixels = orthographic ? focal * tileWidth : (focal * tileWidth) / distance;
     const ideal = tilePixels / targetPixelSize;
     let desired = base;
     while (desired < maximum && desired < ideal) desired *= 2;
