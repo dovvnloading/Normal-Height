@@ -38,6 +38,7 @@ import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
   MapChannel,
+  HeightField,
   NodeKind,
   ParamValue,
   TerrainGraph,
@@ -99,6 +100,11 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   const [graphRatio, setGraphRatio] = useState(36);
   const [viewportFocus, setViewportFocus] = useState(false);
+  const [baseline, setBaseline] = useState<{
+    field: HeightField;
+    project: TerrainProject;
+    label: string;
+  } | null>(null);
   const [toast, setToast] = useState(initial.message);
   // The previous session's autosave, until the user restores it or edits.
   const [lastSession, setLastSession] = useState(initial.lastSession);
@@ -707,6 +713,16 @@ export default function App() {
               onCancel={engine.cancel}
               focusMode={viewportFocus}
               onFocusModeChange={setViewportFocus}
+              baseline={baseline}
+              onCaptureBaseline={() => {
+                if (!engine.result || engine.stale || engine.busy) {
+                  notify('Build the current terrain before pinning a comparison baseline.');
+                  return;
+                }
+                setBaseline({ field: engine.result.field, project: structuredClone(project), label: previewLabel });
+                notify('Comparison baseline pinned. Change your terrain, then open Compare.');
+              }}
+              onClearBaseline={() => setBaseline(null)}
             />
             {previewNodeId && (
               <button className="return-output" onClick={() => setPreviewNodeId(undefined)}>
