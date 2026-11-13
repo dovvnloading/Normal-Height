@@ -258,6 +258,33 @@ test.describe('terrain viewport UX', () => {
     expect(xAfter).toBeGreaterThan(310);
   });
 
+
+  test('split stacks when visible work area is narrow despite a wider browser', async ({ page }) => {
+    await page.setViewportSize({ width: 1090, height: 880 });
+    await page.getByRole('button', { name: 'Split', exact: true }).click();
+    const available = await page.locator('.nh-viewport').evaluate(element =>
+      element.getBoundingClientRect().width);
+    expect(available).toBeLessThanOrEqual(660);
+    await expect(page.locator('.nh-mode-split')).toHaveCSS('flex-direction', 'column');
+    await expect(page.getByRole('separator', { name: 'Resize 3D and map views' }))
+      .toHaveAttribute('aria-orientation', 'horizontal');
+  });
+
+  test('comparison explains sampled cut/fill estimates and cursor elevation delta', async ({ page }) => {
+    await page.getByRole('button', { name: 'Pin comparison baseline' }).click();
+    await page.getByRole('button', { name: 'Compare', exact: true }).click();
+    await page.getByRole('button', { name: 'Elevation change' }).click();
+    const statistics = page.locator('.nh-difference-statistics');
+    await expect(statistics).toBeVisible({ timeout: 30_000 });
+    await expect(statistics).toContainText('Lowered');
+    await expect(statistics).toContainText('Raised');
+    await expect(page.locator('.nh-difference-legend')).toContainText('not the sediment budget');
+    const canvas = page.locator('.nh-map > canvas');
+    const rect = (await canvas.boundingBox())!;
+    await canvas.hover({ position: { x: rect.width / 2, y: rect.height / 2 } });
+    await expect(page.locator('.nh-compare-sample')).toContainText('Cursor Δ');
+  });
+
   test('stacks split panes on narrow screens and preserves the workspace controls', async ({ page }) => {
     await page.setViewportSize({ width: 420, height: 760 });
     await page.getByRole('button', { name: 'Split', exact: true }).click();
