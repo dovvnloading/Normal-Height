@@ -298,6 +298,29 @@ test.describe('terrain viewport UX', () => {
     await expect(page.getByRole('region', { name: 'Display settings' })).toHaveCount(0);
   });
 
+  test('before/after comparison reports a real delta after a different height-scale build', async ({ page }) => {
+    const viewport = page.locator('.nh-viewport');
+    const oldScale = Number(await viewport.getAttribute('data-displayed-height-scale'));
+    expect(oldScale).toBeGreaterThan(0);
+    await page.getByRole('button', { name: 'Pin comparison baseline' }).click();
+    await page.getByRole('checkbox', { name: 'Auto build' }).uncheck({ force: true });
+    await page.getByRole('button', { name: 'Scene', exact: true }).click();
+    const input = page.getByRole('spinbutton', { name: 'Terrain elevation scale' });
+    const nextScale = oldScale > 19000 ? oldScale - 300 : oldScale + 300;
+    await input.fill(String(nextScale));
+    await input.press('Enter');
+    await page.getByRole('button', { name: 'Build terrain', exact: true }).click();
+    await expect(viewport).toHaveAttribute('data-displayed-height-scale',
+      String(nextScale), { timeout: 90_000 });
+    await page.getByRole('button', { name: 'Compare', exact: true }).click();
+    await page.getByRole('button', { name: 'Elevation change' }).click();
+    const legend = page.locator('.nh-difference-legend');
+    await expect(legend).toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () =>
+      Number(await legend.getAttribute('data-peak-delta'))).toBeGreaterThan(0);
+    await expect(legend.locator('.nh-difference-statistics')).toContainText('m³');
+  });
+
   test('comparison explains sampled cut/fill estimates and cursor elevation delta', async ({ page }, testInfo) => {
     await page.getByRole('button', { name: 'Pin comparison baseline' }).click();
     await page.getByRole('button', { name: 'Compare', exact: true }).click();
