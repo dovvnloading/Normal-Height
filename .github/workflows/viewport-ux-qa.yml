@@ -1,0 +1,48 @@
+name: Viewport UX browser acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/components/TerrainViewport.*'
+      - 'src/render/TerrainScene.ts'
+      - 'src/render/compare.worker.ts'
+      - 'src/model/viewportUX*'
+      - 'src/App.tsx'
+      - 'tests/e2e/viewport-ux.spec.ts'
+      - '.github/workflows/viewport-ux-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: viewport-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  viewport:
+    name: Browser interaction and layout
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify viewport UX against bundled app
+        run: npx playwright test tests/e2e/viewport-ux.spec.ts --workers=1
+      - name: Save screenshots, traces and browser report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewport-ux-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
