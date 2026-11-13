@@ -98,6 +98,7 @@ export default function App() {
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   const [graphRatio, setGraphRatio] = useState(36);
+  const [viewportFocus, setViewportFocus] = useState(false);
   const [toast, setToast] = useState(initial.message);
   // The previous session's autosave, until the user restores it or edits.
   const [lastSession, setLastSession] = useState(initial.lastSession);
@@ -433,6 +434,11 @@ export default function App() {
     const listener = (event: KeyboardEvent) => {
       if (event.defaultPrevented || modal) return;
       const command = event.ctrlKey || event.metaKey;
+      if (command && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setModal('palette');
+        return;
+      }
       if (command && event.key.toLowerCase() === 's') {
         event.preventDefault();
         save();
@@ -458,26 +464,23 @@ export default function App() {
               ?.focus(),
           0,
         );
-      } else if (
-        event.key === 'Tab' &&
-        !event.shiftKey &&
-        (document.activeElement === document.body ||
-          (event.target instanceof HTMLElement && Boolean(event.target.closest('.react-flow'))))
-      ) {
+      } else if (event.key.toLowerCase() === 'f' && !command &&
+        event.target instanceof HTMLElement && event.target.closest('.nh-viewport')) {
         event.preventDefault();
-        setModal('palette');
+        setViewportFocus((v) => !v);
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
         event.preventDefault();
         remove();
       } else if (event.key === 'Escape') {
-        setSelectedId(null);
+        if (viewportFocus) setViewportFocus(false);
+        else setSelectedId(null);
       } else if (event.key === '?') {
         setModal('help');
       }
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [modal, undo, redo, duplicate, remove, save, selectedId]);
+  }, [modal, undo, redo, duplicate, remove, save, selectedId, viewportFocus]);
   const resizeGraph = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const handle = event.currentTarget;
@@ -498,7 +501,7 @@ export default function App() {
   const sedimentBudget = engine.result?.stats.sedimentBudget;
   return (
     <div
-      className={`app-shell ${!leftOpen ? 'library-collapsed' : ''} ${!rightOpen ? 'inspector-collapsed' : ''}`}
+      className={`app-shell ${!leftOpen ? 'library-collapsed' : ''} ${!rightOpen ? 'inspector-collapsed' : ''} ${viewportFocus ? 'viewport-focus' : ''}`}
     >
       <header className="app-header">
         <a
@@ -702,6 +705,8 @@ export default function App() {
               onChannelChange={setChannel}
               onSettingsChange={setSettings}
               onCancel={engine.cancel}
+              focusMode={viewportFocus}
+              onFocusModeChange={setViewportFocus}
             />
             {previewNodeId && (
               <button className="return-output" onClick={() => setPreviewNodeId(undefined)}>
