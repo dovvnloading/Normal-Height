@@ -137,12 +137,33 @@ export default function App() {
   const fileInput = useRef<HTMLInputElement>(null);
   const centerRef = useRef<HTMLElement>(null);
   const engine = useTerrainEngine(project, previewNodeId, automatic);
+  // Editor settings can change while the last valid Float32 field remains on
+  // screen. Keep its original physical extent, height scale and seed until a
+  // matching worker result arrives. Visual-only surface controls stay live.
+  const displayedProject = useMemo(() => {
+    const built = engine.result && engine.completedProject;
+    return built ? {
+      ...project,
+      worldSize: built.worldSize,
+      heightScale: built.heightScale,
+      seed: built.seed,
+    } : project;
+  }, [project, engine.result, engine.completedProject]);
   const selected = project.graph.nodes.find((n) => n.id === selectedId) ?? null;
   const selectedSpline = selected?.kind === 'spline' ? selected : null;
   const output = project.graph.nodes.find((n) => n.kind === 'output');
   const previewLabel =
     project.graph.nodes.find((n) => n.id === (previewNodeId ?? output?.id))?.label ??
     'Terrain output';
+  const lastBuiltPreviewLabel = useMemo(() => {
+    const built = engine.completedProject;
+    if (!built) return null;
+    const id = engine.completedPreviewNodeId ??
+      built.graph.nodes.find((node) => node.kind === 'output')?.id;
+    return built.graph.nodes.find((node) => node.id === id)?.label ?? 'Terrain output';
+  }, [engine.completedProject, engine.completedPreviewNodeId]);
+  const displayedPreviewLabel = engine.stale && engine.result && lastBuiltPreviewLabel
+    ? `Last built: ${lastBuiltPreviewLabel}` : previewLabel;
   const notify = useCallback((message: string) => setToast(message), []);
   useEffect(() => {
     const query = window.matchMedia?.('(prefers-color-scheme: dark)');
@@ -717,7 +738,7 @@ export default function App() {
               onSplinePath={changeSplinePath}
               theme={theme}
               field={engine.result?.field ?? null}
-              project={project}
+              project={displayedProject}
               viewMode={viewMode}
               channel={channel}
               settings={settings}
@@ -725,7 +746,7 @@ export default function App() {
               progress={engine.progress}
               stage={engine.stage}
               stale={engine.stale}
-              previewLabel={previewLabel}
+              previewLabel={displayedPreviewLabel}
               onViewModeChange={setViewMode}
               onChannelChange={setChannel}
               onSettingsChange={setSettings}
