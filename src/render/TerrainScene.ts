@@ -75,6 +75,8 @@ export class TerrainScene {
   readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(36, 1, 0.002, 40);
+  private readonly orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.002, 40);
+  private orthographic = false;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly sun: THREE.DirectionalLight;
@@ -185,7 +187,7 @@ export class TerrainScene {
       ((clientX - bounds.left) / bounds.width) * 2 - 1,
       1 - ((clientY - bounds.top) / bounds.height) * 2,
     );
-    this.raycaster.setFromCamera(this.rayPointer, this.camera);
+    this.raycaster.setFromCamera(this.rayPointer, this.renderCamera());
     const hit = this.raycaster.intersectObject(this.terrain, false)[0];
     if (!hit) return null;
     return {
@@ -293,6 +295,7 @@ export class TerrainScene {
     this.renderer.domElement.setAttribute('role', 'img');
     this.renderer.domElement.tabIndex = 0;
     host.appendChild(this.renderer.domElement);
+    this.renderer.domElement.dataset.projection = 'perspective';
     this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
     if (this.meshBenchmark) {
@@ -467,6 +470,29 @@ export class TerrainScene {
     this.animate();
   }
 
+  /** The interactive perspective camera controls both projection modes.
+   * Orthographic framing follows its target/distance so OrbitControls zoom
+   * and pan remain continuous when toggling a top-down survey view. */
+  private renderCamera(): THREE.PerspectiveCamera | THREE.OrthographicCamera {
+    if (!this.orthographic) return this.camera;
+    const distance = Math.max(0.03, this.camera.position.distanceTo(this.controls.target));
+    const halfHeight = Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)) * distance;
+    const aspect = this.camera.aspect;
+    const camera = this.orthographicCamera;
+    camera.left = -halfHeight * aspect;
+    camera.right = halfHeight * aspect;
+    camera.top = halfHeight;
+    camera.bottom = -halfHeight;
+    camera.near = this.camera.near;
+    camera.far = this.camera.far;
+    camera.position.copy(this.camera.position);
+    camera.quaternion.copy(this.camera.quaternion);
+    camera.up.copy(this.camera.up);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    return camera;
+  }
+
   private resize() {
     if (this.disposed) return;
     const width = this.host.clientWidth,
@@ -544,7 +570,7 @@ export class TerrainScene {
         if (gpuQuery) gl.beginQuery(this.gpuTimer.TIME_ELAPSED_EXT, gpuQuery);
       }
       try {
-        this.renderer.render(this.scene, this.camera);
+        this.renderer.render(this.scene, this.renderCamera());
       } finally {
         if (gpuQuery && gl && this.gpuTimer) {
           gl.endQuery(this.gpuTimer.TIME_ELAPSED_EXT);
@@ -822,7 +848,7 @@ export class TerrainScene {
     const plan = this.meshBenchmark === 'uniform512'
       ? planUniform512Reference()
       : planTerrainMesh(
-          this.heightSampler, this.camera,
+          this.heightSampler, this.renderCamera(),
           this.host.clientHeight, this.renderer.getPixelRatio(),
           this.project.heightScale, this.project.worldSize,
           this.settings.exaggeration, this.settings.meshQuality,
@@ -1280,6 +1306,10 @@ export class TerrainScene {
     if (![...state.position, ...state.target].every(Number.isFinite)) return;
     this.camera.position.fromArray(state.position);
     this.controls.target.fromArray(state.target);
+    this.orthographic = false;
+    this.renderer.domElement.dataset.projection = 'perspective';
+    this.orthographic = false;
+    this.renderer.domElement.dataset.projection = 'perspective';
     this.cameraAdjusted = true;
     this.cameraView = 'perspective';
     this.controls.update();
@@ -1304,19 +1334,24 @@ export class TerrainScene {
   }
 
   resetCamera() {
+    this.orthographic = false;
+    this.renderer.domElement.dataset.projection = 'perspective';
     this.cameraAdjusted = false;
     this.cameraView = 'perspective';
     this.fitCamera();
   }
 
   topView() {
+    this.orthographic = true;
+    this.renderer.domElement.dataset.projection = 'orthographic';
     this.cameraAdjusted = false;
     this.cameraView = 'top';
     this.fitCamera();
+    this.lodDirty = true;
   }
 
   downloadSnapshot(name: string) {
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.renderCamera());
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
