@@ -270,7 +270,7 @@ export class TerrainScene {
     settings: ViewSettings,
     private readonly onError: (message: string) => void,
     theme: 'light' | 'dark' = 'light',
-    private readonly onCameraHeading?: (heading: number) => void,
+    private readonly onCameraHeading?: (heading: number, focus: TerrainPoint | null) => void,
   ) {
     this.settings = settings;
     this.renderer = new THREE.WebGLRenderer({
@@ -434,7 +434,7 @@ export class TerrainScene {
     this.controls.screenSpacePanning = true;
     this.controls.update();
     this.controls.addEventListener('change', () => {
-      this.onCameraHeading?.(this.cameraHeading());
+      this.onCameraHeading?.(this.cameraHeading(), this.cameraTargetPoint());
       this.needsRender = true;
       this.lodDirty = true;
       this.lastCameraChangeMs = performance.now();
@@ -443,7 +443,7 @@ export class TerrainScene {
       this.cameraAdjusted = true;
     });
     this.renderer.domElement.addEventListener('dblclick', this.onFocusTerrain);
-    this.onCameraHeading?.(this.cameraHeading());
+    this.onCameraHeading?.(this.cameraHeading(), this.cameraTargetPoint());
     this.hoverMarker.visible = false;
     this.hoverMarker.renderOrder = 10;
     this.scene.add(this.hoverMarker);
@@ -1285,6 +1285,15 @@ export class TerrainScene {
     this.controls.maxDistance = Math.max(12, distance * 2);
     this.controls.update();
     this.needsRender = true;
+  }
+
+  /** The orbit focal point projected into the original tile's map coordinates.
+   * Do not clamp targets that are outside the tile: an out-of-bounds camera
+   * focus must not appear pinned to a fictitious edge location. */
+  private cameraTargetPoint(): TerrainPoint | null {
+    const u = this.controls.target.x / TERRAIN_SIZE + 0.5;
+    const v = this.controls.target.z / TERRAIN_SIZE + 0.5;
+    return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? { u, v } : null;
   }
 
   /** North is negative Z, matching the source map's first row. */
