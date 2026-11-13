@@ -1006,3 +1006,194 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Unified interaction system: linked 2D/3D inspection and adjustable workspace. */
+.nh-viewport-toolset {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid #cbd1c9;
+  border-radius: 6px;
+}
+.nh-viewport-toolset button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 3px 6px;
+  background: transparent;
+  color: #526a54;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.nh-viewport-toolset button.active,
+.nh-viewport-toolset button:hover:not(:disabled) {
+  background: #dfe9e0;
+  color: #253c30;
+}
+.nh-viewport-toolset button:disabled { opacity: .35; cursor: default; }
+.nh-viewport-toolset button:focus-visible,
+.nh-split-divider:focus-visible,
+.nh-compass-control:focus-visible {
+  outline: 2px solid #7f9e7e;
+  outline-offset: 2px;
+}
+.nh-split-divider {
+  position: relative;
+  z-index: 3;
+  flex: 0 0 8px;
+  touch-action: none;
+  cursor: col-resize;
+  background: #b5c3b7;
+  border-left: 1px solid #9caa9e;
+  border-right: 1px solid #9caa9e;
+  display: grid;
+  place-items: center;
+}
+.nh-split-divider > span {
+  display: block;
+  height: 34px;
+  width: 2px;
+  border-radius: 2px;
+  background: #455f4b;
+}
+.nh-split-divider:hover { background: #91ad96; }
+.nh-mode-split > .nh-map-pane { border-left: 0; }
+.nh-compass-control {
+  pointer-events: auto;
+  border: 0;
+  background: transparent;
+  padding: 2px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.nh-compass {
+  color: #365344;
+  transition: transform 100ms ease-out;
+}
+.nh-compass > span { border-bottom-color: #486c5b; }
+.nh-inspection-overlay {
+  position: absolute;
+  pointer-events: none;
+  z-index: 4;
+  overflow: visible;
+  filter: drop-shadow(0 1px 2px #000a);
+}
+.nh-map-update {
+  position: absolute;
+  top: 62px;
+  left: 16px;
+  z-index: 5;
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: #f2f5eeec;
+  border: 1px solid #a8b7a7;
+  color: #36483b;
+  font-size: 10px;
+}
+.nh-map-update.error { border-color: #ad6d61; color: #833f34; }
+.nh-inspection-readout {
+  position: absolute;
+  z-index: 6;
+  bottom: 58px;
+  left: 16px;
+  width: min(300px, calc(100% - 32px));
+  max-height: min(45vh, 330px);
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 7px;
+  border: 1px solid #9db3a2;
+  color: #293c31;
+  background: #edf2eaf5;
+  box-shadow: 0 4px 16px #0002;
+  backdrop-filter: blur(9px);
+  font: 10px var(--mono);
+}
+.nh-inspect-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.nh-inspect-header strong {
+  font-size: 11px;
+  font-family: 'Inter Variable', Inter, sans-serif;
+}
+.nh-inspect-header button {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.nh-inspect-values,
+.nh-measure-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  align-items: center;
+}
+.nh-inspect-values b,
+.nh-measure-results b { font-weight: 700; }
+.nh-measure-results {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid #adbdad;
+}
+.nh-profile-chart {
+  display: block;
+  width: 100%;
+  height: 100px;
+  margin-top: 8px;
+}
+.nh-inspection-readout small {
+  display: block;
+  margin-top: 8px;
+  opacity: .8;
+}
+@media (max-width: 1220px) {
+  .nh-viewport-toolset button span { display: none; }
+  .nh-viewport-toolset button { min-width: 30px; }
+}
+@media (max-width: 780px) {
+  .nh-viewport-toolbar {
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
+    row-gap: 3px;
+    justify-content: space-between;
+    padding: 5px 8px;
+  }
+  .nh-view-tabs button { padding: 0 6px; }
+  .nh-view-tabs button span { display: none; }
+  .nh-view-tabs button { min-width: 32px; }
+  .nh-viewport-toolbar-right { gap: 3px; }
+  .nh-viewport-toolset { margin-left: auto; }
+  .nh-map-controls button, .nh-three-tools button { min-width: 32px; min-height: 32px; }
+  .nh-inspection-readout { bottom: 44px; max-height: 38vh; }
+}
+@media (pointer: coarse) {
+  .nh-viewport-toolset button { min-width: 40px; min-height: 40px; }
+  .nh-map-controls button, .nh-three-tools button { min-width: 40px; min-height: 40px; }
+  .nh-spline-handle { min-width: 40px; height: 40px; }
+  .nh-split-divider { flex-basis: 12px; }
+}
+:root[data-theme='dark'] .nh-viewport-toolset { border-color: #53685a; }
+:root[data-theme='dark'] .nh-viewport-toolset button { color: #c2d5c8; }
+:root[data-theme='dark'] .nh-viewport-toolset button.active,
+:root[data-theme='dark'] .nh-viewport-toolset button:hover { background: #43564b; color: #fff; }
+:root[data-theme='dark'] .nh-inspection-readout,
+:root[data-theme='dark'] .nh-map-update { background: #293633f2; border-color: #5b7c68; color: #e1eee2; }
+:root[data-theme='dark'] .nh-inspect-values, :root[data-theme='dark'] .nh-measure-results { color: #e1eee2; }
+:root[data-theme='dark'] .nh-compass { color: #c4d7ca; }
