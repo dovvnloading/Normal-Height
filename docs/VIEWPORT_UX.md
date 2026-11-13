@@ -100,8 +100,9 @@ comparison field at 1024² may retain roughly 16 MiB across four Float32 channel
 - PBR channel changes blank the previous channel raster while the material
   worker generates the new map, with explicit updating/error feedback. This
   avoids labeling obsolete pixels as the new channel.
-- WebGL failures retain 2D mode and a retry option. A scene rebuild leaves
-  the graph, source data and export workflow intact.
+- WebGL failures retain 2D mode, a retry option, **and the fully 2D
+  Compare workflow**. Only 3D and 3D/2D Split require a graphics context.
+  A scene rebuild leaves the graph, source data and export workflow intact.
 - The **Display** panel appears only in 3D/Split, not in the 2D-only
   Compare workspace. It receives keyboard focus when opened, can be dismissed
   by Escape or clicking outside, and returns focus to the toolbar trigger on
