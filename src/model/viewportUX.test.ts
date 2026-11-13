@@ -25,6 +25,13 @@ describe('terrain viewport inspection', () => {
     expect(value.slope).toBeCloseTo(Math.atan(0.5) * 180 / Math.PI);
     expect(value.flow).toBeCloseTo(0.5);
   });
+  it('bounds transects to the measured tile before computing physical distance', () => {
+    const profile = terrainProfile(field, project,
+      { u: -50, v: 0.5 }, { u: 50, v: 0.5 }, 16);
+    expect(profile.horizontalDistance).toBeCloseTo(200);
+    expect(profile.elevationChange).toBeCloseTo(100);
+    expect(profile.grade).toBeCloseTo(50);
+  });
   it('reports flat, rising and descending transects correctly', () => {
     const rising = terrainProfile(field, project, { u: 0, v: 0.5 }, { u: 1, v: 0.5 }, 20);
     expect(rising.horizontalDistance).toBe(200);
