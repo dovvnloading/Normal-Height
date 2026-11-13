@@ -20,6 +20,13 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  Crosshair,
+  Ruler,
+  ChartNoAxesCombined,
+  MousePointer2,
+  Minimize2,
+  Maximize2,
+  Compass,
 } from 'lucide-react';
 import type {
   HeightField,
@@ -30,6 +37,8 @@ import type {
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
 import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
+import { DEFAULT_MAP_FRAMING, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
+import type { MapFraming, TerrainPoint, ViewportTool } from '../model/viewportUX';
 import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
 import { pbrPixels } from '../materials/pbr';
@@ -59,6 +68,8 @@ interface TerrainViewportProps {
   onChannelChange: (channel: MapChannel) => void;
   onSettingsChange: (settings: ViewSettings) => void;
   onCancel: () => void;
+  focusMode: boolean;
+  onFocusModeChange: (focus: boolean) => void;
 }
 
 const CHANNELS: { value: MapChannel; label: string }[] = [
@@ -80,6 +91,13 @@ const CHANNELS: { value: MapChannel; label: string }[] = [
   { value: 'curvature', label: 'PBR curvature' },
   { value: 'orm', label: 'Packed ORM' },
 ];
+
+const VIEWPORT_TOOLS = [
+  { value: 'navigate', label: 'Navigate', Icon: MousePointer2 },
+  { value: 'inspect', label: 'Inspect', Icon: Crosshair },
+  { value: 'measure', label: 'Measure', Icon: Ruler },
+  { value: 'profile', label: 'Profile', Icon: ChartNoAxesCombined },
+] as const;
 
 const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
   rockWeight: 0, soilWeight: 1, vegetationWeight: 2, snowWeight: 3,
@@ -106,6 +124,13 @@ function MapCanvas({
   spline,
   splineEditing,
   onSplinePath,
+  initialFraming,
+  onFramingChange,
+  tool,
+  hoverPoint,
+  inspectionPoints,
+  onHoverPoint,
+  onChoosePoint,
 }: {
   field: HeightField | null;
   channel: MapChannel;
@@ -113,14 +138,24 @@ function MapCanvas({
   spline: TerrainNode | null;
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
+  initialFraming: MapFraming;
+  onFramingChange: (framing: MapFraming) => void;
+  tool: ViewportTool;
+  hoverPoint: TerrainPoint | null;
+  inspectionPoints: TerrainPoint[];
+  onHoverPoint: (point: TerrainPoint | null) => void;
+  onChoosePoint: (point: TerrainPoint) => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLCanvasElement | null>(null);
   const materialMapsRef = useRef<PBRMaps | null>(null);
   const [rasterVersion, setRasterVersion] = useState(0);
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(initialFraming.zoom);
+  const [offset, setOffset] = useState(initialFraming.offset);
+  const [mapBusy, setMapBusy] = useState(false);
+  const [mapError, setMapError] = useState(false);
+  useEffect(() => onFramingChange({ zoom, offset }), [zoom, offset]);
   const [sample, setSample] = useState<{
     x: number;
     y: number;
@@ -129,6 +164,12 @@ function MapCanvas({
   } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
+  const clickStart = useRef<{ x: number; y: number } | null>(null);
+  const touches = useRef(new globalThis.Map<number, { x: number; y: number }>());
+  const pinch = useRef<{
+    distance: number; middleX: number; middleY: number;
+    zoom: number; offset: { x: number; y: number };
+  } | null>(null);
   const [draftSpline, setDraftSpline] = useState<SplinePoint[] | null>(null);
   const draftRef = useRef<SplinePoint[] | null>(null);
   const handleDrag = useRef<{ index: number; pointer: number } | null>(null);
@@ -149,6 +190,14 @@ function MapCanvas({
     };
   };
 
+  const mapPoint = (clientX: number, clientY: number): TerrainPoint | null => {
+    if (!field) return null;
+    const rect = hostRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const u = (clientX - rect.left - layerLeft) / layerSize;
+    const v = (clientY - rect.top - layerTop) / layerSize;
+    return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? { u, v } : null;
+  };
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
 
@@ -165,6 +214,11 @@ function MapCanvas({
   useEffect(() => {
     let active = true;
     materialMapsRef.current = null;
+    // Never label a previous raster as the newly chosen material channel.
+    imageRef.current = null;
+    setRasterVersion((version) => version + 1);
+    setMapError(false);
+    setMapBusy(false);
     if (!field) {
       imageRef.current = null;
       setRasterVersion((version) => version + 1);
@@ -202,14 +256,17 @@ function MapCanvas({
       'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
     ].includes(channel);
     if (material) {
+      setMapBusy(true);
       const request = requestPBR(field, project);
       request.promise.then((maps) => {
         if (!active) return;
         materialMapsRef.current = maps;
         paintPixels(pbrPixels(maps, field, project, channel as PBRChannel));
+        setMapBusy(false);
       }).catch(() => {
-        // A replaced or unmounted request is expected; the next edit queues
-        // the correct version without showing a stale worker result.
+        if (!active) return;
+        setMapBusy(false);
+        setMapError(true);
       });
       return () => { active = false; request.release(); };
     }
@@ -285,6 +342,24 @@ function MapCanvas({
   }, []);
 
   function inspect(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (event.pointerType === 'touch' && touches.current.size >= 2 && pinch.current) {
+      touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      const [a, b] = [...touches.current.values()];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const next = Math.max(0.35, Math.min(12, pinch.current.zoom * distance / pinch.current.distance));
+      const middleX = (a.x + b.x) / 2, middleY = (a.y + b.y) / 2;
+      const rect = hostRef.current!.getBoundingClientRect();
+      const x0 = pinch.current.middleX - rect.left - dimensions.width / 2;
+      const y0 = pinch.current.middleY - rect.top - dimensions.height / 2;
+      const x1 = middleX - rect.left - dimensions.width / 2;
+      const y1 = middleY - rect.top - dimensions.height / 2;
+      setOffset({
+        x: x1 - (x0 - pinch.current.offset.x) * next / pinch.current.zoom,
+        y: y1 - (y0 - pinch.current.offset.y) * next / pinch.current.zoom,
+      });
+      setZoom(next);
+      return;
+    }
     if (drag.current) {
       setOffset({
         x: drag.current.startX + event.clientX - drag.current.x,
@@ -292,7 +367,8 @@ function MapCanvas({
       });
       return;
     }
-    if (!field) return;
+    if (!field || event.pointerType === 'touch') return;
+    onHoverPoint(mapPoint(event.clientX, event.clientY));
     const rect = event.currentTarget.getBoundingClientRect();
     const size = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
     const left = (dimensions.width - size) / 2 + offset.x,
@@ -325,20 +401,49 @@ function MapCanvas({
         role="img"
         tabIndex={0}
         onPointerDown={(event) => {
-          if (event.button !== 0 && event.button !== 1) return;
-          drag.current = { x: event.clientX, y: event.clientY, startX: offset.x, startY: offset.y };
+          if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
+          clickStart.current = { x: event.clientX, y: event.clientY };
+          if (event.pointerType === 'touch') {
+            touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            if (touches.current.size === 2) {
+              const [a, b] = [...touches.current.values()];
+              pinch.current = {
+                distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+                middleX: (a.x + b.x) / 2, middleY: (a.y + b.y) / 2,
+                zoom, offset: { ...offset },
+              };
+              drag.current = null;
+            }
+          }
+          if ((tool === 'navigate' || event.button !== 0 || event.pointerType === 'touch') &&
+            touches.current.size < 2) {
+            drag.current = { x: event.clientX, y: event.clientY,
+              startX: offset.x, startY: offset.y };
+          }
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={inspect}
         onPointerUp={(event) => {
+          const start = clickStart.current;
+          if (event.pointerType === 'touch') touches.current.delete(event.pointerId);
+          if (touches.current.size < 2) pinch.current = null;
+          if (start && !splineEditing && tool !== 'navigate' &&
+            Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) {
+            const point = mapPoint(event.clientX, event.clientY);
+            if (point) onChoosePoint(point);
+          }
+          clickStart.current = null;
           drag.current = null;
           if (event.currentTarget.hasPointerCapture(event.pointerId))
             event.currentTarget.releasePointerCapture(event.pointerId);
         }}
-        onPointerCancel={() => {
+        onPointerCancel={(event) => {
+          touches.current.delete(event.pointerId);
+          pinch.current = null;
+          clickStart.current = null;
           drag.current = null;
         }}
-        onPointerLeave={() => setSample(null)}
+        onPointerLeave={() => { setSample(null); onHoverPoint(null); }}
         onKeyDown={(event) => {
           if (event.key === 'Home') {
             setZoom(1);
@@ -348,6 +453,36 @@ function MapCanvas({
           if (event.key === '-') setZoom((v) => Math.max(0.35, v / 1.2));
         }}
       />
+      {(hoverPoint || inspectionPoints.length > 0) && (
+        <svg className="nh-inspection-overlay" aria-hidden="true"
+          style={{ left: layerLeft, top: layerTop, width: layerSize, height: layerSize }}
+          viewBox="0 0 1000 1000" preserveAspectRatio="none">
+          {inspectionPoints.length >= 2 && (
+            <line x1={inspectionPoints[0].u * 1000} y1={inspectionPoints[0].v * 1000}
+              x2={inspectionPoints[1].u * 1000} y2={inspectionPoints[1].v * 1000}
+              stroke="#ffe7a8" strokeWidth="2.6" vectorEffect="non-scaling-stroke" />
+          )}
+          {inspectionPoints.map((p, index) => (
+            <g key={index}>
+              <circle cx={p.u * 1000} cy={p.v * 1000} r="10" fill="#edbc6b"
+                stroke="#2e3b36" strokeWidth="3" vectorEffect="non-scaling-stroke" />
+              <text x={p.u * 1000 + 16} y={p.v * 1000 - 16} fill="#fff"
+                stroke="#25332e" strokeWidth="3" paintOrder="stroke"
+                fontSize="24" fontWeight="bold">{String.fromCharCode(65 + index)}</text>
+            </g>
+          ))}
+          {hoverPoint && (
+            <g stroke="#f9faf2" strokeWidth="2" vectorEffect="non-scaling-stroke">
+              <circle cx={hoverPoint.u * 1000} cy={hoverPoint.v * 1000} r="8" fill="none" />
+              <path d={`M ${hoverPoint.u * 1000 - 18} ${hoverPoint.v * 1000}
+                h 8 m 20 0 h 8 M ${hoverPoint.u * 1000} ${hoverPoint.v * 1000 - 18}
+                v 8 m 0 20 v 8`} fill="none" />
+            </g>
+          )}
+        </svg>
+      )}
+      {mapBusy && <div className="nh-map-update" role="status">Generating {CHANNELS.find(c => c.value === channel)?.label}…</div>}
+      {mapError && <div className="nh-map-update error" role="alert">Could not generate this material map.</div>}
       {spline && (
         <div
           ref={layerRef}
@@ -609,6 +744,8 @@ export function TerrainViewport({
   onChannelChange,
   onSettingsChange,
   onCancel,
+  focusMode,
+  onFocusModeChange,
 }: TerrainViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
