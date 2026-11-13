@@ -1504,3 +1504,41 @@
   color: #e0f2e4;
   border-color: #78947f;
 }
+
+/* Comparison diagnostics distinguish sampled volume estimates from solver output. */
+.nh-difference-legend { width: 264px; max-width: min(264px, calc(100% - 32px)); }
+.nh-difference-statistics {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #b2c4b6;
+  font: 10px var(--mono);
+}
+.nh-difference-statistics span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.nh-difference-statistics b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.nh-compare-sample {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid #aec7b6;
+  border-radius: 4px;
+  background: #dfeae2;
+  font: 10px var(--mono);
+}
+.nh-compare-sample b { font-weight: 600; font-variant-numeric: tabular-nums; }
+:root[data-theme='dark'] .nh-compare-sample {
+  background: #395346;
+  color: #e6f1e9;
+  border-color: #668973;
+}
+:root[data-theme='dark'] .nh-difference-statistics { border-color: #586e60; }
