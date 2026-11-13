@@ -1055,6 +1055,7 @@ export function TerrainViewport({
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [compactSplit, setCompactSplit] = useState(() => window.innerWidth <= 660);
   const displayPanel = useRef<HTMLDivElement>(null);
+  const displayTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const host = viewportRef.current;
     if (!host) return;
@@ -1095,6 +1096,10 @@ export function TerrainViewport({
     field && inspectionPoints.length === 2
       ? terrainProfile(field, project, inspectionPoints[0], inspectionPoints[1]) : null,
     [field, project, inspectionPoints]);
+  const lastPinnedSample = useMemo(() => {
+    const point = inspectionPoints.at(-1);
+    return field && point ? sampleTerrain(field, project, point) : null;
+  }, [field, project, inspectionPoints]);
   useEffect(() => {
     try { localStorage.setItem('normal-height.split.v1', String(splitRatio)); } catch { /* optional */ }
   }, [splitRatio]);
@@ -1193,19 +1198,25 @@ export function TerrainViewport({
 
   useEffect(() => {
     if (!showSettings) return;
+    // Focus the panel itself so Tab reaches its controls immediately.
+    displayPanel.current?.focus();
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowSettings(false);
+      if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setShowSettings(false);
+      displayTrigger.current?.focus();
     };
     const outside = (event: PointerEvent) => {
       if (!displayPanel.current?.contains(event.target as Node) &&
-          !(event.target as HTMLElement).closest('.nh-viewport-tool')) {
+          !displayTrigger.current?.contains(event.target as Node)) {
         setShowSettings(false);
       }
     };
-    window.addEventListener('keydown', escape);
+    window.addEventListener('keydown', escape, true);
     window.addEventListener('pointerdown', outside);
     return () => {
-      window.removeEventListener('keydown', escape);
+      window.removeEventListener('keydown', escape, true);
       window.removeEventListener('pointerdown', outside);
     };
   }, [showSettings]);
@@ -1334,6 +1345,7 @@ export function TerrainViewport({
           </button>
           {effectiveMode !== '2d' && (
             <button
+              ref={displayTrigger}
               className={`nh-viewport-tool ${showSettings ? 'active' : ''}`}
               type="button"
               title="Display settings"
@@ -1628,6 +1640,13 @@ export function TerrainViewport({
               <small>{inspectionPoints.length === 0 ? 'Choose point A' : 'Choose point B'}</small>}
           </div>
         )}
+        <div className="nh-sr-only" aria-live="polite" aria-atomic="true">
+          {lastPinnedSample ? `Point ${inspectionPoints.length === 2 ? 'B' : 'A'} pinned.
+            Easting ${formatMeters(lastPinnedSample.easting)}, northing
+            ${formatMeters(lastPinnedSample.northing)}, elevation
+            ${formatMeters(lastPinnedSample.elevation)}, slope
+            ${lastPinnedSample.slope.toFixed(1)} degrees.` : ''}
+        </div>
         <div className="nh-preview-source">
           <span
             className={
@@ -1678,14 +1697,17 @@ export function TerrainViewport({
           </div>
         )}
         {showSettings && effectiveMode !== '2d' && (
-          <div className="nh-display-panel" ref={displayPanel}
+          <div className="nh-display-panel" ref={displayPanel} tabIndex={-1}
             role="region" aria-label="Display settings">
             <div className="nh-display-title">
               <span>DISPLAY SETTINGS</span>
               <button
                 type="button"
                 aria-label="Close display settings"
-                onClick={() => setShowSettings(false)}
+                onClick={() => {
+                  setShowSettings(false);
+                  displayTrigger.current?.focus();
+                }
               >
                 <X size={14} />
               </button>
