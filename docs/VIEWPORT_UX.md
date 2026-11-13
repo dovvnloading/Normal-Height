@@ -102,9 +102,11 @@ comparison field at 1024² may retain roughly 16 MiB across four Float32 channel
   avoids labeling obsolete pixels as the new channel.
 - WebGL failures retain 2D mode and a retry option. A scene rebuild leaves
   the graph, source data and export workflow intact.
-- The **Display** panel receives keyboard focus when opened, can be dismissed
+- The **Display** panel appears only in 3D/Split, not in the 2D-only
+  Compare workspace. It receives keyboard focus when opened, can be dismissed
   by Escape or clicking outside, and returns focus to the toolbar trigger on
-  Escape. Closing it does not clear graph selection.
+  Escape. Closing it does not clear graph selection; switching views closes
+  any stale contextual popovers.
 - **Top view** uses an actual orthographic survey projection, with
   orthographic-aware adaptive tessellation and raycast inspection. Reset Camera,
   cardinal navigation or restoring bookmarks returns to perspective.
