@@ -97,7 +97,7 @@ export const PRESETS: Preset[] = [
     seed: 48271,
     color: '#748872',
     build: () => [
-      node('range', 'mountain', 0, { profile: 'fluvial', dissection: 0.86, criticalSlope: 46 }, 'Alpine spine'),
+      node('range', 'mountain', 0, { profile: 'fluvial', dissection: 0.86, criticalSlope: 46, crestRounding: 0.2 }, 'Alpine spine'),
       node('warp', 'warp', 270, { strength: 0, scale: 2.8 }, 'Break the symmetry'),
       node('erosion', 'hydraulic', 540, { hillslope: 0.03, cycles: 24, bedrockPreserve: true }, 'Carve the watershed'),
       node('thermal', 'thermal', 810, { iterations: 3, talus: 0.03, strength: 0.18 }, 'Settle the scree'),

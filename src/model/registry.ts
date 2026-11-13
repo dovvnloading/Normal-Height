@@ -177,6 +177,16 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         '°',
       ),
       range(
+        'crestRounding',
+        'Crest rounding',
+        0.6,
+        0,
+        1,
+        0.01,
+        'Fluvial uplands only: the soil-creep length. Crests round into convex hilltops no sharper than creep allows, gullies begin no closer to a divide, and slopes steepen toward the hillslope angle below. Zero leaves sharp, rocky crests.',
+        'Structure',
+      ),
+      range(
         'dissectionDepth',
         'Interfluve height',
         0.5,

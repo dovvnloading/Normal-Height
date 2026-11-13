@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  accordUplands, evolveFluvialLandscape, FLUVIAL_DEFAULTS, fluvialLevels, limitSlopes,
-  planeFloodplains,
+  accordUplands, evolveFluvialLandscape, FLUVIAL_DEFAULTS, fluvialLevels, limitSlopeIsotropic,
+  planeFloodplains, roundHilltops,
 } from './fluvial';
 import { accumulateDrainage, createDrainageWorkspace, routeDrainage } from './hydrology';
 import { estimatedWorkingBytes, evaluateGraph, WORKING_MEMORY_BUDGET } from './index';
@@ -246,32 +246,31 @@ describe('Fluvial uplands landform in the terrain graph', () => {
   });
 });
 
-describe('threshold hillslopes at physical scale', () => {
-  it('caps every neighbour difference at the critical slope, only ever lowering', () => {
-    const n = 64;
-    const z = new Float64Array(n * n);
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
-      z[y * n + x] = 0.002 * x + (x === 30 && y === 30 ? 1 : 0) + (y > 40 ? 0.3 * Math.sin(x) : 0);
-    const before = z.slice();
-    const cap = new Float64Array(n * n).fill(0.01);
-    expect(limitSlopes(z, n, cap)).toBeGreaterThan(0);
-    let worst = 0;
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+describe('hillslope transport at physical scale', () => {
+  /** Laplacian at 5×5 local maxima (crests), in 1/m. */
+  const crestCurvature = (z: Float32Array, n: number, cell: number, heightScale: number) => {
+    const values: number[] = [];
+    for (let y = 3; y < n - 3; y++) for (let x = 3; x < n - 3; x++) {
       const i = y * n + x;
-      expect(z[i]).toBeLessThanOrEqual(before[i] + 1e-15);
-      for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [-1, 1]]) {
-        const xx = x + dx, yy = y + dy;
-        if (xx < 0 || yy < 0 || xx >= n || yy >= n) continue;
-        const allowed = 0.01 * Math.hypot(dx, dy);
-        worst = Math.max(worst, Math.abs(z[yy * n + xx] - z[i]) - allowed);
-      }
+      let top = true;
+      for (let dy = -2; dy <= 2 && top; dy++) for (let dx = -2; dx <= 2; dx++)
+        if ((dx || dy) && z[i + dy * n + dx] > z[i]) { top = false; break; }
+      if (!top) continue;
+      values.push((z[i - 1] + z[i + 1] + z[i - n] + z[i + n] - 4 * z[i]) * heightScale / (cell * cell));
     }
-    expect(worst).toBeLessThan(1e-9);
-    // A gentle ramp below the cap is untouched.
-    const ramp = Float64Array.from({ length: n * n }, (_, i) => 0.004 * (i % n));
-    const copy = ramp.slice();
-    expect(limitSlopes(ramp, n, cap)).toBe(0);
-    expect(Array.from(ramp)).toEqual(Array.from(copy));
+    return values;
+  };
+
+  it('rounds crests by soil creep instead of leaving knife edges', () => {
+    const n = 128, worldSize = 8000, heightScale = 2400, cell = worldSize / (n - 1);
+    const source = upland(n);
+    const options = { strength: 1, seed: 8, worldSize, heightScale, accordance: 0, dissectionDepth: 1 };
+    const sharp = crestCurvature(evolveFluvialLandscape(source, n, { ...options, crestRounding: 0 }).height, n, cell, heightScale);
+    const round = crestCurvature(evolveFluvialLandscape(source, n, { ...options, crestRounding: 1 }).height, n, cell, heightScale);
+    const mean = (values: number[]) => values.reduce((total, v) => total + Math.abs(v), 0) / values.length;
+    expect(sharp.length).toBeGreaterThan(10);
+    expect(round.length).toBeGreaterThan(10);
+    expect(mean(round)).toBeLessThan(mean(sharp) * 0.7);
   });
 
   it('forms real hillslope angles: no needle forests at the project scale', () => {
@@ -298,5 +297,71 @@ describe('threshold hillslopes at physical scale', () => {
   it('gives the reference-style preset a regional tile', () => {
     expect(createProject('uplands').worldSize).toBe(36000);
     expect(createProject('alpine').worldSize).toBe(8000);
+  });
+
+  it('bounds hilltop curvature without touching slopes or valleys', () => {
+    const n = 97, c = 48, curvature = 0.002;
+    // A knife-edge ridge along y and a V-valley along x, both planar flanks.
+    const ridge = new Float64Array(n * n), valley = new Float64Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      ridge[y * n + x] = 1 - 0.05 * Math.abs(x - c);
+      valley[y * n + x] = 0.05 * Math.abs(y - c);
+    }
+    const before = ridge.slice();
+    roundHilltops(ridge, n, curvature);
+    for (let i = 0; i < ridge.length; i++) expect(ridge[i]).toBeLessThanOrEqual(before[i] + 1e-12);
+    for (let y = 2; y < n - 2; y++) {
+      const i = y * n + c;
+      // Crest second difference at most 2·curvature (paraboloid d²·c).
+      expect(before[i - 1] + before[i + 1] - 2 * before[i]).toBeLessThan(-0.09);
+      expect(ridge[i - 1] + ridge[i + 1] - 2 * ridge[i]).toBeGreaterThan(-2 * curvature - 1e-9);
+      // Planar flanks beyond the cap keep their exact height.
+      expect(ridge[y * n + c + 30]).toBeCloseTo(before[y * n + c + 30], 12);
+    }
+    const untouched = valley.slice();
+    roundHilltops(valley, n, curvature);
+    for (let i = 0; i < valley.length; i++) expect(valley[i]).toBeCloseTo(untouched[i], 12);
+  });
+
+  it('retreats valley walls at the slope limit through a concave toe', () => {
+    const n = 129, river = 64, limit = 0.012;
+    const z = new Float64Array(n * n), area = new Float32Array(n * n).fill(1);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      z[y * n + x] = Math.abs(x - river) * 0.011 + (n - 1 - y) * 0.001;
+      if (x === river) area[y * n + x] = 0.6 * (n - 1) * (n - 1);
+    }
+    const before = z.slice();
+    planeFloodplains(z, n, area, 1, 7, new Float64Array(n * n).fill(limit));
+    for (let i = 0; i < z.length; i++) expect(z[i]).toBeLessThanOrEqual(before[i] + 1e-12);
+    for (let y = 8; y < n - 8; y++) {
+      const row = y * n;
+      expect(z[row + river + 1] - before[row + river]).toBeLessThan(0.004);
+      let previous = 0;
+      for (let x = river + 1; x < river + 40; x++) {
+        const step = z[row + x] - z[row + x - 1];
+        // Never steeper than the wall slope; the toe steepens monotonically.
+        expect(step).toBeLessThanOrEqual(limit * 1.0001);
+        if (z[row + x] < before[row + x] - 1e-9 && step > 1e-6) expect(step).toBeGreaterThanOrEqual(previous - 1e-3);
+        previous = step;
+      }
+    }
+  });
+
+  it('limits slopes isotropically, only lowering', () => {
+    const n = 65;
+    const z = new Float64Array(n * n);
+    for (let i = 0; i < z.length; i++) z[i] = 1;
+    z[32 * n + 32] = 0;
+    limitSlopeIsotropic(z, n, new Float64Array(n * n).fill(0.01));
+    // A cone around the low point, within 5% of the Euclidean distance in
+    // every direction. An eight-direction chamfer is 8% high at 2:1 and
+    // exact on axes and diagonals, which cuts octagonal facets.
+    for (const [dy, dx] of [[0, 20], [10, 20], [14, 14], [8, 24], [20, 4]]) {
+      const euclid = 0.01 * Math.hypot(dx, dy);
+      const value = z[(32 + dy) * n + 32 + dx];
+      expect(value).toBeGreaterThanOrEqual(euclid - 1e-9);
+      expect(value).toBeLessThan(euclid * 1.05);
+    }
+    for (const value of z) expect(value).toBeLessThanOrEqual(1);
   });
 });

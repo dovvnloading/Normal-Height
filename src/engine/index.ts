@@ -225,6 +225,7 @@ function createMountains(
         accordance: number(node, 'accordance', FLUVIAL_DEFAULTS.accordance, 0, 1),
         dissectionDepth: number(node, 'dissectionDepth', FLUVIAL_DEFAULTS.dissectionDepth, 0.2, 1),
         criticalSlope: number(node, 'criticalSlope', FLUVIAL_DEFAULTS.criticalSlope, 20, 65),
+        crestRounding: number(node, 'crestRounding', FLUVIAL_DEFAULTS.crestRounding, 0, 1),
         worldSize: physical?.worldSize,
         heightScale: physical?.heightScale,
       });

@@ -309,9 +309,12 @@ Folded highlands presets) does that.
      crisp incisions into smoother slopes, not coral-like ridges.
    - *Valley floors*: rivers above 0.2% of the tile plane flat floors
      whose width grows with √area (hydraulic geometry, Leopold &
-     Maddock 1953), blending into the walls through a concave toe slope.
-     Floors only ever lower the surface and tilt downstream with their
-     river, so they still drain.
+     Maddock 1953). Each cell takes the floor of its Euclidean-nearest
+     river cell, so the floor outline is a smooth offset of the river
+     rather than a union of stamped discs; walls blend in through a
+     concave toe slope (at physical scale, see below, they retreat
+     parallel to themselves). Floors only ever lower the surface and
+     tilt downstream with their river, so they still drain.
 
 Strength (Stream-network dissection) 0 returns the classic range exactly.
 Above 1024² the landscape is formed at 1024² and its relief change is
@@ -329,8 +332,9 @@ resampled onto the full-size source.
 | Raster direction bias (peak / mean) | 1.07 | 1.14 | 1.04 |
 | Flat area | 4% | 18% | 1.4% |
 
-The full Dissected uplands pipeline runs in ~10.5 s at 1024² in Node
-(the previous Alpine pipeline: ~13.5 s).
+The full Dissected uplands pipeline runs in ~12–14 s at 1024² in Node
+(~5.5 s at the default 512²), including the physical hillslope laws
+below.
 
 ### Validation
 
@@ -353,36 +357,77 @@ steeper than 60°. The old carved Alpine source was no better (median 74°).
 Real mountains at this resolution have median slopes around 25–35°,
 because soil and rock fail above roughly 35–45°.
 
-The solver now knows the physical scale and applies three real limits:
+The solver now knows the physical scale and applies real hillslope and
+channel laws:
 
-- **Threshold hillslopes.** No cell may stand above any neighbour by more
-  than tan(critical angle) × distance (`limitSlopes`, a two-way chamfer
-  sweep that only lowers). The cap is applied in every pass, so drainage
-  forms on the limited surface; harder rock may stand up to ~1.5× steeper
-  (cliffs), softer rock gentler. Where the cap binds, channels steepen to
-  carry the authored large-scale relief, as in real high-relief ranges.
-  *Hillslope angle* is a node control (default 36°).
-- **Physical channel heads.** Channels start at a real catchment area
-  (2 ha) instead of a raster cell count, since 18 cells is 1,100 m² at
-  8 km but 22,000 m² at 36 km.
-- **Steeper ground channelises sooner.** The initiation area scales as
-  S⁻² (Montgomery & Dietrich 1992; reference slope 20°), so steep faces
-  carry dense chutes and couloirs while gentle slopes stay smooth.
+- **Threshold hillslopes.** Soil and rock fail above a critical angle
+  (*Hillslope angle*, default 36°; harder rock may stand up to ~1.5×
+  steeper, softer rock gentler). Slopes are bounded isotropically: the
+  surface becomes its maximal Lipschitz minorant (Fast Marching on
+  |∇z| ≤ tan θc, the surface as an obstacle), so limited slopes form cones
+  whose intersections follow the terrain. The first version used a
+  two-way chamfer sweep, whose eight raster directions cut octagonal
+  facets and straight 0/45/90° creases into the hillshade. The bound only
+  lowers; where it binds, channels steepen to carry the authored relief.
+- **Soil creep.** Unchannelled slopes follow steady-state nonlinear creep
+  (Roering et al. 1999), S / (1 − (S/Sc)²) = a / L, with a the specific
+  catchment area and L = D/U the creep length (*Crest rounding*): slopes
+  rise from zero at the divide toward Sc downslope. On hillslopes the
+  catchment is dispersive (multiple flow direction, Quinn et al. 1991),
+  and each hillslope cell stands above the flow-weighted mean of the
+  cells it drains to. Single-direction area is a per-cell lottery on
+  hillslopes; driving a transport law with it pitted the surface with
+  one-cell notches.
+- **Hilltops.** A steady-state hilltop has curvature U/D = 1/L and none
+  can be sharper. The surface is opened (mathematical morphology) by the
+  paraboloid of that curvature, an exact O(n²) operation (separable lower
+  envelopes of parabolas; Felzenszwalb & Huttenlocher 2012) that rounds
+  only crests, such as the crease where the two sides of a divide, formed
+  along separate flow paths, meet. Alpine uses L ≈ 30 m (rock, fast
+  erosion), the other presets ~100 m (soil-mantled), within the hilltop
+  curvatures of 0.005–0.05 1/m measured across erosion rates (Hurst et
+  al. 2012).
+- **Channel heads.** Channels start where routed (concentrated) flow
+  reaches a real catchment area (2 ha, not a raster cell count: 18 cells
+  is 1,100 m² at 8 km but 22,000 m² at 36 km), scaled as S⁻²
+  (Montgomery & Dietrich 1992; reference slope 20°) so steep faces carry
+  dense chutes while gentle slopes stay smooth, and never within the
+  creep length of a divide.
+- **Debris-flow valleys.** Steep small channels are scoured by debris
+  flows, not water: a valley starts at the hillslope angle at its head
+  and flattens as A^−0.3 (Stock & Dietrich 2003) until the fluvial
+  stream-power slope is gentler. Gullies begin as shallow swales and
+  deepen downstream. Channels that saturated at the full hillslope
+  angle merged with their slopes into planar, comb-like facets.
+- **Valley walls.** Beside planed floors the undercut wall retreats
+  parallel to itself just under the threshold, through a concave
+  colluvial toe, instead of being cut back by the slope bound from the
+  floor's outline (which scalloped and stair-stepped the walls). The
+  lowered zone is relaxed by three averaging passes, which smooth the
+  cell-by-cell steps of river level without raising anything.
 
 Dense pixel-scale dissection, as in the reference DEM, is only physically
 possible when each sample spans tens of meters, so **Dissected uplands is a
 36 km regional tile**. Alpine uses 46° hard-rock faces and Folded
 highlands 32° weathered slopes, both on 8 km tiles.
 
-| Preset (1024², full graph) | Median slope | p90 | p99 | Relief |
-|---|--:|--:|--:|--:|
-| Dissected uplands, 36 km (before: 8 km) | 26° (74°) | 38° (83°) | 43° (86°) | 1,764 m |
-| Alpine, 8 km, 46° | 35° (67°) | 47° (82°) | 55° (85°) | 1,221 m |
-| Folded highlands, 8 km, 32° | 22° | 31° | 37° | 876 m |
+| Preset (1024², full graph) | Median slope | p90 | p99 | Hilltop curvature | Relief |
+|---|--:|--:|--:|--:|--:|
+| Dissected uplands, 36 km | 22° | 34° | 39° | −0.016 1/m | 1,670 m |
+| Alpine, 8 km, 46° | 34° | 45° | 51° | −0.045 1/m | 1,052 m |
+| Folded highlands, 8 km, 32° | 20° | 29° | 34° | −0.014 1/m | 736 m |
 
-Unit tests require every neighbour difference to respect the cap and the
-formed terrain's median slope to stay below the critical angle at real
-scale; without a physical scale the dimensionless solver is unchanged.
+With the chamfer bound and single-direction hillslopes the same presets
+measured 26° / 38° / 43° (uplands), 35° / 47° / 55° (Alpine) and
+22° / 31° / 37° (highlands), with hilltop curvature −0.020, −0.109 and
+−0.049 1/m: knife-edge crests. Before any physical scale, the uplands
+on an 8 km tile measured 74° / 83° / 86°. Hilltop curvature here is the
+Laplacian at 5×5 local maxima; slopes are central differences in metres.
+
+Unit tests require the steepest neighbour difference to stay within the
+hard-rock bound and the median below the critical angle at real scale,
+and full crest rounding to lower hilltop curvature by more than 30%;
+without a physical scale the dimensionless solver is unchanged.
 
 ### Limitations
 
@@ -396,6 +441,12 @@ scale; without a physical scale the dimensionless solver is unchanged.
   reference's.
 - Random-D8 is still an eight-neighbour raster model; rivers do not
   meander.
+- Hillslopes follow the creep law along flow paths plus a curvature
+  bound, not a 2D diffusion solve: divides are not migrated until both
+  sides stand equally high. The hilltop opening rounds the resulting
+  crease.
+- Straight drainage divides inherited from the coarsest level can
+  survive refinement as long, straight crests.
 - Pixel-scale roughness stays below the reference's, part of which is
   sensor noise and compression in that image.
 
@@ -410,7 +461,19 @@ Montgomery & Dietrich (1988), channel initiation,
 Leopold & Maddock (1953), hydraulic geometry,
 [doi:10.3133/pp252](https://doi.org/10.3133/pp252);
 Cordonnier et al. (2016),
-[doi:10.1111/cgf.12820](https://doi.org/10.1111/cgf.12820).
+[doi:10.1111/cgf.12820](https://doi.org/10.1111/cgf.12820);
+Montgomery & Dietrich (1992), channel initiation and landscape scale,
+[doi:10.1126/science.255.5046.826](https://doi.org/10.1126/science.255.5046.826);
+Roering, Kirchner & Dietrich (1999), nonlinear hillslope transport,
+[doi:10.1029/1998WR900090](https://doi.org/10.1029/1998WR900090);
+Quinn et al. (1991), multiple-flow-direction hillslope routing,
+[doi:10.1002/hyp.3360050106](https://doi.org/10.1002/hyp.3360050106);
+Stock & Dietrich (2003), debris-flow valley incision,
+[doi:10.1029/2001WR001057](https://doi.org/10.1029/2001WR001057);
+Hurst et al. (2012), hilltop curvature and erosion rate,
+[doi:10.1029/2011JF002057](https://doi.org/10.1029/2011JF002057);
+Felzenszwalb & Huttenlocher (2012), distance transforms of sampled
+functions, [doi:10.4086/toc.2012.v008a019](https://doi.org/10.4086/toc.2012.v008a019).
 
 ---
 
