@@ -1669,7 +1669,7 @@ export function TerrainViewport({
           <span>{previewLabel}</span>
           {stale && !busy && <em>Out of date</em>}
         </div>
-        {sceneError && (
+        {sceneError && effectiveMode !== 'compare' && (
           <div className="nh-render-error">
             <span>{sceneError}</span>
             <button type="button" onClick={() => setAttempt((v) => v + 1)}>
