@@ -1582,3 +1582,18 @@
   border: 0;
 }
 .nh-display-panel:focus { outline: 2px solid #8ca18a; outline-offset: 1px; }
+
+/* Comparison readouts live with comparison controls, never on top of the
+ * separate bottom-corner signed-difference legend. */
+.nh-compare-sample {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  line-height: 1.45;
+}
+.nh-compare-sample > span:last-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
