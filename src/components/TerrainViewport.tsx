@@ -1513,6 +1513,18 @@ export function TerrainViewport({
                   <span>{activeSample.slope.toFixed(1)}° slope</span>
                   <span>Flow {activeSample.flow.toPrecision(3)}</span>
                 </div>
+                {inspectionPoints.length > 0 && effectiveMode !== 'compare' && (
+                  <button className="nh-inspect-focus" type="button"
+                    aria-label="Focus 3D camera at pinned sample"
+                    onClick={() => {
+                      const point = inspectionPoints.at(-1);
+                      if (!point) return;
+                      sceneRef.current?.focusPoint(point);
+                      if (effectiveMode === '2d') onViewModeChange('split');
+                    }}>
+                    <Focus size={13} /> Focus 3D at sample
+                  </button>
+                )}
                 {profile && tool !== 'inspect' && (
                   <div className="nh-measure-results">
                     <span>Distance <b>{formatMeters(profile.horizontalDistance)}</b></span>
