@@ -270,6 +270,18 @@ function MapCanvas({
   };
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
+  const zoomAt = useRef((next: number, x: number, y: number) => {});
+  zoomAt.current = (nextZoom: number, px: number, py: number) => {
+    const old = view.current;
+    const next = Math.max(0.35, Math.min(12, nextZoom));
+    if (next === old.zoom) return;
+    const ratio = next / old.zoom;
+    setOffset({
+      x: px - (px - old.offset.x) * ratio,
+      y: py - (py - old.offset.y) * ratio,
+    });
+    setZoom(next);
+  };
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -434,8 +446,13 @@ function MapCanvas({
     const { width, height } = dimensions;
     if (!width || !height) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
+    // Never reset the backing buffer during pan/zoom/channel repaint.
+    // Assigning canvas.width/height clears and reallocates it, even when the
+    // requested dimensions are unchanged, causing repeated frame stalls.
+    const pixelWidth = Math.max(1, Math.round(width * dpr));
+    const pixelHeight = Math.max(1, Math.round(height * dpr));
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.clearRect(0, 0, width, height);
     if (!imageRef.current) return;
@@ -492,16 +509,10 @@ function MapCanvas({
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      const oldZoom = view.current.zoom;
-      const next = Math.max(0.35, Math.min(12, oldZoom * Math.exp(-event.deltaY * 0.0015)));
+      const next = view.current.zoom * Math.exp(-event.deltaY * 0.0015);
       const px = event.clientX - rect.left - view.current.dimensions.width / 2;
       const py = event.clientY - rect.top - view.current.dimensions.height / 2;
-      const ratio = next / oldZoom;
-      setOffset({
-        x: px - (px - view.current.offset.x) * ratio,
-        y: py - (py - view.current.offset.y) * ratio,
-      });
-      setZoom(next);
+      zoomAt.current(next, px, py);
     };
     canvas.addEventListener('wheel', wheel, { passive: false });
     return () => canvas.removeEventListener('wheel', wheel);
@@ -565,7 +576,9 @@ function MapCanvas({
     <div className="nh-map" ref={hostRef}>
       <canvas
         ref={canvasRef}
-        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. Drag to pan, scroll to zoom. Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
+        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. ${tool === 'navigate'
+          ? 'Drag to pan' : 'Click to sample, right or middle drag to pan'}, scroll to zoom.
+          Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
         role="img"
         tabIndex={0}
         onPointerDown={(event) => {
@@ -601,7 +614,10 @@ function MapCanvas({
             !splineEditing && tool !== 'navigate' &&
             Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) {
             const point = mapPoint(event.clientX, event.clientY);
-            if (point) onChoosePoint(point);
+            if (point) {
+              setKeyboardPoint(point);
+              onChoosePoint(point);
+            }
           }
           clickStart.current = null;
           drag.current = null;
@@ -625,11 +641,11 @@ function MapCanvas({
           }
           if (event.key === '+' || event.key === '=') {
             event.preventDefault();
-            setZoom((v) => Math.min(12, v * 1.2));
+            zoomAt.current(view.current.zoom * 1.2, 0, 0);
           }
           if (event.key === '-') {
             event.preventDefault();
-            setZoom((v) => Math.max(0.35, v / 1.2));
+            zoomAt.current(view.current.zoom / 1.2, 0, 0);
           }
           if (tool !== 'navigate') {
             const arrows: Record<string, [number, number]> = {
@@ -832,7 +848,7 @@ function MapCanvas({
           type="button"
           title="Zoom out"
           aria-label="Zoom map out"
-          onClick={() => setZoom((v) => Math.max(0.35, v / 1.25))}
+          onClick={() => zoomAt.current(view.current.zoom / 1.25, 0, 0)}
         >
           <ZoomOut size={15} />
         </button>
@@ -841,7 +857,7 @@ function MapCanvas({
           type="button"
           title="Zoom in"
           aria-label="Zoom map in"
-          onClick={() => setZoom((v) => Math.min(12, v * 1.25))}
+          onClick={() => zoomAt.current(view.current.zoom * 1.25, 0, 0)}
         >
           <ZoomIn size={15} />
         </button>
@@ -867,7 +883,8 @@ function MapCanvas({
             {sample.value && <span>{sample.value}</span>}
           </>
         ) : (
-          <span>Hover to inspect · Drag to pan</span>
+          <span>{tool === 'navigate' ? 'Hover to inspect · Drag to pan'
+            : 'Click to sample · Right or middle drag to pan'}</span>
         )}
       </div>
     </div>
@@ -991,6 +1008,14 @@ export function TerrainViewport({
   const [showSettings, setShowSettings] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [tool, setTool] = useState<ViewportTool>('navigate');
+  // Spline handles own the 2D pointer surface while editing. Suppress
+  // competing inspection tools instead of allowing inert tool selections.
+  useEffect(() => {
+    if (!splineEditing) return;
+    setTool('navigate');
+    setInspectionPoints([]);
+    setHoverPoint(null);
+  }, [splineEditing]);
   const [compareKind, setCompareKind] = useState<'wipe' | 'difference'>('wipe');
   const [wipe, setWipe] = useState(50);
   const [showLayers, setShowLayers] = useState(false);
@@ -1168,7 +1193,9 @@ export function TerrainViewport({
   }, [field, attempt]);
 
   return (
-    <section className="nh-viewport" aria-label="Terrain preview">
+    <section className="nh-viewport" aria-label="Terrain preview"
+      data-displayed-world-size={field ? project.worldSize : undefined}
+      data-displayed-height-scale={field ? project.heightScale : undefined}>
       <div className="nh-viewport-toolbar">
         <div className="nh-view-tabs" role="group" aria-label="Preview mode">
           <button
@@ -1217,7 +1244,8 @@ export function TerrainViewport({
           {VIEWPORT_TOOLS.map(({ value, label, Icon }) => (
             <button key={value} type="button" aria-label={label + ' terrain'}
               title={label + (value === 'measure' || value === 'profile' ? ' · select two points' : '')}
-              aria-pressed={tool === value} disabled={!field && value !== 'navigate'}
+              aria-pressed={tool === value}
+              disabled={value !== 'navigate' && (!field || splineEditing)}
               className={tool === value ? 'active' : ''}
               onClick={() => { setTool(value); setInspectionPoints([]); setHoverPoint(null); }}>
               <Icon size={15} /><span>{label}</span>
