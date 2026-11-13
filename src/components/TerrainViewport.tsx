@@ -1598,7 +1598,7 @@ export function TerrainViewport({
                   <span>{activeSample.slope.toFixed(1)}° slope</span>
                   <span>Flow {activeSample.flow.toPrecision(3)}</span>
                 </div>
-                {inspectionPoints.length > 0 && effectiveMode !== 'compare' && (
+                {inspectionPoints.length > 0 && (
                   <button className="nh-inspect-focus" type="button"
                     aria-label="Focus 3D camera at pinned sample"
                     onClick={() => {
