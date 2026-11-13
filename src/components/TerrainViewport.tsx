@@ -26,7 +26,6 @@ import {
   MousePointer2,
   Minimize2,
   Maximize2,
-  Compass,
   GitCompareArrows,
   Pin,
   PinOff,
