@@ -27,6 +27,9 @@ import {
   Minimize2,
   Maximize2,
   Compass,
+  GitCompareArrows,
+  Pin,
+  PinOff,
 } from 'lucide-react';
 import type {
   HeightField,
@@ -49,6 +52,8 @@ import type { SplinePoint } from '../model/splines';
 import type { TerrainNode } from '../model/types';
 import './TerrainViewport.css';
 
+type Baseline = { field: HeightField; project: TerrainProject; label: string };
+
 interface TerrainViewportProps {
   spline: TerrainNode | null;
   splineEditing: boolean;
@@ -70,6 +75,9 @@ interface TerrainViewportProps {
   onCancel: () => void;
   focusMode: boolean;
   onFocusModeChange: (focus: boolean) => void;
+  baseline: Baseline | null;
+  onCaptureBaseline: () => void;
+  onClearBaseline: () => void;
 }
 
 const CHANNELS: { value: MapChannel; label: string }[] = [
@@ -142,6 +150,9 @@ function MapCanvas({
   inspectionPoints,
   onHoverPoint,
   onChoosePoint,
+  baseline,
+  compareKind,
+  wipe,
 }: {
   field: HeightField | null;
   channel: MapChannel;
@@ -156,10 +167,15 @@ function MapCanvas({
   inspectionPoints: TerrainPoint[];
   onHoverPoint: (point: TerrainPoint | null) => void;
   onChoosePoint: (point: TerrainPoint) => void;
+  baseline: Baseline | null;
+  compareKind: 'wipe' | 'difference';
+  wipe: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLCanvasElement | null>(null);
+  const baselineRasterRef = useRef<HTMLCanvasElement | null>(null);
+  const [deltaScale, setDeltaScale] = useState(0);
   const materialMapsRef = useRef<PBRMaps | null>(null);
   const [rasterVersion, setRasterVersion] = useState(0);
   const [zoom, setZoom] = useState(initialFraming.zoom);
@@ -225,6 +241,26 @@ function MapCanvas({
   useEffect(() => {
     let active = true;
     materialMapsRef.current = null;
+    baselineRasterRef.current = null;
+    if (baseline && compareKind === 'wipe') {
+      const key = `terrain/${baseline.project.worldSize}/${baseline.project.heightScale}`;
+      const cached = mapRasters.get(baseline.field)?.get(key);
+      if (cached) baselineRasterRef.current = cached;
+      else {
+        const n = baseline.field.resolution;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = n;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const image = ctx.createImageData(n, n);
+          image.data.set(colorizeMap(baseline.field, 'terrain',
+            baseline.project.worldSize, baseline.project.heightScale));
+          ctx.putImageData(image, 0, 0);
+          baselineRasterRef.current = canvas;
+          rememberRaster(baseline.field, key, canvas);
+        }
+      }
+    }
     // Never label a previous raster as the newly chosen material channel.
     imageRef.current = null;
     setRasterVersion((version) => version + 1);
@@ -235,10 +271,10 @@ function MapCanvas({
       setRasterVersion((version) => version + 1);
       return;
     }
-    const paintPixels = (source: Uint8ClampedArray): HTMLCanvasElement | null => {
+    const paintPixels = (source: Uint8ClampedArray, resolution = field.resolution): HTMLCanvasElement | null => {
       if (!active) return null;
       const canvas = document.createElement('canvas');
-      canvas.width = canvas.height = field.resolution;
+      canvas.width = canvas.height = resolution;
       const context = canvas.getContext('2d');
       if (!context) return null;
       let pixels = source;
@@ -253,7 +289,7 @@ function MapCanvas({
         }
         pixels = display;
       }
-      const image = context.createImageData(field.resolution, field.resolution);
+      const image = context.createImageData(resolution, resolution);
       image.data.set(pixels);
       context.putImageData(image, 0, 0);
       imageRef.current = canvas;
@@ -262,6 +298,35 @@ function MapCanvas({
       setRasterVersion((version) => version + 1);
       return canvas;
     };
+    if (baseline && compareKind === 'difference') {
+      setMapBusy(true);
+      const worker = new Worker(new URL('../render/compare.worker.ts', import.meta.url),
+        { type: 'module' });
+      worker.onmessage = (event: MessageEvent<{
+        pixels: Uint8ClampedArray; resolution: number; maxAbs: number;
+      }>) => {
+        if (!active) return;
+        paintPixels(event.data.pixels, event.data.resolution);
+        setDeltaScale(event.data.maxAbs);
+        setMapBusy(false);
+        worker.terminate();
+      };
+      worker.onerror = () => {
+        if (!active) return;
+        setMapBusy(false);
+        setMapError(true);
+        worker.terminate();
+      };
+      const currentHeight = field.height.slice();
+      const baselineHeight = baseline.field.height.slice();
+      worker.postMessage({
+        current: currentHeight, baseline: baselineHeight,
+        currentSize: field.resolution, baselineSize: baseline.field.resolution,
+        currentScale: project.heightScale, baselineScale: baseline.project.heightScale,
+        outputSize: Math.min(512, Math.max(field.resolution, baseline.field.resolution)),
+      }, [currentHeight.buffer, baselineHeight.buffer]);
+      return () => { active = false; worker.terminate(); };
+    }
     const material = [
       'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
       'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
@@ -292,7 +357,8 @@ function MapCanvas({
       if (raster) rememberRaster(field, key, raster);
     }
     return () => { active = false; };
-  }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed]);
+  }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed,
+    baseline, compareKind]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -311,6 +377,21 @@ function MapCanvas({
       top = (height - size) / 2 + offset.y;
     context.imageSmoothingEnabled = size < imageRef.current.width;
     context.drawImage(imageRef.current, left, top, size, size);
+    if (baseline && compareKind === 'wipe' && baselineRasterRef.current) {
+      context.save();
+      context.beginPath();
+      context.rect(left, top, size * wipe / 100, size);
+      context.clip();
+      context.drawImage(baselineRasterRef.current, left, top, size, size);
+      context.restore();
+      context.strokeStyle = '#fff9ec';
+      context.lineWidth = 1.5;
+      const divider = left + size * wipe / 100;
+      context.beginPath();
+      context.moveTo(divider, top);
+      context.lineTo(divider, top + size);
+      context.stroke();
+    }
     context.strokeStyle = '#6d7b6f';
     context.lineWidth = 0.75;
     context.strokeRect(left - 0.5, top - 0.5, size + 1, size + 1);
@@ -329,7 +410,8 @@ function MapCanvas({
       context.lineTo(x + dx * length, y);
       context.stroke();
     }
-  }, [dimensions, zoom, offset, rasterVersion, field, channel, project.worldSize, project.heightScale]);
+  }, [dimensions, zoom, offset, rasterVersion, field, channel, project.worldSize,
+    project.heightScale, baseline, compareKind, wipe]);
 
   useEffect(() => {
     const canvas = hostRef.current;
@@ -492,7 +574,18 @@ function MapCanvas({
           )}
         </svg>
       )}
-      {mapBusy && <div className="nh-map-update" role="status">Generating {CHANNELS.find(c => c.value === channel)?.label}…</div>}
+      {mapBusy && <div className="nh-map-update" role="status">
+        {baseline && compareKind === 'difference' ? 'Computing elevation change…' :
+          `Generating ${CHANNELS.find(c => c.value === channel)?.label}…`}
+      </div>}
+      {baseline && compareKind === 'difference' && !mapBusy && !mapError &&
+        <div className="nh-difference-legend">
+          <strong>Δ elevation in meters</strong>
+          <div className="nh-difference-gradient" />
+          <div><span>−{formatMeters(deltaScale)}</span>
+            <span>0 m</span><span>+{formatMeters(deltaScale)}</span></div>
+          <small>Warm = lower · Cool = higher</small>
+        </div>}
       {mapError && <div className="nh-map-update error" role="alert">Could not generate this material map.</div>}
       {spline && (
         <div
@@ -757,6 +850,9 @@ export function TerrainViewport({
   onCancel,
   focusMode,
   onFocusModeChange,
+  baseline,
+  onCaptureBaseline,
+  onClearBaseline,
 }: TerrainViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
@@ -764,6 +860,8 @@ export function TerrainViewport({
   const [showSettings, setShowSettings] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [tool, setTool] = useState<ViewportTool>('navigate');
+  const [compareKind, setCompareKind] = useState<'wipe' | 'difference'>('wipe');
+  const [wipe, setWipe] = useState(50);
   const [hoverPoint, setHoverPoint] = useState<TerrainPoint | null>(null);
   const [inspectionPoints, setInspectionPoints] = useState<TerrainPoint[]>([]);
   const [splitRatio, setSplitRatio] = useState(() => {
@@ -936,6 +1034,13 @@ export function TerrainViewport({
             <Columns2 size={14} />
             <span>Split</span>
           </button>
+          <button type="button" className={effectiveMode === 'compare' ? 'active' : ''}
+            aria-pressed={effectiveMode === 'compare'} disabled={!baseline || !field}
+            title={baseline ? 'Compare the pinned baseline with the current terrain' :
+              'Pin a terrain baseline first'}
+            onClick={() => { onChannelChange('terrain'); onViewModeChange('compare'); }}>
+            <GitCompareArrows size={14} /><span>Compare</span>
+          </button>
         </div>
         <div className="nh-viewport-toolset" role="group" aria-label="Viewport tool">
           {VIEWPORT_TOOLS.map(({ value, label, Icon }) => (
@@ -949,7 +1054,7 @@ export function TerrainViewport({
           ))}
         </div>
         <div className="nh-viewport-toolbar-right">
-          {effectiveMode !== '3d' && (
+          {effectiveMode !== '3d' && effectiveMode !== 'compare' && (
             <label className="nh-channel-select">
               <TerrainIcon name={MAP_ICON_NAMES[channel]} height={16} />
               <select
@@ -965,6 +1070,21 @@ export function TerrainViewport({
               </select>
               <ChevronDown size={12} />
             </label>
+          )}
+          <button type="button" className="nh-viewport-tool"
+            title={baseline ? `Replace baseline: ${baseline.label}` : 'Pin baseline for comparison'}
+            aria-label={baseline ? 'Replace comparison baseline' : 'Pin comparison baseline'}
+            disabled={!field || busy || stale} onClick={onCaptureBaseline}>
+            <Pin size={15} />
+            <span>{baseline ? 'Pinned' : 'Pin'}</span>
+          </button>
+          {baseline && (
+            <button type="button" className="nh-viewport-tool" title="Clear comparison baseline"
+              aria-label="Clear comparison baseline"
+              onClick={() => {
+                if (effectiveMode === 'compare') onViewModeChange('2d');
+                onClearBaseline();
+              }}><PinOff size={15} /></button>
           )}
           <button type="button" className="nh-viewport-tool"
             title={focusMode ? 'Exit viewport focus mode (F)' : 'Focus viewport (F)'}
@@ -993,7 +1113,7 @@ export function TerrainViewport({
       <div className={`nh-preview-surface nh-mode-${effectiveMode}`}>
         <div
           className="nh-three-pane"
-          style={{ display: effectiveMode === '2d' ? 'none' : undefined,
+          style={{ display: effectiveMode === '2d' || effectiveMode === 'compare' ? 'none' : undefined,
             flex: effectiveMode === 'split' ? `0 0 ${splitRatio}%` : undefined }}
         >
           <div className="nh-three-host" ref={hostRef} />
@@ -1083,13 +1203,43 @@ export function TerrainViewport({
         )}
         {effectiveMode !== '3d' && (
           <div className="nh-map-pane">
-            <MapCanvas field={field} channel={channel} project={project} spline={spline}
-              splineEditing={splineEditing} onSplinePath={onSplinePath}
+            <MapCanvas field={field} channel={effectiveMode === 'compare' ? 'terrain' : channel}
+              project={project} spline={spline} splineEditing={splineEditing}
+              onSplinePath={onSplinePath}
               initialFraming={mapFraming.current}
               onFramingChange={next => { mapFraming.current = next; }}
               tool={tool} hoverPoint={hoverPoint} inspectionPoints={inspectionPoints}
-              onHoverPoint={setHoverPoint} onChoosePoint={choosePoint} />
-            <MapLegend field={field} channel={channel} project={project} />
+              onHoverPoint={setHoverPoint} onChoosePoint={choosePoint}
+              baseline={effectiveMode === 'compare' && baseline?.project.worldSize === project.worldSize
+                ? baseline : null}
+              compareKind={compareKind} wipe={wipe} />
+            {effectiveMode !== 'compare' && <MapLegend field={field} channel={channel} project={project} />}
+          </div>
+        )}
+        {effectiveMode === 'compare' && baseline && (
+          <div className="nh-compare-panel">
+            <strong>{baseline.label} → {previewLabel}</strong>
+            {baseline.project.worldSize !== project.worldSize ?
+              <span>Cannot compare different tile widths. Restore the original tile width.</span> : (
+                <>
+                  <div className="nh-compare-kinds" role="group" aria-label="Comparison style">
+                    <button type="button" aria-pressed={compareKind === 'wipe'}
+                      className={compareKind === 'wipe' ? 'active' : ''}
+                      onClick={() => setCompareKind('wipe')}>Before / after wipe</button>
+                    <button type="button" aria-pressed={compareKind === 'difference'}
+                      className={compareKind === 'difference' ? 'active' : ''}
+                      onClick={() => setCompareKind('difference')}>Elevation change</button>
+                  </div>
+                  {compareKind === 'wipe' &&
+                    <label className="nh-compare-wipe">
+                      <span>Baseline {wipe}%</span>
+                      <input type="range" aria-label="Before after wipe position"
+                        min="0" max="100" step="1" value={wipe}
+                        onChange={e => setWipe(Number(e.target.value))} />
+                      <span>Current {100 - wipe}%</span>
+                    </label>}
+                </>
+            )}
           </div>
         )}
         {field && tool !== 'navigate' && (
