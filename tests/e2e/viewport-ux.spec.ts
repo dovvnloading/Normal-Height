@@ -10,12 +10,12 @@ test.describe('terrain viewport UX', () => {
 
   test('focus mode hides the editor docks without remounting WebGL', async ({ page }) => {
     const terrain = page.getByRole('img', { name: /^Interactive 3D terrain/ });
-    const old = await terrain.evaluate(el => el);
+    await terrain.evaluate(el => el.setAttribute('data-same-canvas', 'yes'));
     await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
     await expect(page.locator('.graph-area')).toBeHidden();
     await expect(page.locator('.library')).toBeHidden();
     await expect(terrain).toBeVisible();
-    await expect.poll(async () => terrain.evaluate(el => el === old)).toBe(true);
+    await expect(terrain).toHaveAttribute('data-same-canvas', 'yes');
     await page.getByRole('button', { name: 'Exit viewport focus mode' }).click();
     await expect(page.locator('.graph-area')).toBeVisible();
   });
@@ -52,7 +52,7 @@ test.describe('terrain viewport UX', () => {
     await page.mouse.click(left + mapSize * 0.70, top + mapSize * 0.68);
     await expect(page.locator('.nh-profile-chart')).toBeVisible();
     await expect(page.locator('.nh-measure-results')).toContainText('Distance');
-    await expect(page.locator('.nh-inspection-overlay circle')).toHaveCount(2);
+    await expect(page.locator('.nh-inspection-overlay g > circle')).toHaveCount(2);
     await page.getByRole('button', { name: 'Clear sample points' }).click();
     await expect(page.locator('.nh-profile-chart')).toHaveCount(0);
   });
