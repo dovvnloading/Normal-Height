@@ -63,6 +63,19 @@ test.describe('terrain viewport UX', () => {
     await expect(separator).toHaveAttribute('aria-valuenow', '50');
   });
 
+  test('right-click pans the map without creating a terrain inspection pin', async ({ page }) => {
+    await page.getByRole('button', { name: '2D map', exact: true }).click();
+    await page.getByRole('button', { name: 'Inspect terrain' }).click();
+    const map = page.locator('.nh-map > canvas');
+    const bounds = (await map.boundingBox())!;
+    const x = bounds.x + bounds.width / 2;
+    const y = bounds.y + bounds.height / 2;
+    await page.mouse.click(x, y, { button: 'right' });
+    await expect(page.locator('.nh-inspect-pin')).toHaveCount(0);
+    await page.mouse.click(x, y, { button: 'left' });
+    await expect(page.locator('.nh-inspect-pin')).toHaveCount(1);
+  });
+
   test('two-finger map pinch zooms without accidentally pinning a sample', async ({ page }) => {
     await page.getByRole('button', { name: '2D map', exact: true }).click();
     await page.getByRole('button', { name: 'Inspect terrain' }).click();
