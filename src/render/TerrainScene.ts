@@ -242,27 +242,28 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
-  private readonly onFocusTerrain = (event: MouseEvent) => {
-    if (!this.terrain) return;
-    const point = this.pickPoint(event.clientX, event.clientY);
-    if (!point || !this.field || !this.project) return;
-    const hit = {
-      point: new THREE.Vector3(
-        (point.u - 0.5) * TERRAIN_SIZE,
-        bilinear(this.field.height, this.field.resolution, point.u, point.v) *
-          TERRAIN_SIZE * this.project.heightScale / this.project.worldSize * this.settings.exaggeration,
-        (point.v - 0.5) * TERRAIN_SIZE,
-      ),
-    };
-    // Move the orbit target to the actual mesh point while preserving the
-    // current view direction/distance. This makes 1–5 m microstructure
-    // inspectable on any cliff, not only at the tile's default center.
-    const delta = hit.point.clone().sub(this.controls.target);
-    this.controls.target.copy(hit.point);
+  /** Focus a normalized source location from either 2D or 3D, preserving
+   * the user's camera orientation and zoom distance. */
+  focusPoint(point: TerrainPoint) {
+    if (!this.field || !this.project || !this.terrain) return;
+    const position = new THREE.Vector3(
+      (point.u - 0.5) * TERRAIN_SIZE,
+      bilinear(this.field.height, this.field.resolution, point.u, point.v) *
+        TERRAIN_SIZE * this.project.heightScale / this.project.worldSize * this.settings.exaggeration,
+      (point.v - 0.5) * TERRAIN_SIZE,
+    );
+    const delta = position.sub(this.controls.target);
+    this.controls.target.add(delta);
     this.camera.position.add(delta);
     this.cameraAdjusted = true;
     this.controls.update();
     this.needsRender = true;
+    this.lodDirty = true;
+  }
+
+  private readonly onFocusTerrain = (event: MouseEvent) => {
+    const point = this.pickPoint(event.clientX, event.clientY);
+    if (point) this.focusPoint(point);
   };
 
   constructor(
