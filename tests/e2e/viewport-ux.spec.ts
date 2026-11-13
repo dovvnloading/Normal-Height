@@ -63,6 +63,30 @@ test.describe('terrain viewport UX', () => {
     await expect(separator).toHaveAttribute('aria-valuenow', '50');
   });
 
+  test('two-finger map pinch zooms without accidentally pinning a sample', async ({ page }) => {
+    await page.getByRole('button', { name: '2D map', exact: true }).click();
+    await page.getByRole('button', { name: 'Inspect terrain' }).click();
+    const rect = (await page.locator('.nh-map > canvas').boundingBox())!;
+    const cx = Math.round(rect.x + rect.width / 2), cy = Math.round(rect.y + rect.height / 2);
+    const client = await page.context().newCDPSession(page);
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    const touchPoints = (span: number) =>
+      [{ x: cx - span, y: cy, id: 1 }, { x: cx + span, y: cy, id: 2 }];
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchStart', touchPoints: touchPoints(35),
+    });
+    for (const span of [50, 70, 90]) {
+      await client.send('Input.dispatchTouchEvent', {
+        type: 'touchMove', touchPoints: touchPoints(span),
+      });
+    }
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(async () => page.locator('.nh-map-controls > span')
+      .innerText()).not.toBe('100%');
+    await expect(page.locator('.nh-inspect-pin')).toHaveCount(0);
+    await client.detach();
+  });
+
   test('pins physically sampled points, measures a transect and shows an elevation profile', async ({ page }) => {
     await page.getByRole('button', { name: '2D map', exact: true }).click();
     await page.getByRole('button', { name: 'Profile terrain' }).click();
