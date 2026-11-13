@@ -166,6 +166,97 @@ test.describe('terrain viewport UX', () => {
     }
   });
 
+
+  test('a pending physical tile edit cannot relabel the last completed terrain', async ({ page }) => {
+    const viewport = page.locator('.nh-viewport');
+    const originalWidth = Number(await viewport.getAttribute('data-displayed-world-size'));
+    const originalScale = Number(await viewport.getAttribute('data-displayed-height-scale'));
+    expect(originalWidth).toBeGreaterThan(0);
+    expect(originalScale).toBeGreaterThan(0);
+    await page.getByRole('checkbox', { name: 'Auto build' }).uncheck({ force: true });
+    await page.getByRole('button', { name: 'Scene', exact: true }).click();
+    const tileWidth = page.getByRole('spinbutton', { name: 'Terrain tile width' });
+    const elevation = page.getByRole('spinbutton', { name: 'Terrain elevation scale' });
+    const nextWidth = Math.min(originalWidth * 2, 100000);
+    const nextScale = Math.min(originalScale * 1.5, 20000);
+    await tileWidth.fill(String(nextWidth));
+    await tileWidth.press('Enter');
+    await elevation.fill(String(nextScale));
+    await elevation.press('Enter');
+    await expect(tileWidth).toHaveValue(String(nextWidth));
+    await expect(elevation).toHaveValue(String(nextScale));
+    // Editor input reflects new settings; terrain/data readouts still use
+    // the last completed field's original physical metadata.
+    await expect(viewport).toHaveAttribute('data-displayed-world-size', String(originalWidth));
+    await expect(viewport).toHaveAttribute('data-displayed-height-scale', String(originalScale));
+    await expect(page.locator('.nh-preview-source')).toContainText('Last built:');
+    await page.getByRole('button', { name: 'Build terrain', exact: true }).click();
+    await expect(viewport).toHaveAttribute('data-displayed-world-size', String(nextWidth),
+      { timeout: 90_000 });
+    await expect(viewport).toHaveAttribute('data-displayed-height-scale', String(nextScale));
+    await expect(page.locator('.nh-preview-source')).not.toContainText('Last built:');
+  });
+
+  test('pan and zoom repaint the map without reallocating its backing canvas', async ({ page }) => {
+    await page.getByRole('button', { name: '2D map', exact: true }).click();
+    const canvas = page.locator('.nh-map > canvas');
+    await canvas.evaluate((node) => {
+      const el = node as HTMLCanvasElement & { __resets?: () => number };
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
+      if (!descriptor?.get || !descriptor.set) throw new Error('No canvas width setter');
+      let resets = 0;
+      Object.defineProperty(el, 'width', {
+        configurable: true,
+        get: () => descriptor.get!.call(el),
+        set: (width: number) => { resets++; descriptor.set!.call(el, width); },
+      });
+      el.__resets = () => resets;
+    });
+    await page.getByRole('button', { name: 'Zoom map in' }).click();
+    await expect(page.locator('.nh-map-controls > span')).not.toHaveText('100%');
+    await canvas.hover();
+    const rect = (await canvas.boundingBox())!;
+    await page.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(rect.x + rect.width / 2 + 50,
+      rect.y + rect.height / 2 + 35, { steps: 10 });
+    await page.mouse.up();
+    expect(await canvas.evaluate(node =>
+      (node as HTMLCanvasElement & { __resets: () => number }).__resets())).toBe(0);
+  });
+
+  test('spline editing disables competing terrain inspection tools', async ({ page }) => {
+    const library = page.getByRole('complementary', { name: 'Node library', exact: true });
+    await library.getByRole('button', { name: /River \/ ridge spline/ }).click();
+    await expect(page.getByRole('button', { name: 'Finish editing' })).toBeVisible();
+    for (const name of ['Inspect terrain', 'Measure terrain', 'Profile terrain']) {
+      await expect(page.getByRole('button', { name })).toBeDisabled();
+    }
+    await page.getByRole('button', { name: 'Finish editing' }).click();
+    await expect(page.getByRole('button', { name: 'Inspect terrain' })).toBeEnabled();
+  });
+
+  test('keyboard inspection continues from the point last pinned with a mouse', async ({ page }) => {
+    await page.getByRole('button', { name: '2D map', exact: true }).click();
+    await page.getByRole('button', { name: 'Inspect terrain' }).click();
+    const canvas = page.locator('.nh-map > canvas');
+    const rect = (await canvas.boundingBox())!;
+    const size = Math.min(rect.width - 84, rect.height - 82);
+    const x = rect.x + (rect.width - size) / 2 + size * 0.31;
+    const y = rect.y + (rect.height - size) / 2 + size * 0.60;
+    await page.mouse.click(x, y);
+    const first = page.locator('.nh-inspect-pin');
+    await expect(first).toHaveCount(1);
+    const initial = await first.getAttribute('transform');
+    await canvas.focus();
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Enter');
+    await expect(first).not.toHaveAttribute('transform', initial!);
+    const moved = await first.getAttribute('transform');
+    expect(moved).toContain('translate(');
+    expect(Number(moved?.match(/translate\\(([-\d.]+)/)?.[1] ?? '0')).toBeGreaterThan(310);
+  });
+
   test('stacks split panes on narrow screens and preserves the workspace controls', async ({ page }) => {
     await page.setViewportSize({ width: 420, height: 760 });
     await page.getByRole('button', { name: 'Split', exact: true }).click();
