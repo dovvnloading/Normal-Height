@@ -1542,3 +1542,29 @@
   border-color: #668973;
 }
 :root[data-theme='dark'] .nh-difference-statistics { border-color: #586e60; }
+
+/* The sidebars consume viewport space independently of window width.
+ * Split/overlay layout follows the actual terrain pane container. */
+@container (max-width: 660px) {
+  .nh-preview-surface.nh-mode-split { flex-direction: column; }
+  .nh-mode-split > .nh-three-pane,
+  .nh-mode-split > .nh-map-pane { width: 100%; }
+  .nh-mode-split > .nh-map-pane { border-top: 0; }
+  .nh-split-divider {
+    flex-basis: 10px;
+    width: 100%;
+    border-left: 0;
+    border-right: 0;
+    border-top: 1px solid #9caa9e;
+    border-bottom: 1px solid #9caa9e;
+    cursor: row-resize;
+  }
+  .nh-split-divider > span { height: 2px; width: 34px; }
+  .nh-mode-split .nh-three-tools { top: 10px; right: 8px; }
+  .nh-camera-bookmarks { right: 48px; width: min(190px, calc(100% - 60px)); }
+}
+@container (max-width: 520px) {
+  .nh-compare-panel { top: 62px; padding: 7px; }
+  .nh-compare-wipe { flex-wrap: wrap; }
+  .nh-difference-legend { bottom: 34px; width: min(235px, calc(100% - 32px)); }
+}
