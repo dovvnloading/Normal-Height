@@ -75,9 +75,11 @@ retain roughly 16 MiB across four Float32 channels.
   avoids labeling obsolete pixels as the new channel.
 - WebGL failures retain 2D mode and a retry option. A scene rebuild leaves
   the graph, source data and export workflow intact.
-- The 3D top view currently uses the perspective camera; it is not an
-  orthographic survey projection. The pinned baseline workflow compares
-  2D map and elevation fields, not simultaneous dual-WebGL cameras.
+- **Top view** uses an actual orthographic survey projection, with
+  orthographic-aware adaptive tessellation and raycast inspection. Reset Camera,
+  cardinal navigation or restoring bookmarks returns to perspective.
+- The pinned baseline workflow compares 2D map and elevation fields, not
+  simultaneous dual-WebGL cameras.
 
 ## Verification
 
