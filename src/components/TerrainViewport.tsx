@@ -43,7 +43,8 @@ import type {
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
 import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
-import { DEFAULT_MAP_FRAMING, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
+import { DEFAULT_MAP_FRAMING, sampleGrid, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
+import type { DifferenceMapResult, DifferenceStatistics } from '../render/compareMap';
 import type { MapFraming, TerrainPoint, ViewportTool } from '../model/viewportUX';
 import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
@@ -136,6 +137,12 @@ const VIEWPORT_TOOLS = [
   { value: 'profile', label: 'Profile', Icon: ChartNoAxesCombined },
 ] as const;
 
+function formatVolume(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact', maximumFractionDigits: 1,
+  }).format(value) + ' m³';
+}
+
 const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
   rockWeight: 0, soilWeight: 1, vegetationWeight: 2, snowWeight: 3,
 };
@@ -213,7 +220,7 @@ function MapCanvas({
   const imageRef = useRef<HTMLCanvasElement | null>(null);
   const baselineRasterRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRasterRef = useRef<HTMLCanvasElement | null>(null);
-  const [deltaScale, setDeltaScale] = useState(0);
+  const [deltaStats, setDeltaStats] = useState<DifferenceStatistics | null>(null);
   const materialMapsRef = useRef<PBRMaps | null>(null);
   const [rasterVersion, setRasterVersion] = useState(0);
   const [zoom, setZoom] = useState(initialFraming.zoom);
@@ -231,6 +238,7 @@ function MapCanvas({
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
   const clickStart = useRef<{ x: number; y: number } | null>(null);
+  const lastInspectAt = useRef(0);
   const hadPinch = useRef(false);
   const touches = useRef(new globalThis.Map<number, { x: number; y: number }>());
   const pinch = useRef<{
@@ -270,6 +278,18 @@ function MapCanvas({
   };
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
+  const zoomAt = useRef<(next: number, x: number, y: number) => void>(() => {});
+  zoomAt.current = (nextZoom: number, px: number, py: number) => {
+    const old = view.current;
+    const next = Math.max(0.35, Math.min(12, nextZoom));
+    if (next === old.zoom) return;
+    const ratio = next / old.zoom;
+    setOffset({
+      x: px - (px - old.offset.x) * ratio,
+      y: py - (py - old.offset.y) * ratio,
+    });
+    setZoom(next);
+  };
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -342,15 +362,15 @@ function MapCanvas({
       return canvas;
     };
     if (baseline && compareKind === 'difference') {
+      setDeltaStats(null);
       setMapBusy(true);
       const worker = new Worker(new URL('../render/compare.worker.ts', import.meta.url),
         { type: 'module' });
-      worker.onmessage = (event: MessageEvent<{
-        pixels: Uint8ClampedArray; resolution: number; maxAbs: number;
-      }>) => {
+      worker.onmessage = (event: MessageEvent<DifferenceMapResult>) => {
         if (!active) return;
         paintPixels(event.data.pixels, event.data.resolution);
-        setDeltaScale(event.data.maxAbs);
+        const { maxAbs, minDelta, maxDelta, cutVolumeM3, fillVolumeM3 } = event.data;
+        setDeltaStats({ maxAbs, minDelta, maxDelta, cutVolumeM3, fillVolumeM3 });
         setMapBusy(false);
         worker.terminate();
       };
@@ -366,6 +386,7 @@ function MapCanvas({
         current: currentHeight, baseline: baselineHeight,
         currentSize: field.resolution, baselineSize: baseline.field.resolution,
         currentScale: project.heightScale, baselineScale: baseline.project.heightScale,
+        worldSize: project.worldSize,
         outputSize: Math.min(512, Math.max(field.resolution, baseline.field.resolution)),
       }, [currentHeight.buffer, baselineHeight.buffer]);
       return () => { active = false; worker.terminate(); };
@@ -434,8 +455,13 @@ function MapCanvas({
     const { width, height } = dimensions;
     if (!width || !height) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
+    // Never reset the backing buffer during pan/zoom/channel repaint.
+    // Assigning canvas.width/height clears and reallocates it, even when the
+    // requested dimensions are unchanged, causing repeated frame stalls.
+    const pixelWidth = Math.max(1, Math.round(width * dpr));
+    const pixelHeight = Math.max(1, Math.round(height * dpr));
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.clearRect(0, 0, width, height);
     if (!imageRef.current) return;
@@ -492,16 +518,10 @@ function MapCanvas({
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
       const rect = canvas.getBoundingClientRect();
-      const oldZoom = view.current.zoom;
-      const next = Math.max(0.35, Math.min(12, oldZoom * Math.exp(-event.deltaY * 0.0015)));
+      const next = view.current.zoom * Math.exp(-event.deltaY * 0.0015);
       const px = event.clientX - rect.left - view.current.dimensions.width / 2;
       const py = event.clientY - rect.top - view.current.dimensions.height / 2;
-      const ratio = next / oldZoom;
-      setOffset({
-        x: px - (px - view.current.offset.x) * ratio,
-        y: py - (py - view.current.offset.y) * ratio,
-      });
-      setZoom(next);
+      zoomAt.current(next, px, py);
     };
     canvas.addEventListener('wheel', wheel, { passive: false });
     return () => canvas.removeEventListener('wheel', wheel);
@@ -536,7 +556,12 @@ function MapCanvas({
       return;
     }
     if (!field || event.pointerType === 'touch') return;
-    if (tool !== 'navigate') onHoverPoint(mapPoint(event.clientX, event.clientY));
+    // A 2D readback/React update at every raw pointer event is expensive in
+    // Split mode. 30 Hz is ample for hover feedback; clicks sample exactly.
+    const now = performance.now();
+    if (now - lastInspectAt.current < 33) return;
+    lastInspectAt.current = now;
+    if (tool !== 'navigate' || baseline) onHoverPoint(mapPoint(event.clientX, event.clientY));
     const rect = event.currentTarget.getBoundingClientRect();
     const size = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
     const left = (dimensions.width - size) / 2 + offset.x,
@@ -565,7 +590,9 @@ function MapCanvas({
     <div className="nh-map" ref={hostRef}>
       <canvas
         ref={canvasRef}
-        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. Drag to pan, scroll to zoom. Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
+        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. ${tool === 'navigate'
+          ? 'Drag to pan' : 'Click to sample, right or middle drag to pan'}, scroll to zoom.
+          Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
         role="img"
         tabIndex={0}
         onPointerDown={(event) => {
@@ -601,7 +628,10 @@ function MapCanvas({
             !splineEditing && tool !== 'navigate' &&
             Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) {
             const point = mapPoint(event.clientX, event.clientY);
-            if (point) onChoosePoint(point);
+            if (point) {
+              setKeyboardPoint(point);
+              onChoosePoint(point);
+            }
           }
           clickStart.current = null;
           drag.current = null;
@@ -625,11 +655,11 @@ function MapCanvas({
           }
           if (event.key === '+' || event.key === '=') {
             event.preventDefault();
-            setZoom((v) => Math.min(12, v * 1.2));
+            zoomAt.current(view.current.zoom * 1.2, 0, 0);
           }
           if (event.key === '-') {
             event.preventDefault();
-            setZoom((v) => Math.max(0.35, v / 1.2));
+            zoomAt.current(view.current.zoom / 1.2, 0, 0);
           }
           if (tool !== 'navigate') {
             const arrows: Record<string, [number, number]> = {
@@ -701,13 +731,18 @@ function MapCanvas({
         {baseline && compareKind === 'difference' ? 'Computing elevation change…' :
           `Generating ${CHANNELS.find(c => c.value === channel)?.label}…`}
       </div>}
-      {baseline && compareKind === 'difference' && !mapBusy && !mapError &&
-        <div className="nh-difference-legend">
+      {baseline && compareKind === 'difference' && deltaStats && !mapBusy && !mapError &&
+        <div className="nh-difference-legend" data-peak-delta={deltaStats.maxAbs}>
           <strong>Δ elevation in meters</strong>
           <div className="nh-difference-gradient" />
-          <div><span>−{formatMeters(deltaScale)}</span>
-            <span>0 m</span><span>+{formatMeters(deltaScale)}</span></div>
-          <small>Warm = lower · Cool = higher</small>
+          <div><span>−{formatMeters(deltaStats.maxAbs)}</span>
+            <span>0 m</span><span>+{formatMeters(deltaStats.maxAbs)}</span></div>
+          <small>Warm = lower · Cool = higher · √ intensity</small>
+          <div className="nh-difference-statistics">
+            <span>Lowered ≈ <b>{formatVolume(deltaStats.cutVolumeM3)}</b></span>
+            <span>Raised ≈ <b>{formatVolume(deltaStats.fillVolumeM3)}</b></span>
+          </div>
+          <small>Estimated from a display-resolution grid, not the sediment budget.</small>
         </div>}
       {mapError && <div className="nh-map-update error" role="alert">Could not generate this material map.</div>}
       {spline && (
@@ -832,7 +867,7 @@ function MapCanvas({
           type="button"
           title="Zoom out"
           aria-label="Zoom map out"
-          onClick={() => setZoom((v) => Math.max(0.35, v / 1.25))}
+          onClick={() => zoomAt.current(view.current.zoom / 1.25, 0, 0)}
         >
           <ZoomOut size={15} />
         </button>
@@ -841,7 +876,7 @@ function MapCanvas({
           type="button"
           title="Zoom in"
           aria-label="Zoom map in"
-          onClick={() => setZoom((v) => Math.min(12, v * 1.25))}
+          onClick={() => zoomAt.current(view.current.zoom * 1.25, 0, 0)}
         >
           <ZoomIn size={15} />
         </button>
@@ -867,7 +902,8 @@ function MapCanvas({
             {sample.value && <span>{sample.value}</span>}
           </>
         ) : (
-          <span>Hover to inspect · Drag to pan</span>
+          <span>{tool === 'navigate' ? 'Hover to inspect · Drag to pan'
+            : 'Click to sample · Right or middle drag to pan'}</span>
         )}
       </div>
     </div>
@@ -986,11 +1022,20 @@ export function TerrainViewport({
   onClearBaseline,
 }: TerrainViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [tool, setTool] = useState<ViewportTool>('navigate');
+  // Spline handles own the 2D pointer surface while editing. Suppress
+  // competing inspection tools instead of allowing inert tool selections.
+  useEffect(() => {
+    if (!splineEditing) return;
+    setTool('navigate');
+    setInspectionPoints([]);
+    setHoverPoint(null);
+  }, [splineEditing]);
   const [compareKind, setCompareKind] = useState<'wipe' | 'difference'>('wipe');
   const [wipe, setWipe] = useState(50);
   const [showLayers, setShowLayers] = useState(false);
@@ -1008,15 +1053,20 @@ export function TerrainViewport({
   const [cameraFocus, setCameraFocus] = useState<TerrainPoint | null>(null);
   const [bookmarks, setBookmarks] = useState<CameraBookmark[]>(readCameraBookmarks);
   const [showBookmarks, setShowBookmarks] = useState(false);
-  const [compactSplit, setCompactSplit] = useState(
-    () => window.matchMedia('(max-width: 660px)').matches,
-  );
+  const [compactSplit, setCompactSplit] = useState(() => window.innerWidth <= 660);
   const displayPanel = useRef<HTMLDivElement>(null);
+  const displayTrigger = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 660px)');
-    const onChange = (e: MediaQueryListEvent) => setCompactSplit(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    const host = viewportRef.current;
+    if (!host) return;
+    // Use the available editor pane, not the browser window. Both sidebars
+    // can leave a 600px canvas in a much wider 1100px desktop window.
+    const observer = new ResizeObserver(([entry]) => {
+      const stacked = entry.contentRect.width <= 660;
+      setCompactSplit(current => current === stacked ? current : stacked);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
   }, []);
   useEffect(() => {
     try { localStorage.setItem('normal-height.camera-bookmarks.v1',
@@ -1030,8 +1080,25 @@ export function TerrainViewport({
   interactions.current = { tool, choosePoint };
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
-  const effectiveMode = sceneError ? '2d' : viewMode;
+  // A WebGL failure disables only modes that require 3D. Compare is an
+  // entirely 2D analysis mode and must remain usable on software-only devices.
+  const effectiveMode = sceneError && (viewMode === '3d' || viewMode === 'split')
+    ? '2d' : viewMode;
+  useEffect(() => {
+    // These contextual popovers belong to a specific viewport. Never leave a
+    // hidden 3D menu open while switching to 2D/Compare and then resurrect it.
+    setShowSettings(false);
+    setShowBookmarks(false);
+    setShowLayers(false);
+  }, [effectiveMode]);
   const activePoint = hoverPoint ?? inspectionPoints.at(-1) ?? null;
+  const comparisonDelta = useMemo(() => {
+    if (!field || !baseline || !activePoint || effectiveMode !== 'compare' ||
+        baseline.project.worldSize !== project.worldSize) return null;
+    return sampleGrid(field.height, field.resolution, activePoint) * project.heightScale -
+      sampleGrid(baseline.field.height, baseline.field.resolution, activePoint) *
+        baseline.project.heightScale;
+  }, [field, baseline, activePoint, effectiveMode, project.worldSize, project.heightScale]);
   const activeSample = useMemo(() =>
     field && activePoint ? sampleTerrain(field, project, activePoint) : null,
     [field, project, activePoint]);
@@ -1039,6 +1106,10 @@ export function TerrainViewport({
     field && inspectionPoints.length === 2
       ? terrainProfile(field, project, inspectionPoints[0], inspectionPoints[1]) : null,
     [field, project, inspectionPoints]);
+  const lastPinnedSample = useMemo(() => {
+    const point = inspectionPoints.at(-1);
+    return field && point ? sampleTerrain(field, project, point) : null;
+  }, [field, project, inspectionPoints]);
   useEffect(() => {
     try { localStorage.setItem('normal-height.split.v1', String(splitRatio)); } catch { /* optional */ }
   }, [splitRatio]);
@@ -1137,19 +1208,25 @@ export function TerrainViewport({
 
   useEffect(() => {
     if (!showSettings) return;
+    // Focus the panel itself so Tab reaches its controls immediately.
+    displayPanel.current?.focus();
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowSettings(false);
+      if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setShowSettings(false);
+      displayTrigger.current?.focus();
     };
     const outside = (event: PointerEvent) => {
       if (!displayPanel.current?.contains(event.target as Node) &&
-          !(event.target as HTMLElement).closest('.nh-viewport-tool')) {
+          !displayTrigger.current?.contains(event.target as Node)) {
         setShowSettings(false);
       }
     };
-    window.addEventListener('keydown', escape);
+    window.addEventListener('keydown', escape, true);
     window.addEventListener('pointerdown', outside);
     return () => {
-      window.removeEventListener('keydown', escape);
+      window.removeEventListener('keydown', escape, true);
       window.removeEventListener('pointerdown', outside);
     };
   }, [showSettings]);
@@ -1168,7 +1245,9 @@ export function TerrainViewport({
   }, [field, attempt]);
 
   return (
-    <section className="nh-viewport" aria-label="Terrain preview">
+    <section ref={viewportRef} className="nh-viewport" aria-label="Terrain preview"
+      data-displayed-world-size={field ? project.worldSize : undefined}
+      data-displayed-height-scale={field ? project.heightScale : undefined}>
       <div className="nh-viewport-toolbar">
         <div className="nh-view-tabs" role="group" aria-label="Preview mode">
           <button
@@ -1217,7 +1296,8 @@ export function TerrainViewport({
           {VIEWPORT_TOOLS.map(({ value, label, Icon }) => (
             <button key={value} type="button" aria-label={label + ' terrain'}
               title={label + (value === 'measure' || value === 'profile' ? ' · select two points' : '')}
-              aria-pressed={tool === value} disabled={!field && value !== 'navigate'}
+              aria-pressed={tool === value}
+              disabled={value !== 'navigate' && (!field || splineEditing)}
               className={tool === value ? 'active' : ''}
               onClick={() => { setTool(value); setInspectionPoints([]); setHoverPoint(null); }}>
               <Icon size={15} /><span>{label}</span>
@@ -1273,8 +1353,9 @@ export function TerrainViewport({
             {focusMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             <span>{focusMode ? 'Restore' : 'Focus'}</span>
           </button>
-          {effectiveMode !== '2d' && (
+          {(effectiveMode === '3d' || effectiveMode === 'split') && (
             <button
+              ref={displayTrigger}
               className={`nh-viewport-tool ${showSettings ? 'active' : ''}`}
               type="button"
               title="Display settings"
@@ -1475,6 +1556,14 @@ export function TerrainViewport({
         {effectiveMode === 'compare' && baseline && (
           <div className="nh-compare-panel">
             <strong>{baseline.label} → {previewLabel}</strong>
+            {comparisonDelta !== null && activeSample && (
+              <div className="nh-compare-sample">
+                <span>Cursor · E {formatMeters(activeSample.easting)} ·
+                  N {formatMeters(activeSample.northing)}</span>
+                <span>Current {formatMeters(activeSample.elevation)}</span>
+                <span>Δ <b>{comparisonDelta > 0 ? '+' : ''}{formatMeters(comparisonDelta)}</b></span>
+              </div>
+            )}
             {baseline.project.worldSize !== project.worldSize ?
               <span>Cannot compare different tile widths. Restore the original tile width.</span> : (
                 <>
@@ -1498,7 +1587,7 @@ export function TerrainViewport({
             )}
           </div>
         )}
-        {field && tool !== 'navigate' && (
+        {field && tool !== 'navigate' && effectiveMode !== 'compare' && (
           <div className="nh-inspection-readout" role="status" aria-live="off">
             <div className="nh-inspect-header">
               <strong>{tool === 'profile' ? 'Elevation profile' : tool === 'measure'
@@ -1519,7 +1608,7 @@ export function TerrainViewport({
                   <span>{activeSample.slope.toFixed(1)}° slope</span>
                   <span>Flow {activeSample.flow.toPrecision(3)}</span>
                 </div>
-                {inspectionPoints.length > 0 && effectiveMode !== 'compare' && (
+                {inspectionPoints.length > 0 && (
                   <button className="nh-inspect-focus" type="button"
                     aria-label="Focus 3D camera at pinned sample"
                     onClick={() => {
@@ -1564,6 +1653,13 @@ export function TerrainViewport({
               <small>{inspectionPoints.length === 0 ? 'Choose point A' : 'Choose point B'}</small>}
           </div>
         )}
+        <div className="nh-sr-only" aria-live="polite" aria-atomic="true">
+          {lastPinnedSample ? `Point ${inspectionPoints.length === 2 ? 'B' : 'A'} pinned.
+            Easting ${formatMeters(lastPinnedSample.easting)}, northing
+            ${formatMeters(lastPinnedSample.northing)}, elevation
+            ${formatMeters(lastPinnedSample.elevation)}, slope
+            ${lastPinnedSample.slope.toFixed(1)} degrees.` : ''}
+        </div>
         <div className="nh-preview-source">
           <span
             className={
@@ -1573,7 +1669,7 @@ export function TerrainViewport({
           <span>{previewLabel}</span>
           {stale && !busy && <em>Out of date</em>}
         </div>
-        {sceneError && (
+        {sceneError && effectiveMode !== 'compare' && (
           <div className="nh-render-error">
             <span>{sceneError}</span>
             <button type="button" onClick={() => setAttempt((v) => v + 1)}>
@@ -1613,15 +1709,18 @@ export function TerrainViewport({
             </button>
           </div>
         )}
-        {showSettings && effectiveMode !== '2d' && (
-          <div className="nh-display-panel" ref={displayPanel}
+        {showSettings && (effectiveMode === '3d' || effectiveMode === 'split') && (
+          <div className="nh-display-panel" ref={displayPanel} tabIndex={-1}
             role="region" aria-label="Display settings">
             <div className="nh-display-title">
               <span>DISPLAY SETTINGS</span>
               <button
                 type="button"
                 aria-label="Close display settings"
-                onClick={() => setShowSettings(false)}
+                onClick={() => {
+                  setShowSettings(false);
+                  displayTrigger.current?.focus();
+                }}
               >
                 <X size={14} />
               </button>

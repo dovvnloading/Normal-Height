@@ -105,5 +105,5 @@ export function terrainProfile(
 }
 
 export function formatMeters(value: number): string {
-  return value.toLocaleString(undefined, { maximumFractionDigits: value < 10 ? 1 : 0 }) + ' m';
+  return value.toLocaleString(undefined, { maximumFractionDigits: Math.abs(value) < 10 ? 1 : 0 }) + ' m';
 }
