@@ -32,7 +32,10 @@ The shared toolbar has Navigate, Inspect, Measure and Profile.
 1. **Inspect:** click either the 2D source map or the 3D terrain to pin a
    location. The same normalized (u,v) coordinate is highlighted in the other
    view. Hover provides an ephemeral marker. The readout shows tile-relative
-   easting/northing, elevation in meters, physical slope and flow.
+   easting/northing, elevation in meters, physical slope and flow. From a
+   pinned 2D sample, **Focus 3D at sample** moves the camera's orbit target
+   to that exact source location without changing its direction or distance,
+   entering linked Split mode when necessary.
 2. **Measure:** click A then B. The readout shows horizontal distance,
    elevation change, grade and sampled surface distance.
 3. **Profile:** click A then B to additionally plot source elevation along the
