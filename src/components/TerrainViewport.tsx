@@ -32,6 +32,7 @@ import {
   Bookmark,
   BookmarkPlus,
   Trash2,
+  Layers2,
 } from 'lucide-react';
 import type {
   HeightField,
@@ -181,6 +182,8 @@ function MapCanvas({
   baseline,
   compareKind,
   wipe,
+  overlayChannel,
+  overlayOpacity,
 }: {
   field: HeightField | null;
   channel: MapChannel;
@@ -198,11 +201,14 @@ function MapCanvas({
   baseline: Baseline | null;
   compareKind: 'wipe' | 'difference';
   wipe: number;
+  overlayChannel: MapChannel | null;
+  overlayOpacity: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLCanvasElement | null>(null);
   const baselineRasterRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayRasterRef = useRef<HTMLCanvasElement | null>(null);
   const [deltaScale, setDeltaScale] = useState(0);
   const materialMapsRef = useRef<PBRMaps | null>(null);
   const [rasterVersion, setRasterVersion] = useState(0);
@@ -389,6 +395,30 @@ function MapCanvas({
     baseline, compareKind]);
 
   useEffect(() => {
+    overlayRasterRef.current = null;
+    if (field && overlayChannel && !baseline) {
+      const key = `${overlayChannel}/${project.worldSize}/${project.heightScale}`;
+      const cached = mapRasters.get(field)?.get(key);
+      if (cached) overlayRasterRef.current = cached;
+      else {
+        const n = field.resolution;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = n;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const image = ctx.createImageData(n, n);
+          image.data.set(colorizeMap(field, overlayChannel,
+            project.worldSize, project.heightScale));
+          ctx.putImageData(image, 0, 0);
+          overlayRasterRef.current = canvas;
+          rememberRaster(field, key, canvas);
+        }
+      }
+    }
+    setRasterVersion(n => n + 1);
+  }, [field, overlayChannel, project.worldSize, project.heightScale, baseline]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     const context = canvas?.getContext('2d');
     if (!canvas || !context) return;
@@ -405,6 +435,12 @@ function MapCanvas({
       top = (height - size) / 2 + offset.y;
     context.imageSmoothingEnabled = size < imageRef.current.width;
     context.drawImage(imageRef.current, left, top, size, size);
+    if (!baseline && overlayRasterRef.current) {
+      context.save();
+      context.globalAlpha = overlayOpacity / 100;
+      context.drawImage(overlayRasterRef.current, left, top, size, size);
+      context.restore();
+    }
     if (baseline && compareKind === 'wipe' && baselineRasterRef.current) {
       context.save();
       context.beginPath();
@@ -439,7 +475,7 @@ function MapCanvas({
       context.stroke();
     }
   }, [dimensions, zoom, offset, rasterVersion, field, channel, project.worldSize,
-    project.heightScale, baseline, compareKind, wipe]);
+    project.heightScale, baseline, compareKind, wipe, overlayOpacity, overlayChannel]);
 
   useEffect(() => {
     const canvas = hostRef.current;
@@ -890,6 +926,9 @@ export function TerrainViewport({
   const [tool, setTool] = useState<ViewportTool>('navigate');
   const [compareKind, setCompareKind] = useState<'wipe' | 'difference'>('wipe');
   const [wipe, setWipe] = useState(50);
+  const [showLayers, setShowLayers] = useState(false);
+  const [overlayChannel, setOverlayChannel] = useState<MapChannel | null>(null);
+  const [overlayOpacity, setOverlayOpacity] = useState(45);
   const [hoverPoint, setHoverPoint] = useState<TerrainPoint | null>(null);
   const [inspectionPoints, setInspectionPoints] = useState<TerrainPoint[]>([]);
   const [splitRatio, setSplitRatio] = useState(() => {
@@ -1109,6 +1148,13 @@ export function TerrainViewport({
         </div>
         <div className="nh-viewport-toolbar-right">
           {effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+            <button type="button" className={`nh-viewport-tool ${showLayers ? 'active' : ''}`}
+              title="Map overlays" aria-label="Map overlays" aria-expanded={showLayers}
+              onClick={() => setShowLayers(v => !v)}>
+              <Layers2 size={16} /><span>Layers</span>
+            </button>
+          )}
+          {effectiveMode !== '3d' && effectiveMode !== 'compare' && (
             <label className="nh-channel-select">
               <TerrainIcon name={MAP_ICON_NAMES[channel]} height={16} />
               <select
@@ -1315,8 +1361,35 @@ export function TerrainViewport({
               onHoverPoint={setHoverPoint} onChoosePoint={choosePoint}
               baseline={effectiveMode === 'compare' && baseline?.project.worldSize === project.worldSize
                 ? baseline : null}
-              compareKind={compareKind} wipe={wipe} />
+              compareKind={compareKind} wipe={wipe}
+              overlayChannel={effectiveMode === 'compare' ? null : overlayChannel}
+              overlayOpacity={overlayOpacity} />
             {effectiveMode !== 'compare' && <MapLegend field={field} channel={channel} project={project} />}
+          </div>
+        )}
+        {showLayers && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+          <div className="nh-overlay-panel" role="region" aria-label="Map overlays">
+            <div className="nh-overlay-heading">
+              <strong>Map overlay</strong>
+              <button type="button" aria-label="Close map overlays"
+                onClick={() => setShowLayers(false)}><X size={14}/></button>
+            </div>
+            <label>Layer
+              <select aria-label="Overlay channel" value={overlayChannel ?? ''}
+                onChange={e => setOverlayChannel(e.target.value ?
+                  e.target.value as MapChannel : null)}>
+                <option value="">No overlay</option>
+                {CHANNELS.filter(c => ['slope', 'flow', 'wear', 'deposition', 'normal']
+                  .includes(c.value)).map(c =>
+                    <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </label>
+            {overlayChannel && <label>Opacity <b>{overlayOpacity}%</b>
+              <input type="range" aria-label="Overlay opacity" min="5" max="100"
+                step="5" value={overlayOpacity}
+                onChange={e => setOverlayOpacity(Number(e.target.value))}/>
+            </label>}
+            <small>Display-only overlay; source and exports stay unchanged.</small>
           </div>
         )}
         {effectiveMode === 'compare' && baseline && (
