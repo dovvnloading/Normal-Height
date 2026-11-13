@@ -509,11 +509,34 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
+  /** Maintain approximately constant on-screen marker sizes while zooming
+   * from a whole 8 km tile into an individual cliff face. Fixed-size spheres
+   * otherwise obscure the terrain by hundreds of pixels at close range. */
+  private scaleInspectionMarkers() {
+    const height = this.host.clientHeight;
+    if (height <= 0) return;
+    const fovScale = 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5));
+    const orbitDistance = this.camera.position.distanceTo(this.controls.target);
+    const markers = [this.hoverMarker, ...this.pinnedMarkers];
+    for (let i = 0; i < markers.length; i++) {
+      const marker = markers[i];
+      if (!marker.visible) continue;
+      const distance = this.orthographic ? orbitDistance :
+        this.camera.position.distanceTo(marker.position);
+      const worldPerPixel = fovScale * Math.max(0.001, distance) / height;
+      const baseRadius = i === 0 ? 0.019 : 0.023;
+      const pixelRadius = i === 0 ? 4 : 5;
+      const radius = THREE.MathUtils.clamp(worldPerPixel * pixelRadius, 0.0001, 0.06);
+      marker.scale.setScalar(radius / baseRadius);
+    }
+  }
+
   private animate = () => {
     if (this.disposed || this.contextLost) return;
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
+    this.scaleInspectionMarkers();
     // Camera changes mark LOD dirty. Don't re-plan 3x/s while idle. When
     // auto-rotating, refresh at most every 1.5 s rather than staying stale.
     const lodNow = performance.now();
