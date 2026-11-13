@@ -173,6 +173,8 @@ export class TerrainScene {
     new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color: '#fff3da', linewidth: 2, depthTest: false }),
   );
+  private inspectLineField: HeightField | null = null;
+  private inspectLineKey = '';
 
   /** Hit-test the displayed terrain, returning coordinates in the source heightfield. */
   pickPoint(clientX: number, clientY: number): TerrainPoint | null {
@@ -211,18 +213,29 @@ export class TerrainScene {
       if (pinned[i]) locate(pinned[i], marker);
     }
     this.inspectLine.visible = !!field && pinned.length === 2;
-    if (field && project && pinned.length === 2) {
+    const key = field && project && pinned.length === 2 ?
+      JSON.stringify([pinned, project.worldSize, project.heightScale, this.settings.exaggeration]) : '';
+    if (field && project && key && (field !== this.inspectLineField || key !== this.inspectLineKey)) {
       const positions: THREE.Vector3[] = [];
+      const scale = TERRAIN_SIZE * project.heightScale / project.worldSize *
+        this.settings.exaggeration;
       for (let i = 0; i <= 64; i++) {
         const t = i / 64;
-        const p = { u: pinned[0].u * (1 - t) + pinned[1].u * t,
-          v: pinned[0].v * (1 - t) + pinned[1].v * t };
-        const marker = new THREE.Object3D();
-        locate(p, marker);
-        positions.push(marker.position);
+        const u = pinned[0].u * (1 - t) + pinned[1].u * t;
+        const v = pinned[0].v * (1 - t) + pinned[1].v * t;
+        positions.push(new THREE.Vector3(
+          (u - 0.5) * TERRAIN_SIZE,
+          bilinear(field.height, field.resolution, u, v) * scale + 0.024,
+          (v - 0.5) * TERRAIN_SIZE,
+        ));
       }
       this.inspectLine.geometry.dispose();
       this.inspectLine.geometry = new THREE.BufferGeometry().setFromPoints(positions);
+      this.inspectLineField = field;
+      this.inspectLineKey = key;
+    } else if (!key) {
+      this.inspectLineField = null;
+      this.inspectLineKey = '';
     }
     this.needsRender = true;
   }
