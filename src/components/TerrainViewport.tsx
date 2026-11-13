@@ -215,6 +215,7 @@ function MapCanvas({
   const [zoom, setZoom] = useState(initialFraming.zoom);
   const [offset, setOffset] = useState(initialFraming.offset);
   const [mapBusy, setMapBusy] = useState(false);
+  const [keyboardPoint, setKeyboardPoint] = useState<TerrainPoint>({ u: 0.5, v: 0.5 });
   const [mapError, setMapError] = useState(false);
   useEffect(() => onFramingChange({ zoom, offset }), [zoom, offset]);
   const [sample, setSample] = useState<{
@@ -226,6 +227,7 @@ function MapCanvas({
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
   const clickStart = useRef<{ x: number; y: number } | null>(null);
+  const hadPinch = useRef(false);
   const touches = useRef(new globalThis.Map<number, { x: number; y: number }>());
   const pinch = useRef<{
     distance: number; middleX: number; middleY: number;
@@ -499,8 +501,10 @@ function MapCanvas({
   }, []);
 
   function inspect(event: React.PointerEvent<HTMLCanvasElement>) {
-    if (event.pointerType === 'touch' && touches.current.size >= 2 && pinch.current) {
+    if (event.pointerType === 'touch' && touches.current.has(event.pointerId)) {
       touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+    if (event.pointerType === 'touch' && touches.current.size >= 2 && pinch.current) {
       const [a, b] = [...touches.current.values()];
       const distance = Math.hypot(a.x - b.x, a.y - b.y);
       const next = Math.max(0.35, Math.min(12, pinch.current.zoom * distance / pinch.current.distance));
@@ -525,7 +529,7 @@ function MapCanvas({
       return;
     }
     if (!field || event.pointerType === 'touch') return;
-    onHoverPoint(mapPoint(event.clientX, event.clientY));
+    if (tool !== 'navigate') onHoverPoint(mapPoint(event.clientX, event.clientY));
     const rect = event.currentTarget.getBoundingClientRect();
     const size = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
     const left = (dimensions.width - size) / 2 + offset.x,
@@ -554,7 +558,7 @@ function MapCanvas({
     <div className="nh-map" ref={hostRef}>
       <canvas
         ref={canvasRef}
-        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. Drag to pan, scroll to zoom. Press Home to fit.`}
+        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. Drag to pan, scroll to zoom. Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
         role="img"
         tabIndex={0}
         onPointerDown={(event) => {
@@ -563,6 +567,7 @@ function MapCanvas({
           if (event.pointerType === 'touch') {
             touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
             if (touches.current.size === 2) {
+              hadPinch.current = true;
               const [a, b] = [...touches.current.values()];
               pinch.current = {
                 distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
@@ -584,30 +589,59 @@ function MapCanvas({
           const start = clickStart.current;
           if (event.pointerType === 'touch') touches.current.delete(event.pointerId);
           if (touches.current.size < 2) pinch.current = null;
-          if (start && !splineEditing && tool !== 'navigate' &&
+          if (start && !hadPinch.current && !splineEditing && tool !== 'navigate' &&
             Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) {
             const point = mapPoint(event.clientX, event.clientY);
             if (point) onChoosePoint(point);
           }
           clickStart.current = null;
           drag.current = null;
+          if (touches.current.size === 0) hadPinch.current = false;
           if (event.currentTarget.hasPointerCapture(event.pointerId))
             event.currentTarget.releasePointerCapture(event.pointerId);
         }}
         onPointerCancel={(event) => {
           touches.current.delete(event.pointerId);
           pinch.current = null;
+          hadPinch.current = false;
           clickStart.current = null;
           drag.current = null;
         }}
         onPointerLeave={() => { setSample(null); onHoverPoint(null); }}
         onKeyDown={(event) => {
           if (event.key === 'Home') {
+            event.preventDefault();
             setZoom(1);
             setOffset({ x: 0, y: 0 });
           }
-          if (event.key === '+' || event.key === '=') setZoom((v) => Math.min(12, v * 1.2));
-          if (event.key === '-') setZoom((v) => Math.max(0.35, v / 1.2));
+          if (event.key === '+' || event.key === '=') {
+            event.preventDefault();
+            setZoom((v) => Math.min(12, v * 1.2));
+          }
+          if (event.key === '-') {
+            event.preventDefault();
+            setZoom((v) => Math.max(0.35, v / 1.2));
+          }
+          if (tool !== 'navigate') {
+            const arrows: Record<string, [number, number]> = {
+              ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+              ArrowUp: [0, -1], ArrowDown: [0, 1],
+            };
+            const direction = arrows[event.key];
+            if (direction) {
+              event.preventDefault();
+              const delta = event.shiftKey ? 0.05 : 0.01;
+              const next = {
+                u: Math.max(0, Math.min(1, keyboardPoint.u + direction[0] * delta)),
+                v: Math.max(0, Math.min(1, keyboardPoint.v + direction[1] * delta)),
+              };
+              setKeyboardPoint(next);
+              onHoverPoint(next);
+            } else if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onChoosePoint(keyboardPoint);
+            }
+          }
         }}
       />
       {(hoverPoint || inspectionPoints.length > 0) && (
