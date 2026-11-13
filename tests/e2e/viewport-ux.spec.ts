@@ -82,6 +82,27 @@ test.describe('terrain viewport UX', () => {
     await expect(page.getByRole('combobox', { name: 'Map channel' }).locator('optgroup')).toHaveCount(4);
   });
 
+  test('toolbar groups do not collide at common dock widths', async ({ page }) => {
+    for (const width of [1920, 1440, 1024, 820, 600, 420]) {
+      await page.setViewportSize({ width, height: 850 });
+      await page.getByRole('button', { name: '2D map', exact: true }).click();
+      const geometry = await page.locator('.nh-viewport-toolbar').evaluate(toolbar => {
+        const selectors = ['.nh-view-tabs', '.nh-viewport-toolset', '.nh-viewport-toolbar-right'];
+        const rects = selectors.map(selector => toolbar.querySelector(selector)!.getBoundingClientRect());
+        const conflicts: string[] = [];
+        for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) {
+          const a = rects[i], b = rects[j];
+          if (a.top < b.bottom - 1 && b.top < a.bottom - 1 &&
+              a.left < b.right - 1 && b.left < a.right - 1)
+            conflicts.push(selectors[i] + ' overlaps ' + selectors[j]);
+        }
+        return { conflicts, scrollWidth: toolbar.scrollWidth, clientWidth: toolbar.clientWidth };
+      });
+      expect(geometry.conflicts, `viewport at ${width}px`).toEqual([]);
+      expect(geometry.scrollWidth, `overflow at ${width}px`).toBeLessThanOrEqual(geometry.clientWidth + 2);
+    }
+  });
+
   test('stacks split panes on narrow screens and preserves the workspace controls', async ({ page }) => {
     await page.setViewportSize({ width: 420, height: 760 });
     await page.getByRole('button', { name: 'Split', exact: true }).click();
