@@ -1707,7 +1707,7 @@ export function TerrainViewport({
                 onClick={() => {
                   setShowSettings(false);
                   displayTrigger.current?.focus();
-                }
+                }}
               >
                 <X size={14} />
               </button>
