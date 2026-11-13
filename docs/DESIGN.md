@@ -50,7 +50,7 @@ The shape operation evaluates a nearest-segment distance field in a limited-radi
 
 ## Preview and export truthfulness
 
-Working simulation resolution, rendered mesh resolution, and export resolution are different values. The UI reports them separately. The 3D mesh is capped at 512 samples per side; higher-resolution output remains available in 2D and export.
+Working simulation resolution, rendered mesh resolution, and export resolution are different values. The UI reports them separately. The 3D mesh is camera-adaptive with bounded budgets independent of source grid and export grid size. Source-derived normals preserve lighting fidelity between levels of detail; rendered triangles never imply additional erosion data beyond the underlying Float32 field. View-only inspection and comparison use that authoritative field, not the display mesh.
 
 The 2D height display uses a fixed 0–1 elevation scale, explicitly labeled. The 16-bit PNG export remaps the actual minimum and maximum to use the full 16-bit range; its metadata supplies the inverse transform in meters. Normal exports use physical dimensions, never the viewport exaggeration.
 
