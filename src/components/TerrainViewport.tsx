@@ -43,7 +43,8 @@ import type {
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
 import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
-import { DEFAULT_MAP_FRAMING, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
+import { DEFAULT_MAP_FRAMING, sampleGrid, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
+import type { DifferenceMapResult, DifferenceStatistics } from '../render/compareMap';
 import type { MapFraming, TerrainPoint, ViewportTool } from '../model/viewportUX';
 import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
@@ -136,6 +137,12 @@ const VIEWPORT_TOOLS = [
   { value: 'profile', label: 'Profile', Icon: ChartNoAxesCombined },
 ] as const;
 
+function formatVolume(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    notation: 'compact', maximumFractionDigits: 1,
+  }).format(value) + ' m³';
+}
+
 const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
   rockWeight: 0, soilWeight: 1, vegetationWeight: 2, snowWeight: 3,
 };
@@ -213,7 +220,7 @@ function MapCanvas({
   const imageRef = useRef<HTMLCanvasElement | null>(null);
   const baselineRasterRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRasterRef = useRef<HTMLCanvasElement | null>(null);
-  const [deltaScale, setDeltaScale] = useState(0);
+  const [deltaStats, setDeltaStats] = useState<DifferenceStatistics | null>(null);
   const materialMapsRef = useRef<PBRMaps | null>(null);
   const [rasterVersion, setRasterVersion] = useState(0);
   const [zoom, setZoom] = useState(initialFraming.zoom);
@@ -354,15 +361,15 @@ function MapCanvas({
       return canvas;
     };
     if (baseline && compareKind === 'difference') {
+      setDeltaStats(null);
       setMapBusy(true);
       const worker = new Worker(new URL('../render/compare.worker.ts', import.meta.url),
         { type: 'module' });
-      worker.onmessage = (event: MessageEvent<{
-        pixels: Uint8ClampedArray; resolution: number; maxAbs: number;
-      }>) => {
+      worker.onmessage = (event: MessageEvent<DifferenceMapResult>) => {
         if (!active) return;
         paintPixels(event.data.pixels, event.data.resolution);
-        setDeltaScale(event.data.maxAbs);
+        const { maxAbs, minDelta, maxDelta, cutVolumeM3, fillVolumeM3 } = event.data;
+        setDeltaStats({ maxAbs, minDelta, maxDelta, cutVolumeM3, fillVolumeM3 });
         setMapBusy(false);
         worker.terminate();
       };
@@ -378,6 +385,7 @@ function MapCanvas({
         current: currentHeight, baseline: baselineHeight,
         currentSize: field.resolution, baselineSize: baseline.field.resolution,
         currentScale: project.heightScale, baselineScale: baseline.project.heightScale,
+        worldSize: project.worldSize,
         outputSize: Math.min(512, Math.max(field.resolution, baseline.field.resolution)),
       }, [currentHeight.buffer, baselineHeight.buffer]);
       return () => { active = false; worker.terminate(); };
@@ -547,7 +555,7 @@ function MapCanvas({
       return;
     }
     if (!field || event.pointerType === 'touch') return;
-    if (tool !== 'navigate') onHoverPoint(mapPoint(event.clientX, event.clientY));
+    if (tool !== 'navigate' || baseline) onHoverPoint(mapPoint(event.clientX, event.clientY));
     const rect = event.currentTarget.getBoundingClientRect();
     const size = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
     const left = (dimensions.width - size) / 2 + offset.x,
@@ -717,13 +725,18 @@ function MapCanvas({
         {baseline && compareKind === 'difference' ? 'Computing elevation change…' :
           `Generating ${CHANNELS.find(c => c.value === channel)?.label}…`}
       </div>}
-      {baseline && compareKind === 'difference' && !mapBusy && !mapError &&
+      {baseline && compareKind === 'difference' && deltaStats && !mapBusy && !mapError &&
         <div className="nh-difference-legend">
           <strong>Δ elevation in meters</strong>
           <div className="nh-difference-gradient" />
-          <div><span>−{formatMeters(deltaScale)}</span>
-            <span>0 m</span><span>+{formatMeters(deltaScale)}</span></div>
-          <small>Warm = lower · Cool = higher</small>
+          <div><span>{formatMeters(deltaStats.minDelta)}</span>
+            <span>0 m</span><span>+{formatMeters(Math.max(0, deltaStats.maxDelta))}</span></div>
+          <small>Warm = lower · Cool = higher · √ intensity</small>
+          <div className="nh-difference-statistics">
+            <span>Lowered ≈ <b>{formatVolume(deltaStats.cutVolumeM3)}</b></span>
+            <span>Raised ≈ <b>{formatVolume(deltaStats.fillVolumeM3)}</b></span>
+          </div>
+          <small>Estimated from a display-resolution grid, not the sediment budget.</small>
         </div>}
       {mapError && <div className="nh-map-update error" role="alert">Could not generate this material map.</div>}
       {spline && (
@@ -1057,6 +1070,13 @@ export function TerrainViewport({
   settingsRef.current = settings;
   const effectiveMode = sceneError ? '2d' : viewMode;
   const activePoint = hoverPoint ?? inspectionPoints.at(-1) ?? null;
+  const comparisonDelta = useMemo(() => {
+    if (!field || !baseline || !activePoint || effectiveMode !== 'compare' ||
+        baseline.project.worldSize !== project.worldSize) return null;
+    return sampleGrid(field.height, field.resolution, activePoint) * project.heightScale -
+      sampleGrid(baseline.field.height, baseline.field.resolution, activePoint) *
+        baseline.project.heightScale;
+  }, [field, baseline, activePoint, effectiveMode, project.worldSize, project.heightScale]);
   const activeSample = useMemo(() =>
     field && activePoint ? sampleTerrain(field, project, activePoint) : null,
     [field, project, activePoint]);
@@ -1503,6 +1523,11 @@ export function TerrainViewport({
         {effectiveMode === 'compare' && baseline && (
           <div className="nh-compare-panel">
             <strong>{baseline.label} → {previewLabel}</strong>
+            {comparisonDelta !== null && (
+              <div className="nh-compare-sample">
+                Cursor Δ <b>{comparisonDelta > 0 ? '+' : ''}{formatMeters(comparisonDelta)}</b>
+              </div>
+            )}
             {baseline.project.worldSize !== project.worldSize ?
               <span>Cannot compare different tile widths. Restore the original tile width.</span> : (
                 <>
