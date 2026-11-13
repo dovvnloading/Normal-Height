@@ -1546,9 +1546,12 @@ export function TerrainViewport({
         {effectiveMode === 'compare' && baseline && (
           <div className="nh-compare-panel">
             <strong>{baseline.label} → {previewLabel}</strong>
-            {comparisonDelta !== null && (
+            {comparisonDelta !== null && activeSample && (
               <div className="nh-compare-sample">
-                Cursor Δ <b>{comparisonDelta > 0 ? '+' : ''}{formatMeters(comparisonDelta)}</b>
+                <span>Cursor · E {formatMeters(activeSample.easting)} ·
+                  N {formatMeters(activeSample.northing)}</span>
+                <span>Current {formatMeters(activeSample.elevation)}</span>
+                <span>Δ <b>{comparisonDelta > 0 ? '+' : ''}{formatMeters(comparisonDelta)}</b></span>
               </div>
             )}
             {baseline.project.worldSize !== project.worldSize ?
@@ -1574,7 +1577,7 @@ export function TerrainViewport({
             )}
           </div>
         )}
-        {field && tool !== 'navigate' && (
+        {field && tool !== 'navigate' && effectiveMode !== 'compare' && (
           <div className="nh-inspection-readout" role="status" aria-live="off">
             <div className="nh-inspect-header">
               <strong>{tool === 'profile' ? 'Elevation profile' : tool === 'measure'
