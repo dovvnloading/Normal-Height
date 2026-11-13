@@ -286,6 +286,18 @@ test.describe('terrain viewport UX', () => {
       .toHaveAttribute('aria-orientation', 'horizontal');
   });
 
+  test('Compare hides irrelevant 3D Display settings and does not reopen old popovers', async ({ page }) => {
+    await page.getByRole('button', { name: 'Display settings' }).click();
+    await expect(page.getByRole('region', { name: 'Display settings' })).toBeVisible();
+    await page.getByRole('button', { name: 'Pin comparison baseline' }).click();
+    await page.getByRole('button', { name: 'Compare', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Display settings' })).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Display settings' })).toHaveCount(0);
+    await page.getByRole('button', { name: '3D terrain', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Display settings' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Display settings' })).toHaveCount(0);
+  });
+
   test('comparison explains sampled cut/fill estimates and cursor elevation delta', async ({ page }, testInfo) => {
     await page.getByRole('button', { name: 'Pin comparison baseline' }).click();
     await page.getByRole('button', { name: 'Compare', exact: true }).click();
