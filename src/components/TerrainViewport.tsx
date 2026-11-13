@@ -270,7 +270,7 @@ function MapCanvas({
   };
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
-  const zoomAt = useRef((next: number, x: number, y: number) => {});
+  const zoomAt = useRef<(next: number, x: number, y: number) => void>(() => {});
   zoomAt.current = (nextZoom: number, px: number, py: number) => {
     const old = view.current;
     const next = Math.max(0.35, Math.min(12, nextZoom));
