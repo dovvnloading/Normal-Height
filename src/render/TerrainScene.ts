@@ -1255,6 +1255,25 @@ export class TerrainScene {
     return (Math.atan2(dx, dz) * 180 / Math.PI + 360) % 360;
   }
 
+  /** Camera bookmarks affect only the viewport, never source terrain. */
+  captureCamera(): { position: [number, number, number]; target: [number, number, number] } {
+    return {
+      position: this.camera.position.toArray() as [number, number, number],
+      target: this.controls.target.toArray() as [number, number, number],
+    };
+  }
+
+  restoreCamera(state: { position: [number, number, number]; target: [number, number, number] }) {
+    if (![...state.position, ...state.target].every(Number.isFinite)) return;
+    this.camera.position.fromArray(state.position);
+    this.controls.target.fromArray(state.target);
+    this.cameraAdjusted = true;
+    this.cameraView = 'perspective';
+    this.controls.update();
+    this.needsRender = true;
+    this.lodDirty = true;
+  }
+
   /** Rotate to a cardinal direction while keeping distance, height, and focal point. */
   orientCamera(heading: number) {
     const delta = this.camera.position.clone().sub(this.controls.target);
