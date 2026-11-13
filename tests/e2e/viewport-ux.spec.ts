@@ -76,6 +76,9 @@ test.describe('terrain viewport UX', () => {
     await expect(page.locator('.nh-profile-chart')).toBeVisible();
     await expect(page.locator('.nh-measure-results')).toContainText('Distance');
     await expect(page.locator('.nh-inspect-pin > circle')).toHaveCount(2);
+    await page.getByRole('button', { name: 'Focus 3D camera at pinned sample' }).click();
+    await expect(page.locator('.nh-mode-split')).toBeVisible();
+    await expect(page.locator('.nh-map-camera-focus')).toBeVisible();
     await page.getByRole('button', { name: 'Clear sample points' }).click();
     await expect(page.locator('.nh-profile-chart')).toHaveCount(0);
   });
