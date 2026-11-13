@@ -1016,6 +1016,7 @@ export function TerrainViewport({
   onClearBaseline,
 }: TerrainViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -1046,15 +1047,19 @@ export function TerrainViewport({
   const [cameraFocus, setCameraFocus] = useState<TerrainPoint | null>(null);
   const [bookmarks, setBookmarks] = useState<CameraBookmark[]>(readCameraBookmarks);
   const [showBookmarks, setShowBookmarks] = useState(false);
-  const [compactSplit, setCompactSplit] = useState(
-    () => window.matchMedia('(max-width: 660px)').matches,
-  );
+  const [compactSplit, setCompactSplit] = useState(() => window.innerWidth <= 660);
   const displayPanel = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 660px)');
-    const onChange = (e: MediaQueryListEvent) => setCompactSplit(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
+    const host = viewportRef.current;
+    if (!host) return;
+    // Use the available editor pane, not the browser window. Both sidebars
+    // can leave a 600px canvas in a much wider 1100px desktop window.
+    const observer = new ResizeObserver(([entry]) => {
+      const stacked = entry.contentRect.width <= 660;
+      setCompactSplit(current => current === stacked ? current : stacked);
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
   }, []);
   useEffect(() => {
     try { localStorage.setItem('normal-height.camera-bookmarks.v1',
@@ -1213,7 +1218,7 @@ export function TerrainViewport({
   }, [field, attempt]);
 
   return (
-    <section className="nh-viewport" aria-label="Terrain preview"
+    <section ref={viewportRef} className="nh-viewport" aria-label="Terrain preview"
       data-displayed-world-size={field ? project.worldSize : undefined}
       data-displayed-height-scale={field ? project.heightScale : undefined}>
       <div className="nh-viewport-toolbar">
