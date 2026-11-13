@@ -5,6 +5,7 @@ import {
   FolderOpen,
   Save,
   Undo2,
+  History,
   Redo2,
   Play,
   LoaderCircle,
@@ -56,16 +57,18 @@ function savedTheme(): ThemeMode | null {
   }
 }
 
+// Every session opens the current default landscape. The autosave of the
+// last session is offered (Restore last session), never loaded by itself:
+// an old scene would hide newer presets and engine defaults.
 function initialProject() {
+  let lastSession: TerrainProject | null = null;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return { project: saved ? parseProject(JSON.parse(saved)) : createProject(), message: '' };
+    if (saved) lastSession = parseProject(JSON.parse(saved));
   } catch {
-    return {
-      project: createProject(),
-      message: 'The previous autosave could not be restored. A fresh landscape is ready.',
-    };
+    lastSession = null;
   }
+  return { project: createProject(), lastSession, message: '' };
 }
 const isEditing = (element: EventTarget | null) =>
   element instanceof HTMLElement &&
@@ -96,6 +99,8 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   const [graphRatio, setGraphRatio] = useState(36);
   const [toast, setToast] = useState(initial.message);
+  // The previous session's autosave, until the user restores it or edits.
+  const [lastSession, setLastSession] = useState(initial.lastSession);
   const [saved, setSaved] = useState(true);
   const [storageError, setStorageError] = useState(false);
   const [historyTick, setHistoryTick] = useState(0);
@@ -187,6 +192,10 @@ export default function App() {
     setHistoryTick((n) => n + 1);
   }, []);
   useEffect(() => {
+    // The untouched starting landscape is not saved over the last session;
+    // the first edit (or a restore) starts autosaving and retires the offer.
+    if (project === initial.project) return;
+    setLastSession(null);
     setSaved(false);
     const timer = setTimeout(() => {
       try {
@@ -198,7 +207,7 @@ export default function App() {
       }
     }, 600);
     return () => clearTimeout(timer);
-  }, [project]);
+  }, [project, initial.project]);
   useEffect(() => {
     if (previewNodeId && !project.graph.nodes.some((n) => n.id === previewNodeId))
       setPreviewNodeId(undefined);
@@ -359,6 +368,18 @@ export default function App() {
     setSelectedId(null);
     setEditingSplineId(null);
   }, [selectedId, apply]);
+  const restoreLastSession = useCallback(() => {
+    if (!lastSession) return;
+    apply(lastSession);
+    setEditingSplineId(null);
+    setPreviewNodeId(undefined);
+    setSelectedId(
+      lastSession.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ??
+        lastSession.graph.nodes[0]?.id ??
+        null,
+    );
+    notify(`Restored ${lastSession.name}.`);
+  }, [apply, lastSession, notify]);
   const loadPreset = useCallback(
     (id: string) => {
       const next = createProject(id);
@@ -517,6 +538,17 @@ export default function App() {
             )}
             {storageError ? 'Save unavailable' : saved ? 'Saved locally' : 'Saving…'}
           </span>
+          {lastSession && (
+            <button
+              type="button"
+              className="button secondary restore-session"
+              title={`Open "${lastSession.name}", autosaved in this browser`}
+              onClick={restoreLastSession}
+            >
+              <History size={12} />
+              Restore last session
+            </button>
+          )}
         </div>
         <div className="header-actions">
           <button

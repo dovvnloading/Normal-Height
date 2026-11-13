@@ -170,7 +170,7 @@ the actual Height and shaded-relief maps, not the Flow channel alone. See
 
 The 16-bit metadata includes the exact elevation reconstruction formula, min/max, world extent, sample spacing, and orientation. PNG samples are big endian as required by the format. The first image row is north (negative Z in the 3D scene); X increases to the right/east.
 
-Projects autosave locally in the browser. Use **Save project** to keep a portable copy, and **Open project** to restore it. Imports validate version, dimensions, node types, parameter bounds, identifiers, group relationships, and ports before replacing the current graph.
+Every session opens a fresh landscape. Your work autosaves locally in the browser but is never reopened by itself: use **Restore last session** in the header to continue it, **Save project** to keep a portable copy, and **Open project** to restore that. Imports validate version, dimensions, node types, parameter bounds, identifiers, group relationships, and ports before replacing the current graph.
 
 ## Appearance
 

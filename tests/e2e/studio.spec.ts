@@ -306,6 +306,24 @@ test('supports charcoal mode, respects the OS, and retains a manual theme choice
   await expect(root).toHaveAttribute('data-theme', 'dark');
 });
 
+test('opens a fresh landscape and only restores the last session on request', async ({ page }) => {
+  const grid = page.getByRole('combobox', { name: 'Working resolution' });
+  const restore = page.getByRole('button', { name: 'Restore last session' });
+  await ready(page);
+  await expect(restore).toHaveCount(0);
+  await grid.selectOption('256');
+  await expect(page.locator('.save-state')).toContainText('Saved locally');
+  await page.reload();
+  await ready(page);
+  // The autosave is offered, not loaded: the default landscape opens.
+  await expect(grid).toHaveValue('512');
+  await expect(restore).toBeVisible();
+  await restore.click();
+  await expect(grid).toHaveValue('256');
+  await expect(restore).toHaveCount(0);
+  await ready(page);
+});
+
 test('renders real 3D terrain and switches between split, flow, and normal maps', async ({
   page,
 }, testInfo) => {

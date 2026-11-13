@@ -73,7 +73,8 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
           ))}
         </div>
         <p className="help-note">
-          Your project autosaves in this browser. Download a project file to keep a portable copy.
+          Each session opens a fresh landscape. Your work autosaves in this browser; use Restore
+          last session to reopen it, or download a project file to keep a portable copy.
           The simulation is an artistic particle erosion model; dimensions and map precision are
           explicit, while rainfall controls are not calibrated to geological time.
         </p>

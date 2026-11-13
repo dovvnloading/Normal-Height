@@ -282,6 +282,11 @@ kbd {
 .save-state.error {
   color: #8b6b52;
 }
+.restore-session {
+  padding: 3px 8px;
+  font-size: 10px;
+  gap: 5px;
+}
 .tiny-dot {
   height: 4px;
   width: 4px;
