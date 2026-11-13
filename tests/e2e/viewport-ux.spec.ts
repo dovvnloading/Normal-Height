@@ -32,6 +32,17 @@ test.describe('terrain viewport UX', () => {
     await expect(page.locator('.graph-area')).toBeVisible();
   });
 
+  test('linked split map indicates the 3D camera focal point and bearing', async ({ page }) => {
+    await page.getByRole('button', { name: 'Split', exact: true }).click();
+    const focus = page.locator('.nh-map-camera-focus');
+    await expect(focus).toBeVisible();
+    const marker = focus.locator('g[transform]');
+    const before = await marker.getAttribute('transform');
+    await page.getByRole('button', { name: 'Camera bookmarks' }).click();
+    await page.getByRole('button', { name: 'Face W' }).click();
+    await expect.poll(async () => marker.getAttribute('transform')).not.toBe(before);
+  });
+
   test('map zoom survives 3D/2D toggling; keyboard can resize the split', async ({ page }) => {
     await page.getByRole('button', { name: '2D map', exact: true }).click();
     const map = page.locator('.nh-map > canvas');
