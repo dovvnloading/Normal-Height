@@ -383,6 +383,7 @@ test('2D comparison remains available when the browser cannot create WebGL', asy
   await page.getByRole('button', { name: 'Compare', exact: true }).click();
   await expect(page.locator('.nh-mode-compare')).toBeVisible();
   await expect(page.locator('.nh-compare-panel')).toBeVisible();
+  await expect(page.locator('.nh-render-error')).toHaveCount(0);
   await page.getByRole('button', { name: 'Elevation change' }).click();
   await expect(page.locator('.nh-difference-legend')).toBeVisible({ timeout: 30_000 });
 });
