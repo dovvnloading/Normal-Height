@@ -1393,3 +1393,56 @@
   .nh-mode-split .nh-three-tools { top: 10px; right: 8px; }
   .nh-camera-bookmarks { right: 48px; width: min(190px, calc(100% - 60px)); }
 }
+
+/* One optional diagnostic image composited over the selected 2D channel. */
+.nh-overlay-panel {
+  position: absolute;
+  z-index: 7;
+  right: 14px;
+  top: 57px;
+  width: 224px;
+  max-width: calc(100% - 28px);
+  border: 1px solid #9cbaa4;
+  border-radius: 7px;
+  background: #f3f6f1f5;
+  box-shadow: 0 5px 20px #0003;
+  color: #2c4636;
+  padding: 12px;
+  font-size: 10px;
+  backdrop-filter: blur(8px);
+}
+.nh-overlay-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+.nh-overlay-heading button {
+  display: grid;
+  place-items: center;
+  border: 0;
+  color: inherit;
+  background: none;
+  cursor: pointer;
+}
+.nh-overlay-panel label {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.nh-overlay-panel select {
+  min-width: 110px;
+  max-width: 145px;
+  font-size: 10px;
+  padding: 5px 7px;
+}
+.nh-overlay-panel input[type='range'] { width: 100%; flex: 1 0 100%; }
+.nh-overlay-panel small { display: block; opacity: .75; line-height: 1.5; }
+:root[data-theme='dark'] .nh-overlay-panel {
+  border-color: #69836e;
+  color: #e0ede1;
+  background: #293c32f3;
+}
