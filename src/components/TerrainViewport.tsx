@@ -729,8 +729,8 @@ function MapCanvas({
         <div className="nh-difference-legend">
           <strong>Δ elevation in meters</strong>
           <div className="nh-difference-gradient" />
-          <div><span>{formatMeters(deltaStats.minDelta)}</span>
-            <span>0 m</span><span>+{formatMeters(Math.max(0, deltaStats.maxDelta))}</span></div>
+          <div><span>−{formatMeters(deltaStats.maxAbs)}</span>
+            <span>0 m</span><span>+{formatMeters(deltaStats.maxAbs)}</span></div>
           <small>Warm = lower · Cool = higher · √ intensity</small>
           <div className="nh-difference-statistics">
             <span>Lowered ≈ <b>{formatVolume(deltaStats.cutVolumeM3)}</b></span>
