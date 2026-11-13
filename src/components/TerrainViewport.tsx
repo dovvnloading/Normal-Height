@@ -29,6 +29,9 @@ import {
   GitCompareArrows,
   Pin,
   PinOff,
+  Bookmark,
+  BookmarkPlus,
+  Trash2,
 } from 'lucide-react';
 import type {
   HeightField,
@@ -98,6 +101,32 @@ const CHANNELS: { value: MapChannel; label: string }[] = [
   { value: 'curvature', label: 'PBR curvature' },
   { value: 'orm', label: 'Packed ORM' },
 ];
+
+type CameraBookmark = {
+  name: string;
+  position: [number, number, number];
+  target: [number, number, number];
+};
+function readCameraBookmarks(): CameraBookmark[] {
+  try {
+    const value = JSON.parse(localStorage.getItem('normal-height.camera-bookmarks.v1') || '[]');
+    if (!Array.isArray(value)) return [];
+    return value.filter((bookmark: CameraBookmark) =>
+      typeof bookmark.name === 'string' &&
+      Array.isArray(bookmark.position) && bookmark.position.length === 3 &&
+      Array.isArray(bookmark.target) && bookmark.target.length === 3 &&
+      [...bookmark.position, ...bookmark.target].every(Number.isFinite)
+    ).slice(0, 8);
+  } catch { return []; }
+}
+
+const CHANNEL_GROUPS = [
+  { label: 'Terrain', values: ['height', 'terrain', 'normal', 'slope'] },
+  { label: 'Water & erosion', values: ['flow', 'wear', 'deposition'] },
+  { label: 'PBR textures', values: ['basecolor', 'roughness', 'ao', 'curvature', 'orm'] },
+  { label: 'Material distribution', values: ['splat', 'rockWeight', 'soilWeight',
+    'vegetationWeight', 'snowWeight'] },
+] as const;
 
 const VIEWPORT_TOOLS = [
   { value: 'navigate', label: 'Navigate', Icon: MousePointer2 },
@@ -870,6 +899,22 @@ export function TerrainViewport({
     } catch { return 50; }
   });
   const [cameraHeading, setCameraHeading] = useState(0);
+  const [bookmarks, setBookmarks] = useState<CameraBookmark[]>(readCameraBookmarks);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [compactSplit, setCompactSplit] = useState(
+    () => window.matchMedia('(max-width: 660px)').matches,
+  );
+  const displayPanel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 660px)');
+    const onChange = (e: MediaQueryListEvent) => setCompactSplit(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('normal-height.camera-bookmarks.v1',
+      JSON.stringify(bookmarks)); } catch { /* optional */ }
+  }, [bookmarks]);
   const mapFraming = useRef<MapFraming>(loadMapFraming());
   const choosePoint = (point: TerrainPoint) =>
     setInspectionPoints((points) => tool === 'inspect' ? [point] :
@@ -982,8 +1027,18 @@ export function TerrainViewport({
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setShowSettings(false);
     };
+    const outside = (event: PointerEvent) => {
+      if (!displayPanel.current?.contains(event.target as Node) &&
+          !(event.target as HTMLElement).closest('.nh-viewport-tool')) {
+        setShowSettings(false);
+      }
+    };
     window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
+    window.addEventListener('pointerdown', outside);
+    return () => {
+      window.removeEventListener('keydown', escape);
+      window.removeEventListener('pointerdown', outside);
+    };
   }, [showSettings]);
 
   const change = (patch: Partial<ViewSettings>) => onSettingsChange({ ...settings, ...patch });
@@ -1061,10 +1116,11 @@ export function TerrainViewport({
                 value={channel}
                 onChange={(event) => onChannelChange(event.target.value as MapChannel)}
               >
-                {CHANNELS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
+                {CHANNEL_GROUPS.map(group => (
+                  <optgroup key={group.label} label={group.label}>
+                    {CHANNELS.filter(c => (group.values as readonly string[]).includes(c.value))
+                      .map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </optgroup>
                 ))}
               </select>
               <ChevronDown size={12} />
@@ -1156,6 +1212,12 @@ export function TerrainViewport({
                 >
                   <Grid2X2 size={16} />
                 </button>
+                <button type="button" aria-label="Camera bookmarks"
+                  title="Camera views and bookmarks"
+                  aria-expanded={showBookmarks}
+                  onClick={() => setShowBookmarks(v => !v)}>
+                  <Bookmark size={16} />
+                </button>
                 <button
                   type="button"
                   aria-label="Download preview image"
@@ -1165,6 +1227,44 @@ export function TerrainViewport({
                   <Camera size={16} />
                 </button>
               </div>
+              {showBookmarks && (
+                <div className="nh-camera-bookmarks" role="region" aria-label="Saved camera views">
+                  <div className="nh-bookmarks-header">
+                    <strong>Camera views</strong>
+                    <button type="button" aria-label="Close camera views"
+                      onClick={() => setShowBookmarks(false)}><X size={13}/></button>
+                  </div>
+                  <div className="nh-cardinal-buttons" role="group" aria-label="Face direction">
+                    {[['N', 0], ['E', 90], ['S', 180], ['W', 270]].map(([name, angle]) => (
+                      <button key={name} type="button" aria-label={`Face ${name}`}
+                        onClick={() => sceneRef.current?.orientCamera(Number(angle))}>{name}</button>
+                    ))}
+                  </div>
+                  <button type="button" className="nh-save-bookmark"
+                    onClick={() => {
+                      const camera = sceneRef.current?.captureCamera();
+                      if (!camera) return;
+                      setBookmarks(old => [...old.slice(-7), {
+                        ...camera, name: `View ${old.length + 1}`,
+                      }]);
+                    }}>
+                    <BookmarkPlus size={14}/> Save current view
+                  </button>
+                  {bookmarks.length === 0 && <small>No saved views yet.</small>}
+                  {bookmarks.map((bookmark, index) => (
+                    <div className="nh-bookmark-item" key={index}>
+                      <button type="button" onClick={() => {
+                        sceneRef.current?.restoreCamera(bookmark);
+                        setShowBookmarks(false);
+                      }}>{bookmark.name}</button>
+                      <button type="button" aria-label={`Delete ${bookmark.name}`}
+                        onClick={() => setBookmarks(old => old.filter((_, i) => i !== index))}>
+                        <Trash2 size={13}/>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="nh-view-hint">
                 Drag to orbit<span>·</span>Right-drag to pan<span>·</span>Double-click to focus<span>·</span>Scroll to zoom
               </div>
@@ -1181,22 +1281,26 @@ export function TerrainViewport({
         </div>
         {effectiveMode === 'split' && (
           <div className="nh-split-divider" role="separator" aria-label="Resize 3D and map views"
-            aria-orientation="vertical" aria-valuemin={22} aria-valuemax={78}
+            aria-orientation={compactSplit ? 'horizontal' : 'vertical'}
+            aria-valuemin={22} aria-valuemax={78}
             aria-valuenow={Math.round(splitRatio)} tabIndex={0}
             onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); }}
             onPointerMove={e => {
               if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
               const rect = e.currentTarget.parentElement?.getBoundingClientRect();
-              if (rect) setSplitRatio(Math.max(22, Math.min(78, (e.clientX - rect.left) / rect.width * 100)));
+              if (rect) setSplitRatio(Math.max(22, Math.min(78,
+                compactSplit ? (e.clientY - rect.top) / rect.height * 100
+                  : (e.clientX - rect.left) / rect.width * 100)));
             }}
             onPointerUp={e => {
               if (e.currentTarget.hasPointerCapture(e.pointerId))
                 e.currentTarget.releasePointerCapture(e.pointerId);
             }}
             onKeyDown={e => {
-              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+              if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
                 e.preventDefault();
-                setSplitRatio(r => Math.max(22, Math.min(78, r + (e.key === 'ArrowRight' ? 5 : -5))));
+                const increment = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 5 : -5;
+                setSplitRatio(r => Math.max(22, Math.min(78, r + increment)));
               } else if (e.key === 'Home') { e.preventDefault(); setSplitRatio(50); }
             }}><span /></div>
         )}
@@ -1345,7 +1449,8 @@ export function TerrainViewport({
           </div>
         )}
         {showSettings && effectiveMode !== '2d' && (
-          <div className="nh-display-panel" role="dialog" aria-label="Display settings">
+          <div className="nh-display-panel" ref={displayPanel}
+            role="region" aria-label="Display settings">
             <div className="nh-display-title">
               <span>DISPLAY SETTINGS</span>
               <button
