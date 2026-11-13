@@ -248,6 +248,9 @@ function MapCanvas({
   const layerSize = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
   const layerLeft = (dimensions.width - layerSize) / 2 + offset.x;
   const layerTop = (dimensions.height - layerSize) / 2 + offset.y;
+  // The SVG is authored in normalized tile units. Cancel map zoom for pin
+  // glyphs so they retain a stable on-screen pixel size at 0.35x–12x.
+  const markerScale = 1000 / Math.max(1, layerSize);
   const layerRef = useRef<HTMLDivElement>(null);
   const pointFromEvent = (event: React.PointerEvent): SplinePoint => {
     const bounds = layerRef.current!.getBoundingClientRect();
@@ -654,17 +657,17 @@ function MapCanvas({
           viewBox="0 0 1000 1000" preserveAspectRatio="none">
           {cameraFocus && (
             <g className="nh-map-camera-focus" transform={`translate(${cameraFocus.u * 1000}
-              ${cameraFocus.v * 1000})`}>
+              ${cameraFocus.v * 1000}) scale(${markerScale})`}>
               <title>3D camera orbit focus and viewing direction</title>
               <g transform={`rotate(${-cameraBearing})`}>
-                <path d="M 0 10 V 36 M -5 29 L 0 36 L 5 29" stroke="#62adcd"
-                  strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                <path d="M 0 7 V 25 M -4 19 L 0 25 L 4 19" stroke="#62adcd"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                   fill="none" vectorEffect="non-scaling-stroke" />
               </g>
-              <circle cx="0" cy="0" r="8" fill="#3c7187" stroke="#f5f7f0"
-                strokeWidth="3" vectorEffect="non-scaling-stroke" />
-              <text x="14" y="-14" fontSize="22" fontWeight="bold" fill="#ffffff"
-                stroke="#2a5265" strokeWidth="4" paintOrder="stroke">3D</text>
+              <circle cx="0" cy="0" r="5" fill="#3c7187" stroke="#f5f7f0"
+                strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <text x="12" y="-10" fontSize="12" fontWeight="bold" fill="#ffffff"
+                stroke="#2a5265" strokeWidth="2" paintOrder="stroke">3D</text>
             </g>
           )}
           {inspectionPoints.length >= 2 && (
@@ -673,20 +676,21 @@ function MapCanvas({
               stroke="#ffe7a8" strokeWidth="2.6" vectorEffect="non-scaling-stroke" />
           )}
           {inspectionPoints.map((p, index) => (
-            <g key={index} className="nh-inspect-pin">
-              <circle cx={p.u * 1000} cy={p.v * 1000} r="10" fill="#edbc6b"
-                stroke="#2e3b36" strokeWidth="3" vectorEffect="non-scaling-stroke" />
-              <text x={p.u * 1000 + 16} y={p.v * 1000 - 16} fill="#fff"
-                stroke="#25332e" strokeWidth="3" paintOrder="stroke"
-                fontSize="24" fontWeight="bold">{String.fromCharCode(65 + index)}</text>
+            <g key={index} className="nh-inspect-pin"
+              transform={`translate(${p.u * 1000} ${p.v * 1000}) scale(${markerScale})`}>
+              <circle cx="0" cy="0" r="6" fill="#edbc6b"
+                stroke="#2e3b36" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <text x="10" y="-10" fill="#fff"
+                stroke="#25332e" strokeWidth="2" paintOrder="stroke"
+                fontSize="12" fontWeight="bold">{String.fromCharCode(65 + index)}</text>
             </g>
           ))}
           {hoverPoint && (
-            <g stroke="#f9faf2" strokeWidth="2" vectorEffect="non-scaling-stroke">
-              <circle cx={hoverPoint.u * 1000} cy={hoverPoint.v * 1000} r="8" fill="none" />
-              <path d={`M ${hoverPoint.u * 1000 - 18} ${hoverPoint.v * 1000}
-                h 8 m 20 0 h 8 M ${hoverPoint.u * 1000} ${hoverPoint.v * 1000 - 18}
-                v 8 m 0 20 v 8`} fill="none" />
+            <g transform={`translate(${hoverPoint.u * 1000}
+              ${hoverPoint.v * 1000}) scale(${markerScale})`}
+              stroke="#f9faf2" strokeWidth="2" vectorEffect="non-scaling-stroke">
+              <circle cx="0" cy="0" r="6" fill="none" />
+              <path d="M -15 0 h 6 m 18 0 h 6 M 0 -15 v 6 m 0 18 v 6" fill="none" />
             </g>
           )}
         </svg>
