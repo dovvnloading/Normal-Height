@@ -8,6 +8,18 @@ test.describe('terrain viewport UX', () => {
     await expect(page.locator('.nh-scene-resolution')).toContainText('tris', { timeout: 90_000 });
   });
 
+  test('top-down survey uses an actual orthographic camera for rendering and picking', async ({ page }) => {
+    const terrain = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+    await expect(terrain).toHaveAttribute('data-projection', 'perspective');
+    await page.getByRole('button', { name: 'View terrain from above' }).click();
+    await expect(terrain).toHaveAttribute('data-projection', 'orthographic');
+    await page.getByRole('button', { name: 'Reset 3D camera' }).click();
+    await expect(terrain).toHaveAttribute('data-projection', 'perspective');
+    await page.getByRole('button', { name: 'View terrain from above' }).click();
+    await page.getByRole('button', { name: 'Face north' }).click();
+    await expect(terrain).toHaveAttribute('data-projection', 'perspective');
+  });
+
   test('focus mode hides the editor docks without remounting WebGL', async ({ page }) => {
     const terrain = page.getByRole('img', { name: /^Interactive 3D terrain/ });
     await terrain.evaluate(el => el.setAttribute('data-same-canvas', 'yes'));
