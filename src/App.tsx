@@ -98,6 +98,16 @@ export default function App() {
   const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | null>(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
+  // Crossing into a narrow viewport closes the temporary drawers. Users can
+  // still explicitly reopen either one without a resize fighting their choice.
+  useEffect(() => {
+    const compact = window.matchMedia('(max-width: 760px)');
+    const onChange = (event: MediaQueryListEvent) => {
+      if (event.matches) { setLeftOpen(false); setRightOpen(false); }
+    };
+    compact.addEventListener('change', onChange);
+    return () => compact.removeEventListener('change', onChange);
+  }, []);
   const [graphRatio, setGraphRatio] = useState(36);
   const [viewportFocus, setViewportFocus] = useState(false);
   const [baseline, setBaseline] = useState<{
