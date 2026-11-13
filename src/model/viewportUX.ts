@@ -75,16 +75,19 @@ export function terrainProfile(
   start: TerrainPoint, end: TerrainPoint, segments = 96,
 ): TerrainProfile {
   const count = Math.max(2, Math.min(512, Math.round(segments)));
+  // Clamp before measuring, not just during sampling. A malformed/outside
+  // point must never produce a physically false distance with clamped heights.
+  const a = validPoint(start), b = validPoint(end);
   const samples: TerrainSample[] = [];
   for (let i = 0; i <= count; i++) {
     const t = i / count;
     samples.push(sampleTerrain(field, project, {
-      u: start.u + (end.u - start.u) * t,
-      v: start.v + (end.v - start.v) * t,
+      u: a.u + (b.u - a.u) * t,
+      v: a.v + (b.v - a.v) * t,
     }));
   }
   const horizontalDistance = Math.hypot(
-    (end.u - start.u) * project.worldSize, (end.v - start.v) * project.worldSize,
+    (b.u - a.u) * project.worldSize, (b.v - a.v) * project.worldSize,
   );
   let surfaceDistance = 0, ascent = 0, descent = 0;
   const horizontalStep = horizontalDistance / count;
