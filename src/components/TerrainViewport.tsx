@@ -20,6 +20,19 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  Crosshair,
+  Ruler,
+  ChartNoAxesCombined,
+  MousePointer2,
+  Minimize2,
+  Maximize2,
+  GitCompareArrows,
+  Pin,
+  PinOff,
+  Bookmark,
+  BookmarkPlus,
+  Trash2,
+  Layers2,
 } from 'lucide-react';
 import type {
   HeightField,
@@ -30,6 +43,8 @@ import type {
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
 import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
+import { DEFAULT_MAP_FRAMING, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
+import type { MapFraming, TerrainPoint, ViewportTool } from '../model/viewportUX';
 import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
 import { pbrPixels } from '../materials/pbr';
@@ -39,6 +54,8 @@ import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/s
 import type { SplinePoint } from '../model/splines';
 import type { TerrainNode } from '../model/types';
 import './TerrainViewport.css';
+
+type Baseline = { field: HeightField; project: TerrainProject; label: string };
 
 interface TerrainViewportProps {
   spline: TerrainNode | null;
@@ -59,6 +76,11 @@ interface TerrainViewportProps {
   onChannelChange: (channel: MapChannel) => void;
   onSettingsChange: (settings: ViewSettings) => void;
   onCancel: () => void;
+  focusMode: boolean;
+  onFocusModeChange: (focus: boolean) => void;
+  baseline: Baseline | null;
+  onCaptureBaseline: () => void;
+  onClearBaseline: () => void;
 }
 
 const CHANNELS: { value: MapChannel; label: string }[] = [
@@ -81,6 +103,39 @@ const CHANNELS: { value: MapChannel; label: string }[] = [
   { value: 'orm', label: 'Packed ORM' },
 ];
 
+type CameraBookmark = {
+  name: string;
+  position: [number, number, number];
+  target: [number, number, number];
+};
+function readCameraBookmarks(): CameraBookmark[] {
+  try {
+    const value = JSON.parse(localStorage.getItem('normal-height.camera-bookmarks.v1') || '[]');
+    if (!Array.isArray(value)) return [];
+    return value.filter((bookmark: CameraBookmark) =>
+      typeof bookmark.name === 'string' &&
+      Array.isArray(bookmark.position) && bookmark.position.length === 3 &&
+      Array.isArray(bookmark.target) && bookmark.target.length === 3 &&
+      [...bookmark.position, ...bookmark.target].every(Number.isFinite)
+    ).slice(0, 8);
+  } catch { return []; }
+}
+
+const CHANNEL_GROUPS = [
+  { label: 'Terrain', values: ['height', 'terrain', 'normal', 'slope'] },
+  { label: 'Water & erosion', values: ['flow', 'wear', 'deposition'] },
+  { label: 'PBR textures', values: ['basecolor', 'roughness', 'ao', 'curvature', 'orm'] },
+  { label: 'Material distribution', values: ['splat', 'rockWeight', 'soilWeight',
+    'vegetationWeight', 'snowWeight'] },
+] as const;
+
+const VIEWPORT_TOOLS = [
+  { value: 'navigate', label: 'Navigate', Icon: MousePointer2 },
+  { value: 'inspect', label: 'Inspect', Icon: Crosshair },
+  { value: 'measure', label: 'Measure', Icon: Ruler },
+  { value: 'profile', label: 'Profile', Icon: ChartNoAxesCombined },
+] as const;
+
 const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
   rockWeight: 0, soilWeight: 1, vegetationWeight: 2, snowWeight: 3,
 };
@@ -89,6 +144,17 @@ const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
 // an unchanged 1024² field cost 55–75 ms of main thread on every switch, so
 // keep a few finished rasters per field (released with the field itself).
 const MAP_RASTERS_PER_FIELD = 4;
+const MAP_VIEW_STORAGE_KEY = 'normal-height.map-framing.v1';
+function loadMapFraming(): MapFraming {
+  try {
+    const value = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || 'null');
+    if (value && Number.isFinite(value.zoom) && value.zoom >= 0.35 && value.zoom <= 12 &&
+      Number.isFinite(value.offset?.x) && Number.isFinite(value.offset?.y)) {
+      return { zoom: value.zoom, offset: { x: value.offset.x, y: value.offset.y } };
+    }
+  } catch { /* Non-persistent browsing still supports in-session framing. */ }
+  return { ...DEFAULT_MAP_FRAMING, offset: { ...DEFAULT_MAP_FRAMING.offset } };
+}
 const mapRasters = new WeakMap<HeightField, Map<string, HTMLCanvasElement>>();
 function rememberRaster(field: HeightField, key: string, raster: HTMLCanvasElement) {
   let rasters = mapRasters.get(field);
@@ -106,6 +172,20 @@ function MapCanvas({
   spline,
   splineEditing,
   onSplinePath,
+  initialFraming,
+  onFramingChange,
+  tool,
+  hoverPoint,
+  inspectionPoints,
+  onHoverPoint,
+  onChoosePoint,
+  baseline,
+  compareKind,
+  wipe,
+  overlayChannel,
+  overlayOpacity,
+  cameraFocus,
+  cameraBearing,
 }: {
   field: HeightField | null;
   channel: MapChannel;
@@ -113,14 +193,35 @@ function MapCanvas({
   spline: TerrainNode | null;
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
+  initialFraming: MapFraming;
+  onFramingChange: (framing: MapFraming) => void;
+  tool: ViewportTool;
+  hoverPoint: TerrainPoint | null;
+  inspectionPoints: TerrainPoint[];
+  onHoverPoint: (point: TerrainPoint | null) => void;
+  onChoosePoint: (point: TerrainPoint) => void;
+  baseline: Baseline | null;
+  compareKind: 'wipe' | 'difference';
+  wipe: number;
+  overlayChannel: MapChannel | null;
+  overlayOpacity: number;
+  cameraFocus: TerrainPoint | null;
+  cameraBearing: number;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLCanvasElement | null>(null);
+  const baselineRasterRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayRasterRef = useRef<HTMLCanvasElement | null>(null);
+  const [deltaScale, setDeltaScale] = useState(0);
   const materialMapsRef = useRef<PBRMaps | null>(null);
   const [rasterVersion, setRasterVersion] = useState(0);
-  const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(initialFraming.zoom);
+  const [offset, setOffset] = useState(initialFraming.offset);
+  const [mapBusy, setMapBusy] = useState(false);
+  const [keyboardPoint, setKeyboardPoint] = useState<TerrainPoint>({ u: 0.5, v: 0.5 });
+  const [mapError, setMapError] = useState(false);
+  useEffect(() => onFramingChange({ zoom, offset }), [zoom, offset]);
   const [sample, setSample] = useState<{
     x: number;
     y: number;
@@ -129,6 +230,13 @@ function MapCanvas({
   } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
+  const clickStart = useRef<{ x: number; y: number } | null>(null);
+  const hadPinch = useRef(false);
+  const touches = useRef(new globalThis.Map<number, { x: number; y: number }>());
+  const pinch = useRef<{
+    distance: number; middleX: number; middleY: number;
+    zoom: number; offset: { x: number; y: number };
+  } | null>(null);
   const [draftSpline, setDraftSpline] = useState<SplinePoint[] | null>(null);
   const draftRef = useRef<SplinePoint[] | null>(null);
   const handleDrag = useRef<{ index: number; pointer: number } | null>(null);
@@ -140,6 +248,9 @@ function MapCanvas({
   const layerSize = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
   const layerLeft = (dimensions.width - layerSize) / 2 + offset.x;
   const layerTop = (dimensions.height - layerSize) / 2 + offset.y;
+  // The SVG is authored in normalized tile units. Cancel map zoom for pin
+  // glyphs so they retain a stable on-screen pixel size at 0.35x–12x.
+  const markerScale = 1000 / Math.max(1, layerSize);
   const layerRef = useRef<HTMLDivElement>(null);
   const pointFromEvent = (event: React.PointerEvent): SplinePoint => {
     const bounds = layerRef.current!.getBoundingClientRect();
@@ -149,6 +260,14 @@ function MapCanvas({
     };
   };
 
+  const mapPoint = (clientX: number, clientY: number): TerrainPoint | null => {
+    if (!field) return null;
+    const rect = hostRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const u = (clientX - rect.left - layerLeft) / layerSize;
+    const v = (clientY - rect.top - layerTop) / layerSize;
+    return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? { u, v } : null;
+  };
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
 
@@ -165,15 +284,40 @@ function MapCanvas({
   useEffect(() => {
     let active = true;
     materialMapsRef.current = null;
+    baselineRasterRef.current = null;
+    if (baseline && compareKind === 'wipe') {
+      const key = `terrain/${baseline.project.worldSize}/${baseline.project.heightScale}`;
+      const cached = mapRasters.get(baseline.field)?.get(key);
+      if (cached) baselineRasterRef.current = cached;
+      else {
+        const n = baseline.field.resolution;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = n;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const image = ctx.createImageData(n, n);
+          image.data.set(colorizeMap(baseline.field, 'terrain',
+            baseline.project.worldSize, baseline.project.heightScale));
+          ctx.putImageData(image, 0, 0);
+          baselineRasterRef.current = canvas;
+          rememberRaster(baseline.field, key, canvas);
+        }
+      }
+    }
+    // Never label a previous raster as the newly chosen material channel.
+    imageRef.current = null;
+    setRasterVersion((version) => version + 1);
+    setMapError(false);
+    setMapBusy(false);
     if (!field) {
       imageRef.current = null;
       setRasterVersion((version) => version + 1);
       return;
     }
-    const paintPixels = (source: Uint8ClampedArray): HTMLCanvasElement | null => {
+    const paintPixels = (source: Uint8ClampedArray, resolution = field.resolution): HTMLCanvasElement | null => {
       if (!active) return null;
       const canvas = document.createElement('canvas');
-      canvas.width = canvas.height = field.resolution;
+      canvas.width = canvas.height = resolution;
       const context = canvas.getContext('2d');
       if (!context) return null;
       let pixels = source;
@@ -188,7 +332,7 @@ function MapCanvas({
         }
         pixels = display;
       }
-      const image = context.createImageData(field.resolution, field.resolution);
+      const image = context.createImageData(resolution, resolution);
       image.data.set(pixels);
       context.putImageData(image, 0, 0);
       imageRef.current = canvas;
@@ -197,19 +341,51 @@ function MapCanvas({
       setRasterVersion((version) => version + 1);
       return canvas;
     };
+    if (baseline && compareKind === 'difference') {
+      setMapBusy(true);
+      const worker = new Worker(new URL('../render/compare.worker.ts', import.meta.url),
+        { type: 'module' });
+      worker.onmessage = (event: MessageEvent<{
+        pixels: Uint8ClampedArray; resolution: number; maxAbs: number;
+      }>) => {
+        if (!active) return;
+        paintPixels(event.data.pixels, event.data.resolution);
+        setDeltaScale(event.data.maxAbs);
+        setMapBusy(false);
+        worker.terminate();
+      };
+      worker.onerror = () => {
+        if (!active) return;
+        setMapBusy(false);
+        setMapError(true);
+        worker.terminate();
+      };
+      const currentHeight = field.height.slice();
+      const baselineHeight = baseline.field.height.slice();
+      worker.postMessage({
+        current: currentHeight, baseline: baselineHeight,
+        currentSize: field.resolution, baselineSize: baseline.field.resolution,
+        currentScale: project.heightScale, baselineScale: baseline.project.heightScale,
+        outputSize: Math.min(512, Math.max(field.resolution, baseline.field.resolution)),
+      }, [currentHeight.buffer, baselineHeight.buffer]);
+      return () => { active = false; worker.terminate(); };
+    }
     const material = [
       'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
       'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
     ].includes(channel);
     if (material) {
+      setMapBusy(true);
       const request = requestPBR(field, project);
       request.promise.then((maps) => {
         if (!active) return;
         materialMapsRef.current = maps;
         paintPixels(pbrPixels(maps, field, project, channel as PBRChannel));
+        setMapBusy(false);
       }).catch(() => {
-        // A replaced or unmounted request is expected; the next edit queues
-        // the correct version without showing a stale worker result.
+        if (!active) return;
+        setMapBusy(false);
+        setMapError(true);
       });
       return () => { active = false; request.release(); };
     }
@@ -224,7 +400,32 @@ function MapCanvas({
       if (raster) rememberRaster(field, key, raster);
     }
     return () => { active = false; };
-  }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed]);
+  }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed,
+    baseline, compareKind]);
+
+  useEffect(() => {
+    overlayRasterRef.current = null;
+    if (field && overlayChannel && !baseline) {
+      const key = `${overlayChannel}/${project.worldSize}/${project.heightScale}`;
+      const cached = mapRasters.get(field)?.get(key);
+      if (cached) overlayRasterRef.current = cached;
+      else {
+        const n = field.resolution;
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = n;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const image = ctx.createImageData(n, n);
+          image.data.set(colorizeMap(field, overlayChannel,
+            project.worldSize, project.heightScale));
+          ctx.putImageData(image, 0, 0);
+          overlayRasterRef.current = canvas;
+          rememberRaster(field, key, canvas);
+        }
+      }
+    }
+    setRasterVersion(n => n + 1);
+  }, [field, overlayChannel, project.worldSize, project.heightScale, baseline]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -243,6 +444,27 @@ function MapCanvas({
       top = (height - size) / 2 + offset.y;
     context.imageSmoothingEnabled = size < imageRef.current.width;
     context.drawImage(imageRef.current, left, top, size, size);
+    if (!baseline && overlayRasterRef.current) {
+      context.save();
+      context.globalAlpha = overlayOpacity / 100;
+      context.drawImage(overlayRasterRef.current, left, top, size, size);
+      context.restore();
+    }
+    if (baseline && compareKind === 'wipe' && baselineRasterRef.current) {
+      context.save();
+      context.beginPath();
+      context.rect(left, top, size * wipe / 100, size);
+      context.clip();
+      context.drawImage(baselineRasterRef.current, left, top, size, size);
+      context.restore();
+      context.strokeStyle = '#fff9ec';
+      context.lineWidth = 1.5;
+      const divider = left + size * wipe / 100;
+      context.beginPath();
+      context.moveTo(divider, top);
+      context.lineTo(divider, top + size);
+      context.stroke();
+    }
     context.strokeStyle = '#6d7b6f';
     context.lineWidth = 0.75;
     context.strokeRect(left - 0.5, top - 0.5, size + 1, size + 1);
@@ -261,7 +483,8 @@ function MapCanvas({
       context.lineTo(x + dx * length, y);
       context.stroke();
     }
-  }, [dimensions, zoom, offset, rasterVersion, field, channel, project.worldSize, project.heightScale]);
+  }, [dimensions, zoom, offset, rasterVersion, field, channel, project.worldSize,
+    project.heightScale, baseline, compareKind, wipe, overlayOpacity, overlayChannel]);
 
   useEffect(() => {
     const canvas = hostRef.current;
@@ -285,6 +508,26 @@ function MapCanvas({
   }, []);
 
   function inspect(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (event.pointerType === 'touch' && touches.current.has(event.pointerId)) {
+      touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    }
+    if (event.pointerType === 'touch' && touches.current.size >= 2 && pinch.current) {
+      const [a, b] = [...touches.current.values()];
+      const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const next = Math.max(0.35, Math.min(12, pinch.current.zoom * distance / pinch.current.distance));
+      const middleX = (a.x + b.x) / 2, middleY = (a.y + b.y) / 2;
+      const rect = hostRef.current!.getBoundingClientRect();
+      const x0 = pinch.current.middleX - rect.left - dimensions.width / 2;
+      const y0 = pinch.current.middleY - rect.top - dimensions.height / 2;
+      const x1 = middleX - rect.left - dimensions.width / 2;
+      const y1 = middleY - rect.top - dimensions.height / 2;
+      setOffset({
+        x: x1 - (x0 - pinch.current.offset.x) * next / pinch.current.zoom,
+        y: y1 - (y0 - pinch.current.offset.y) * next / pinch.current.zoom,
+      });
+      setZoom(next);
+      return;
+    }
     if (drag.current) {
       setOffset({
         x: drag.current.startX + event.clientX - drag.current.x,
@@ -292,7 +535,8 @@ function MapCanvas({
       });
       return;
     }
-    if (!field) return;
+    if (!field || event.pointerType === 'touch') return;
+    if (tool !== 'navigate') onHoverPoint(mapPoint(event.clientX, event.clientY));
     const rect = event.currentTarget.getBoundingClientRect();
     const size = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
     const left = (dimensions.width - size) / 2 + offset.x,
@@ -321,33 +565,151 @@ function MapCanvas({
     <div className="nh-map" ref={hostRef}>
       <canvas
         ref={canvasRef}
-        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. Drag to pan, scroll to zoom. Press Home to fit.`}
+        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. Drag to pan, scroll to zoom. Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
         role="img"
         tabIndex={0}
         onPointerDown={(event) => {
-          if (event.button !== 0 && event.button !== 1) return;
-          drag.current = { x: event.clientX, y: event.clientY, startX: offset.x, startY: offset.y };
+          if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
+          clickStart.current = { x: event.clientX, y: event.clientY };
+          if (event.pointerType === 'touch') {
+            touches.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+            if (touches.current.size === 2) {
+              hadPinch.current = true;
+              const [a, b] = [...touches.current.values()];
+              pinch.current = {
+                distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+                middleX: (a.x + b.x) / 2, middleY: (a.y + b.y) / 2,
+                zoom, offset: { ...offset },
+              };
+              drag.current = null;
+            }
+          }
+          if ((tool === 'navigate' || event.button !== 0 || event.pointerType === 'touch') &&
+            touches.current.size < 2) {
+            drag.current = { x: event.clientX, y: event.clientY,
+              startX: offset.x, startY: offset.y };
+          }
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={inspect}
+        onContextMenu={(event) => event.preventDefault()}
         onPointerUp={(event) => {
+          const start = clickStart.current;
+          if (event.pointerType === 'touch') touches.current.delete(event.pointerId);
+          if (touches.current.size < 2) pinch.current = null;
+          if (start && event.button === 0 && !hadPinch.current &&
+            !splineEditing && tool !== 'navigate' &&
+            Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) {
+            const point = mapPoint(event.clientX, event.clientY);
+            if (point) onChoosePoint(point);
+          }
+          clickStart.current = null;
           drag.current = null;
+          if (touches.current.size === 0) hadPinch.current = false;
           if (event.currentTarget.hasPointerCapture(event.pointerId))
             event.currentTarget.releasePointerCapture(event.pointerId);
         }}
-        onPointerCancel={() => {
+        onPointerCancel={(event) => {
+          touches.current.delete(event.pointerId);
+          pinch.current = null;
+          hadPinch.current = false;
+          clickStart.current = null;
           drag.current = null;
         }}
-        onPointerLeave={() => setSample(null)}
+        onPointerLeave={() => { setSample(null); onHoverPoint(null); }}
         onKeyDown={(event) => {
           if (event.key === 'Home') {
+            event.preventDefault();
             setZoom(1);
             setOffset({ x: 0, y: 0 });
           }
-          if (event.key === '+' || event.key === '=') setZoom((v) => Math.min(12, v * 1.2));
-          if (event.key === '-') setZoom((v) => Math.max(0.35, v / 1.2));
+          if (event.key === '+' || event.key === '=') {
+            event.preventDefault();
+            setZoom((v) => Math.min(12, v * 1.2));
+          }
+          if (event.key === '-') {
+            event.preventDefault();
+            setZoom((v) => Math.max(0.35, v / 1.2));
+          }
+          if (tool !== 'navigate') {
+            const arrows: Record<string, [number, number]> = {
+              ArrowLeft: [-1, 0], ArrowRight: [1, 0],
+              ArrowUp: [0, -1], ArrowDown: [0, 1],
+            };
+            const direction = arrows[event.key];
+            if (direction) {
+              event.preventDefault();
+              const delta = event.shiftKey ? 0.05 : 0.01;
+              const next = {
+                u: Math.max(0, Math.min(1, keyboardPoint.u + direction[0] * delta)),
+                v: Math.max(0, Math.min(1, keyboardPoint.v + direction[1] * delta)),
+              };
+              setKeyboardPoint(next);
+              onHoverPoint(next);
+            } else if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onChoosePoint(keyboardPoint);
+            }
+          }
         }}
       />
+      {(hoverPoint || inspectionPoints.length > 0 || cameraFocus) && (
+        <svg className="nh-inspection-overlay" aria-hidden="true"
+          style={{ left: layerLeft, top: layerTop, width: layerSize, height: layerSize }}
+          viewBox="0 0 1000 1000" preserveAspectRatio="none">
+          {cameraFocus && (
+            <g className="nh-map-camera-focus" transform={`translate(${cameraFocus.u * 1000}
+              ${cameraFocus.v * 1000}) scale(${markerScale})`}>
+              <title>3D camera orbit focus and viewing direction</title>
+              <g transform={`rotate(${-cameraBearing})`}>
+                <path d="M 0 7 V 25 M -4 19 L 0 25 L 4 19" stroke="#62adcd"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  fill="none" vectorEffect="non-scaling-stroke" />
+              </g>
+              <circle cx="0" cy="0" r="5" fill="#3c7187" stroke="#f5f7f0"
+                strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <text x="12" y="-10" fontSize="12" fontWeight="bold" fill="#ffffff"
+                stroke="#2a5265" strokeWidth="2" paintOrder="stroke">3D</text>
+            </g>
+          )}
+          {inspectionPoints.length >= 2 && (
+            <line x1={inspectionPoints[0].u * 1000} y1={inspectionPoints[0].v * 1000}
+              x2={inspectionPoints[1].u * 1000} y2={inspectionPoints[1].v * 1000}
+              stroke="#ffe7a8" strokeWidth="2.6" vectorEffect="non-scaling-stroke" />
+          )}
+          {inspectionPoints.map((p, index) => (
+            <g key={index} className="nh-inspect-pin"
+              transform={`translate(${p.u * 1000} ${p.v * 1000}) scale(${markerScale})`}>
+              <circle cx="0" cy="0" r="6" fill="#edbc6b"
+                stroke="#2e3b36" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+              <text x="10" y="-10" fill="#fff"
+                stroke="#25332e" strokeWidth="2" paintOrder="stroke"
+                fontSize="12" fontWeight="bold">{String.fromCharCode(65 + index)}</text>
+            </g>
+          ))}
+          {hoverPoint && (
+            <g transform={`translate(${hoverPoint.u * 1000}
+              ${hoverPoint.v * 1000}) scale(${markerScale})`}
+              stroke="#f9faf2" strokeWidth="2" vectorEffect="non-scaling-stroke">
+              <circle cx="0" cy="0" r="6" fill="none" />
+              <path d="M -15 0 h 6 m 18 0 h 6 M 0 -15 v 6 m 0 18 v 6" fill="none" />
+            </g>
+          )}
+        </svg>
+      )}
+      {mapBusy && <div className="nh-map-update" role="status">
+        {baseline && compareKind === 'difference' ? 'Computing elevation change…' :
+          `Generating ${CHANNELS.find(c => c.value === channel)?.label}…`}
+      </div>}
+      {baseline && compareKind === 'difference' && !mapBusy && !mapError &&
+        <div className="nh-difference-legend">
+          <strong>Δ elevation in meters</strong>
+          <div className="nh-difference-gradient" />
+          <div><span>−{formatMeters(deltaScale)}</span>
+            <span>0 m</span><span>+{formatMeters(deltaScale)}</span></div>
+          <small>Warm = lower · Cool = higher</small>
+        </div>}
+      {mapError && <div className="nh-map-update error" role="alert">Could not generate this material map.</div>}
       {spline && (
         <div
           ref={layerRef}
@@ -548,18 +910,26 @@ function MapLegend({
         empty: false,
       };
     }
+    if (channel === 'basecolor')
+      return { label: 'PBR base color · sRGB', start: '', end: '', empty: true };
+    if (channel === 'splat')
+      return { label: 'Weights · R rock · G soil · B vegetation · A snow',
+        start: '', end: '', empty: true };
+    if (channel === 'orm')
+      return { label: 'Packed ORM · R occlusion · G roughness · B metallic',
+        start: '', end: '', empty: true };
     if ([
-      'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
+      'roughness', 'ao', 'curvature',
       'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
     ].includes(channel)) {
-      return { label: channel === 'splat' ? 'R rock · G soil · B vegetation · A snow'
-        : channel === 'orm' ? 'R occlusion · G roughness · B metallic'
-          : CHANNELS.find(c => c.value === channel)?.label ?? 'PBR map',
+      return {
+        label: CHANNELS.find(c => c.value === channel)?.label ?? 'PBR map',
         start: channel === 'curvature' ? 'Concave' :
           MATERIAL_WEIGHT_INDEX[channel] !== undefined ? '0%' : '0',
         end: channel === 'curvature' ? 'Convex' :
           MATERIAL_WEIGHT_INDEX[channel] !== undefined ? '100%' : '1',
-        empty: false };
+        empty: false,
+      };
     }
     let max = 0;
     const diagnostic = field[channel as 'flow' | 'wear' | 'deposition'];
@@ -609,20 +979,89 @@ export function TerrainViewport({
   onChannelChange,
   onSettingsChange,
   onCancel,
+  focusMode,
+  onFocusModeChange,
+  baseline,
+  onCaptureBaseline,
+  onClearBaseline,
 }: TerrainViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<TerrainScene | null>(null);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [tool, setTool] = useState<ViewportTool>('navigate');
+  const [compareKind, setCompareKind] = useState<'wipe' | 'difference'>('wipe');
+  const [wipe, setWipe] = useState(50);
+  const [showLayers, setShowLayers] = useState(false);
+  const [overlayChannel, setOverlayChannel] = useState<MapChannel | null>(null);
+  const [overlayOpacity, setOverlayOpacity] = useState(45);
+  const [hoverPoint, setHoverPoint] = useState<TerrainPoint | null>(null);
+  const [inspectionPoints, setInspectionPoints] = useState<TerrainPoint[]>([]);
+  const [splitRatio, setSplitRatio] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem('normal-height.split.v1'));
+      return stored >= 22 && stored <= 78 ? stored : 50;
+    } catch { return 50; }
+  });
+  const [cameraHeading, setCameraHeading] = useState(0);
+  const [cameraFocus, setCameraFocus] = useState<TerrainPoint | null>(null);
+  const [bookmarks, setBookmarks] = useState<CameraBookmark[]>(readCameraBookmarks);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [compactSplit, setCompactSplit] = useState(
+    () => window.matchMedia('(max-width: 660px)').matches,
+  );
+  const displayPanel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 660px)');
+    const onChange = (e: MediaQueryListEvent) => setCompactSplit(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  useEffect(() => {
+    try { localStorage.setItem('normal-height.camera-bookmarks.v1',
+      JSON.stringify(bookmarks)); } catch { /* optional */ }
+  }, [bookmarks]);
+  const mapFraming = useRef<MapFraming>(loadMapFraming());
+  const choosePoint = (point: TerrainPoint) =>
+    setInspectionPoints((points) => tool === 'inspect' ? [point] :
+      points.length >= 2 ? [point] : [...points, point]);
+  const interactions = useRef({ tool, choosePoint });
+  interactions.current = { tool, choosePoint };
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const effectiveMode = sceneError ? '2d' : viewMode;
+  const activePoint = hoverPoint ?? inspectionPoints.at(-1) ?? null;
+  const activeSample = useMemo(() =>
+    field && activePoint ? sampleTerrain(field, project, activePoint) : null,
+    [field, project, activePoint]);
+  const profile = useMemo(() =>
+    field && inspectionPoints.length === 2
+      ? terrainProfile(field, project, inspectionPoints[0], inspectionPoints[1]) : null,
+    [field, project, inspectionPoints]);
+  useEffect(() => {
+    try { localStorage.setItem('normal-height.split.v1', String(splitRatio)); } catch { /* optional */ }
+  }, [splitRatio]);
+  useEffect(() => {
+    const save = () => {
+      try { localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(mapFraming.current)); }
+      catch { /* optional */ }
+    };
+    window.addEventListener('pagehide', save);
+    return () => { save(); window.removeEventListener('pagehide', save); };
+  }, []);
 
   useEffect(() => {
     if (!hostRef.current) return;
     try {
-      sceneRef.current = new TerrainScene(hostRef.current, settingsRef.current, setSceneError, theme);
+      sceneRef.current = new TerrainScene(hostRef.current, settingsRef.current, setSceneError,
+        theme, (next, focus) => {
+          setCameraHeading((current) => Math.abs(next - current) >= 1 ? next : current);
+          setCameraFocus((current) =>
+            (!current && !focus) || (current && focus &&
+              Math.abs(current.u - focus.u) < 0.001 &&
+              Math.abs(current.v - focus.v) < 0.001) ? current : focus);
+        });
       setSceneError(null);
     } catch (error) {
       setSceneError(
@@ -641,6 +1080,51 @@ export function TerrainViewport({
   }, [field, project, settings, attempt]);
 
   useEffect(() => {
+    sceneRef.current?.setInspection(hoverPoint, inspectionPoints);
+  }, [hoverPoint, inspectionPoints, field, settings.exaggeration, attempt]);
+
+  useEffect(() => {
+    const canvas = hostRef.current?.querySelector('canvas');
+    if (!canvas) return;
+    let pressed: { x: number; y: number } | null = null;
+    let lastHover = 0;
+    const down = (event: PointerEvent) => {
+      if (event.button === 0) pressed = { x: event.clientX, y: event.clientY };
+    };
+    const move = (event: PointerEvent) => {
+      if (interactions.current.tool === 'navigate' || event.pointerType === 'touch') return;
+      const now = performance.now();
+      // Raycasting the adaptive mesh on every pointer event would block orbiting.
+      if (now - lastHover < 100) return;
+      lastHover = now;
+      const p = sceneRef.current?.pickPoint(event.clientX, event.clientY) ?? null;
+      setHoverPoint((old) => old && p &&
+        Math.abs(old.u - p.u) < 0.0002 && Math.abs(old.v - p.v) < 0.0002 ? old : p);
+    };
+    const up = (event: PointerEvent) => {
+      if (pressed && interactions.current.tool !== 'navigate' &&
+        Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 6) {
+        const p = sceneRef.current?.pickPoint(event.clientX, event.clientY);
+        if (p) interactions.current.choosePoint(p);
+      }
+      pressed = null;
+    };
+    const leave = () => setHoverPoint(null);
+    canvas.addEventListener('pointerdown', down);
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', leave);
+    canvas.addEventListener('pointerleave', leave);
+    return () => {
+      canvas.removeEventListener('pointerdown', down);
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', leave);
+      canvas.removeEventListener('pointerleave', leave);
+    };
+  }, [attempt]);
+
+  useEffect(() => {
     sceneRef.current?.setSplineGuide(
       spline?.path ?? null,
       spline?.params.mode === 'ridge' ? 'ridge' : 'river',
@@ -656,8 +1140,18 @@ export function TerrainViewport({
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setShowSettings(false);
     };
+    const outside = (event: PointerEvent) => {
+      if (!displayPanel.current?.contains(event.target as Node) &&
+          !(event.target as HTMLElement).closest('.nh-viewport-tool')) {
+        setShowSettings(false);
+      }
+    };
     window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
+    window.addEventListener('pointerdown', outside);
+    return () => {
+      window.removeEventListener('keydown', escape);
+      window.removeEventListener('pointerdown', outside);
+    };
   }, [showSettings]);
 
   const change = (patch: Partial<ViewSettings>) => onSettingsChange({ ...settings, ...patch });
@@ -680,6 +1174,7 @@ export function TerrainViewport({
           <button
             type="button"
             className={effectiveMode === '3d' ? 'active' : ''}
+            aria-label="3D terrain"
             aria-pressed={effectiveMode === '3d'}
             disabled={!!sceneError}
             onClick={() => onViewModeChange('3d')}
@@ -690,6 +1185,7 @@ export function TerrainViewport({
           <button
             type="button"
             className={effectiveMode === '2d' ? 'active' : ''}
+            aria-label="2D map"
             aria-pressed={effectiveMode === '2d'}
             onClick={() => onViewModeChange('2d')}
           >
@@ -699,6 +1195,7 @@ export function TerrainViewport({
           <button
             type="button"
             className={effectiveMode === 'split' ? 'active' : ''}
+            aria-label="Split"
             aria-pressed={effectiveMode === 'split'}
             disabled={!!sceneError}
             title="Compare 3D terrain and 2D map"
@@ -707,9 +1204,35 @@ export function TerrainViewport({
             <Columns2 size={14} />
             <span>Split</span>
           </button>
+          <button type="button" className={effectiveMode === 'compare' ? 'active' : ''}
+            aria-label="Compare"
+            aria-pressed={effectiveMode === 'compare'} disabled={!baseline || !field}
+            title={baseline ? 'Compare the pinned baseline with the current terrain' :
+              'Pin a terrain baseline first'}
+            onClick={() => { onChannelChange('terrain'); onViewModeChange('compare'); }}>
+            <GitCompareArrows size={14} /><span>Compare</span>
+          </button>
+        </div>
+        <div className="nh-viewport-toolset" role="group" aria-label="Viewport tool">
+          {VIEWPORT_TOOLS.map(({ value, label, Icon }) => (
+            <button key={value} type="button" aria-label={label + ' terrain'}
+              title={label + (value === 'measure' || value === 'profile' ? ' · select two points' : '')}
+              aria-pressed={tool === value} disabled={!field && value !== 'navigate'}
+              className={tool === value ? 'active' : ''}
+              onClick={() => { setTool(value); setInspectionPoints([]); setHoverPoint(null); }}>
+              <Icon size={15} /><span>{label}</span>
+            </button>
+          ))}
         </div>
         <div className="nh-viewport-toolbar-right">
-          {effectiveMode !== '3d' && (
+          {effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+            <button type="button" className={`nh-viewport-tool ${showLayers ? 'active' : ''}`}
+              title="Map overlays" aria-label="Map overlays" aria-expanded={showLayers}
+              onClick={() => setShowLayers(v => !v)}>
+              <Layers2 size={16} /><span>Layers</span>
+            </button>
+          )}
+          {effectiveMode !== '3d' && effectiveMode !== 'compare' && (
             <label className="nh-channel-select">
               <TerrainIcon name={MAP_ICON_NAMES[channel]} height={16} />
               <select
@@ -717,15 +1240,39 @@ export function TerrainViewport({
                 value={channel}
                 onChange={(event) => onChannelChange(event.target.value as MapChannel)}
               >
-                {CHANNELS.map((c) => (
-                  <option key={c.value} value={c.value}>
-                    {c.label}
-                  </option>
+                {CHANNEL_GROUPS.map(group => (
+                  <optgroup key={group.label} label={group.label}>
+                    {CHANNELS.filter(c => (group.values as readonly string[]).includes(c.value))
+                      .map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </optgroup>
                 ))}
               </select>
               <ChevronDown size={12} />
             </label>
           )}
+          <button type="button" className="nh-viewport-tool"
+            title={baseline ? `Replace baseline: ${baseline.label}` : 'Pin baseline for comparison'}
+            aria-label={baseline ? 'Replace comparison baseline' : 'Pin comparison baseline'}
+            disabled={!field || busy || stale} onClick={onCaptureBaseline}>
+            <Pin size={15} />
+            <span>{baseline ? 'Pinned' : 'Pin'}</span>
+          </button>
+          {baseline && (
+            <button type="button" className="nh-viewport-tool" title="Clear comparison baseline"
+              aria-label="Clear comparison baseline"
+              onClick={() => {
+                if (effectiveMode === 'compare') onViewModeChange('2d');
+                onClearBaseline();
+              }}><PinOff size={15} /></button>
+          )}
+          <button type="button" className="nh-viewport-tool"
+            title={focusMode ? 'Exit viewport focus mode (F)' : 'Focus viewport (F)'}
+            aria-label={focusMode ? 'Exit viewport focus mode' : 'Focus viewport'}
+            aria-pressed={focusMode}
+            onClick={() => onFocusModeChange(!focusMode)}>
+            {focusMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            <span>{focusMode ? 'Restore' : 'Focus'}</span>
+          </button>
           {effectiveMode !== '2d' && (
             <button
               className={`nh-viewport-tool ${showSettings ? 'active' : ''}`}
@@ -745,15 +1292,20 @@ export function TerrainViewport({
       <div className={`nh-preview-surface nh-mode-${effectiveMode}`}>
         <div
           className="nh-three-pane"
-          style={{ display: effectiveMode === '2d' ? 'none' : undefined }}
+          style={{ display: effectiveMode === '2d' || effectiveMode === 'compare' ? 'none' : undefined,
+            flex: effectiveMode === 'split' ? `0 0 ${splitRatio}%` : undefined }}
         >
           <div className="nh-three-host" ref={hostRef} />
           {field && (
             <>
               <div className="nh-viewport-coordinate">
-                <span className="nh-compass">
-                  N<span />
-                </span>
+                <button type="button" className="nh-compass-control"
+                  aria-label="Face north" title="Face north · compass follows camera"
+                  onClick={() => sceneRef.current?.orientCamera(0)}>
+                  <span className="nh-compass" style={{ transform: `rotate(${cameraHeading}deg)` }}>
+                    N<span />
+                  </span>
+                </button>
                 <div>
                   <span>
                     {settings.material === 'alpine'
@@ -779,10 +1331,16 @@ export function TerrainViewport({
                 <button
                   type="button"
                   aria-label="View terrain from above"
-                  title="Top view"
+                  title="Orthographic top-down view"
                   onClick={() => sceneRef.current?.topView()}
                 >
                   <Grid2X2 size={16} />
+                </button>
+                <button type="button" aria-label="Camera bookmarks"
+                  title="Camera views and bookmarks"
+                  aria-expanded={showBookmarks}
+                  onClick={() => setShowBookmarks(v => !v)}>
+                  <Bookmark size={16} />
                 </button>
                 <button
                   type="button"
@@ -793,6 +1351,44 @@ export function TerrainViewport({
                   <Camera size={16} />
                 </button>
               </div>
+              {showBookmarks && (
+                <div className="nh-camera-bookmarks" role="region" aria-label="Saved camera views">
+                  <div className="nh-bookmarks-header">
+                    <strong>Camera views</strong>
+                    <button type="button" aria-label="Close camera views"
+                      onClick={() => setShowBookmarks(false)}><X size={13}/></button>
+                  </div>
+                  <div className="nh-cardinal-buttons" role="group" aria-label="Face direction">
+                    {[['N', 0], ['E', 90], ['S', 180], ['W', 270]].map(([name, angle]) => (
+                      <button key={name} type="button" aria-label={`Face ${name}`}
+                        onClick={() => sceneRef.current?.orientCamera(Number(angle))}>{name}</button>
+                    ))}
+                  </div>
+                  <button type="button" className="nh-save-bookmark"
+                    onClick={() => {
+                      const camera = sceneRef.current?.captureCamera();
+                      if (!camera) return;
+                      setBookmarks(old => [...old.slice(-7), {
+                        ...camera, name: `View ${old.length + 1}`,
+                      }]);
+                    }}>
+                    <BookmarkPlus size={14}/> Save current view
+                  </button>
+                  {bookmarks.length === 0 && <small>No saved views yet.</small>}
+                  {bookmarks.map((bookmark, index) => (
+                    <div className="nh-bookmark-item" key={index}>
+                      <button type="button" onClick={() => {
+                        sceneRef.current?.restoreCamera(bookmark);
+                        setShowBookmarks(false);
+                      }}>{bookmark.name}</button>
+                      <button type="button" aria-label={`Delete ${bookmark.name}`}
+                        onClick={() => setBookmarks(old => old.filter((_, i) => i !== index))}>
+                        <Trash2 size={13}/>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="nh-view-hint">
                 Drag to orbit<span>·</span>Right-drag to pan<span>·</span>Double-click to focus<span>·</span>Scroll to zoom
               </div>
@@ -807,10 +1403,165 @@ export function TerrainViewport({
             </>
           )}
         </div>
+        {effectiveMode === 'split' && (
+          <div className="nh-split-divider" role="separator" aria-label="Resize 3D and map views"
+            aria-orientation={compactSplit ? 'horizontal' : 'vertical'}
+            aria-valuemin={22} aria-valuemax={78}
+            aria-valuenow={Math.round(splitRatio)} tabIndex={0}
+            onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); }}
+            onPointerMove={e => {
+              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+              const rect = e.currentTarget.parentElement?.getBoundingClientRect();
+              if (rect) setSplitRatio(Math.max(22, Math.min(78,
+                compactSplit ? (e.clientY - rect.top) / rect.height * 100
+                  : (e.clientX - rect.left) / rect.width * 100)));
+            }}
+            onPointerUp={e => {
+              if (e.currentTarget.hasPointerCapture(e.pointerId))
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            }}
+            onKeyDown={e => {
+              if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+                e.preventDefault();
+                const increment = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 5 : -5;
+                setSplitRatio(r => Math.max(22, Math.min(78, r + increment)));
+              } else if (e.key === 'Home') { e.preventDefault(); setSplitRatio(50); }
+            }}><span /></div>
+        )}
         {effectiveMode !== '3d' && (
           <div className="nh-map-pane">
-            <MapCanvas field={field} channel={channel} project={project} spline={spline} splineEditing={splineEditing} onSplinePath={onSplinePath} />
-            <MapLegend field={field} channel={channel} project={project} />
+            <MapCanvas field={field} channel={effectiveMode === 'compare' ? 'terrain' : channel}
+              project={project} spline={spline} splineEditing={splineEditing}
+              onSplinePath={onSplinePath}
+              initialFraming={mapFraming.current}
+              onFramingChange={next => { mapFraming.current = next; }}
+              tool={tool} hoverPoint={hoverPoint} inspectionPoints={inspectionPoints}
+              onHoverPoint={setHoverPoint} onChoosePoint={choosePoint}
+              baseline={effectiveMode === 'compare' && baseline?.project.worldSize === project.worldSize
+                ? baseline : null}
+              compareKind={compareKind} wipe={wipe}
+              overlayChannel={effectiveMode === 'compare' ? null : overlayChannel}
+              overlayOpacity={overlayOpacity}
+              cameraFocus={effectiveMode === 'split' ? cameraFocus : null}
+              cameraBearing={cameraHeading} />
+            {effectiveMode !== 'compare' && <MapLegend field={field} channel={channel} project={project} />}
+          </div>
+        )}
+        {showLayers && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+          <div className="nh-overlay-panel" role="region" aria-label="Map overlays">
+            <div className="nh-overlay-heading">
+              <strong>Map overlay</strong>
+              <button type="button" aria-label="Close map overlays"
+                onClick={() => setShowLayers(false)}><X size={14}/></button>
+            </div>
+            <label>Layer
+              <select aria-label="Overlay channel" value={overlayChannel ?? ''}
+                onChange={e => setOverlayChannel(e.target.value ?
+                  e.target.value as MapChannel : null)}>
+                <option value="">No overlay</option>
+                {CHANNELS.filter(c => ['slope', 'flow', 'wear', 'deposition', 'normal']
+                  .includes(c.value)).map(c =>
+                    <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </label>
+            {overlayChannel && <label>Opacity <b>{overlayOpacity}%</b>
+              <input type="range" aria-label="Overlay opacity" min="5" max="100"
+                step="5" value={overlayOpacity}
+                onChange={e => setOverlayOpacity(Number(e.target.value))}/>
+            </label>}
+            <small>Display-only overlay; source and exports stay unchanged.</small>
+          </div>
+        )}
+        {effectiveMode === 'compare' && baseline && (
+          <div className="nh-compare-panel">
+            <strong>{baseline.label} → {previewLabel}</strong>
+            {baseline.project.worldSize !== project.worldSize ?
+              <span>Cannot compare different tile widths. Restore the original tile width.</span> : (
+                <>
+                  <div className="nh-compare-kinds" role="group" aria-label="Comparison style">
+                    <button type="button" aria-pressed={compareKind === 'wipe'}
+                      className={compareKind === 'wipe' ? 'active' : ''}
+                      onClick={() => setCompareKind('wipe')}>Before / after wipe</button>
+                    <button type="button" aria-pressed={compareKind === 'difference'}
+                      className={compareKind === 'difference' ? 'active' : ''}
+                      onClick={() => setCompareKind('difference')}>Elevation change</button>
+                  </div>
+                  {compareKind === 'wipe' &&
+                    <label className="nh-compare-wipe">
+                      <span>Baseline {wipe}%</span>
+                      <input type="range" aria-label="Before after wipe position"
+                        min="0" max="100" step="1" value={wipe}
+                        onChange={e => setWipe(Number(e.target.value))} />
+                      <span>Current {100 - wipe}%</span>
+                    </label>}
+                </>
+            )}
+          </div>
+        )}
+        {field && tool !== 'navigate' && (
+          <div className="nh-inspection-readout" role="status" aria-live="off">
+            <div className="nh-inspect-header">
+              <strong>{tool === 'profile' ? 'Elevation profile' : tool === 'measure'
+                ? 'Measure terrain' : 'Terrain inspector'}</strong>
+              {inspectionPoints.length > 0 && (
+                <button type="button" aria-label="Clear sample points"
+                  title="Clear sample points" onClick={() => setInspectionPoints([])}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            {activeSample ? (
+              <>
+                <div className="nh-inspect-values">
+                  <span>E {formatMeters(activeSample.easting)}</span>
+                  <span>N {formatMeters(activeSample.northing)}</span>
+                  <b>{formatMeters(activeSample.elevation)} elevation</b>
+                  <span>{activeSample.slope.toFixed(1)}° slope</span>
+                  <span>Flow {activeSample.flow.toPrecision(3)}</span>
+                </div>
+                {inspectionPoints.length > 0 && effectiveMode !== 'compare' && (
+                  <button className="nh-inspect-focus" type="button"
+                    aria-label="Focus 3D camera at pinned sample"
+                    onClick={() => {
+                      const point = inspectionPoints.at(-1);
+                      if (!point) return;
+                      sceneRef.current?.focusPoint(point);
+                      if (effectiveMode === '2d') onViewModeChange('split');
+                    }}>
+                    <Focus size={13} /> Focus 3D at sample
+                  </button>
+                )}
+                {profile && tool !== 'inspect' && (
+                  <div className="nh-measure-results">
+                    <span>Distance <b>{formatMeters(profile.horizontalDistance)}</b></span>
+                    <span>Δ elev. <b>{formatMeters(profile.elevationChange)}</b></span>
+                    <span>Grade <b>{profile.grade.toFixed(1)}%</b></span>
+                    <span>Surface <b>{formatMeters(profile.surfaceDistance)}</b></span>
+                    {tool === 'profile' && (() => {
+                      const heights = profile.samples.map(sample => sample.elevation);
+                      const min = Math.min(...heights), max = Math.max(...heights);
+                      const span = Math.max(1, max - min);
+                      const points = heights.map((h, i) =>
+                        `${(i / (heights.length - 1) * 280).toFixed(2)},${(78 - (h - min) / span * 64).toFixed(2)}`).join(' ');
+                      return (
+                        <svg className="nh-profile-chart" role="img" aria-label="Terrain elevation profile"
+                          viewBox="0 0 280 90" preserveAspectRatio="none">
+                          <line x1="0" y1="78" x2="280" y2="78" stroke="currentColor" opacity=".3" />
+                          <polyline points={points} fill="none" stroke="#83c4b0" strokeWidth="2"
+                            strokeLinejoin="round" strokeLinecap="round" />
+                          <text x="3" y="11" fontSize="9" fill="currentColor">
+                            {formatMeters(max)}</text>
+                          <text x="3" y="89" fontSize="9" fill="currentColor">
+                            {formatMeters(min)}</text>
+                        </svg>
+                      );
+                    })()}
+                  </div>
+                )}
+              </>
+            ) : <span>Click a terrain point to begin.</span>}
+            {(tool === 'measure' || tool === 'profile') && inspectionPoints.length < 2 &&
+              <small>{inspectionPoints.length === 0 ? 'Choose point A' : 'Choose point B'}</small>}
           </div>
         )}
         <div className="nh-preview-source">
@@ -863,7 +1614,8 @@ export function TerrainViewport({
           </div>
         )}
         {showSettings && effectiveMode !== '2d' && (
-          <div className="nh-display-panel" role="dialog" aria-label="Display settings">
+          <div className="nh-display-panel" ref={displayPanel}
+            role="region" aria-label="Display settings">
             <div className="nh-display-title">
               <span>DISPLAY SETTINGS</span>
               <button

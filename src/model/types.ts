@@ -97,7 +97,7 @@ export type WorkerResponse =
 export type MapChannel = 'height' | 'terrain' | 'normal' | 'slope' | 'flow' | 'wear' | 'deposition'
   | 'basecolor' | 'roughness' | 'ao' | 'splat' | 'curvature' | 'orm'
   | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
-export type ViewMode = '3d' | '2d' | 'split';
+export type ViewMode = '3d' | '2d' | 'split' | 'compare';
 export interface ViewSettings {
   material: 'alpine' | 'clay' | 'height' | 'pbr';
   /** Display-only near-camera procedural detail, independent of PBR map exports. */

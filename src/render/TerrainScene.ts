@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import type { TerrainPoint } from '../model/viewportUX';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, terrainColor } from './maps';
 import {
@@ -74,6 +75,8 @@ export class TerrainScene {
   readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(36, 1, 0.002, 40);
+  private readonly orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.002, 40);
+  private orthographic = false;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly sun: THREE.DirectionalLight;
@@ -160,26 +163,114 @@ export class TerrainScene {
   private readonly onContextLost: (event: Event) => void;
   private readonly raycaster = new THREE.Raycaster();
   private readonly rayPointer = new THREE.Vector2();
-  private readonly onFocusTerrain = (event: MouseEvent) => {
-    if (!this.terrain) return;
+  private readonly hoverMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.019, 12, 10),
+    new THREE.MeshBasicMaterial({ color: '#fbf9ed', depthTest: false }),
+  );
+  private readonly pinnedMarkers = [0, 1].map(() => new THREE.Mesh(
+    new THREE.SphereGeometry(0.023, 12, 10),
+    new THREE.MeshBasicMaterial({ color: '#e2ae64', depthTest: false }),
+  ));
+  private readonly inspectLine = new THREE.Line(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ color: '#fff3da', linewidth: 2, depthTest: false }),
+  );
+  private inspectLineField: HeightField | null = null;
+  private inspectLineKey = '';
+
+  /** Hit-test the displayed terrain, returning coordinates in the source heightfield. */
+  pickPoint(clientX: number, clientY: number): TerrainPoint | null {
+    if (!this.terrain) return null;
     const bounds = this.renderer.domElement.getBoundingClientRect();
-    if (!bounds.width || !bounds.height) return;
+    if (!bounds.width || !bounds.height) return null;
     this.rayPointer.set(
-      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
-      1 - ((event.clientY - bounds.top) / bounds.height) * 2,
+      ((clientX - bounds.left) / bounds.width) * 2 - 1,
+      1 - ((clientY - bounds.top) / bounds.height) * 2,
     );
-    this.raycaster.setFromCamera(this.rayPointer, this.camera);
+    this.raycaster.setFromCamera(this.rayPointer, this.renderCamera());
     const hit = this.raycaster.intersectObject(this.terrain, false)[0];
-    if (!hit) return;
-    // Move the orbit target to the actual mesh point while preserving the
-    // current view direction/distance. This makes 1–5 m microstructure
-    // inspectable on any cliff, not only at the tile's default center.
-    const delta = hit.point.clone().sub(this.controls.target);
-    this.controls.target.copy(hit.point);
+    if (!hit) return null;
+    return {
+      u: THREE.MathUtils.clamp(hit.point.x / TERRAIN_SIZE + 0.5, 0, 1),
+      v: THREE.MathUtils.clamp(hit.point.z / TERRAIN_SIZE + 0.5, 0, 1),
+    };
+  }
+
+  /** Keep linked inspection markers independent of adaptive geometry and exports. */
+  setInspection(hover: TerrainPoint | null, pinned: readonly TerrainPoint[]) {
+    const field = this.field, project = this.project;
+    const locate = (point: TerrainPoint, out: THREE.Object3D) => {
+      if (!field || !project) return;
+      const surface = this.heightSampler?.height(point.u, point.v) ??
+        bilinear(field.height, field.resolution, point.u, point.v);
+      const y = surface *
+        TERRAIN_SIZE * project.heightScale / project.worldSize * this.settings.exaggeration;
+      // Keep a real terrain-relative base height, then apply only a few
+      // screen pixels of clearance when the camera frame changes.
+      out.userData.nhBaseElevation = y;
+      out.position.set(
+        (point.u - 0.5) * TERRAIN_SIZE, y, (point.v - 0.5) * TERRAIN_SIZE,
+      );
+    };
+    this.hoverMarker.visible = !!field && !!hover;
+    if (hover) locate(hover, this.hoverMarker);
+    for (let i = 0; i < 2; i++) {
+      const marker = this.pinnedMarkers[i];
+      marker.visible = !!field && !!pinned[i];
+      if (pinned[i]) locate(pinned[i], marker);
+    }
+    this.inspectLine.visible = !!field && pinned.length === 2;
+    const key = field && project && pinned.length === 2 ?
+      JSON.stringify([pinned, project.worldSize, project.heightScale, this.settings.exaggeration]) : '';
+    if (field && project && key && (field !== this.inspectLineField || key !== this.inspectLineKey)) {
+      const positions: THREE.Vector3[] = [];
+      const scale = TERRAIN_SIZE * project.heightScale / project.worldSize *
+        this.settings.exaggeration;
+      for (let i = 0; i <= 64; i++) {
+        const t = i / 64;
+        const u = pinned[0].u * (1 - t) + pinned[1].u * t;
+        const v = pinned[0].v * (1 - t) + pinned[1].v * t;
+        positions.push(new THREE.Vector3(
+          (u - 0.5) * TERRAIN_SIZE,
+          (this.heightSampler?.height(u, v) ??
+            bilinear(field.height, field.resolution, u, v)) * scale + 0.0005,
+          (v - 0.5) * TERRAIN_SIZE,
+        ));
+      }
+      this.inspectLine.geometry.dispose();
+      this.inspectLine.geometry = new THREE.BufferGeometry().setFromPoints(positions);
+      this.inspectLineField = field;
+      this.inspectLineKey = key;
+    } else if (!key) {
+      this.inspectLineField = null;
+      this.inspectLineKey = '';
+    }
+    this.needsRender = true;
+  }
+
+  /** Focus a normalized source location from either 2D or 3D, preserving
+   * the user's camera orientation and zoom distance. */
+  focusPoint(point: TerrainPoint) {
+    if (!this.field || !this.project || !this.terrain) return;
+    const position = new THREE.Vector3(
+      (point.u - 0.5) * TERRAIN_SIZE,
+      (this.heightSampler?.height(point.u, point.v) ??
+        bilinear(this.field.height, this.field.resolution, point.u, point.v)) *
+        TERRAIN_SIZE * this.project.heightScale / this.project.worldSize * this.settings.exaggeration,
+      (point.v - 0.5) * TERRAIN_SIZE,
+    );
+    const delta = position.sub(this.controls.target);
+    this.controls.target.add(delta);
     this.camera.position.add(delta);
     this.cameraAdjusted = true;
     this.controls.update();
     this.needsRender = true;
+    this.lodDirty = true;
+  }
+
+  private readonly onFocusTerrain = (event: MouseEvent) => {
+    const point = this.pickPoint(event.clientX, event.clientY);
+    if (point) this.focusPoint(point);
   };
 
   constructor(
@@ -187,6 +278,7 @@ export class TerrainScene {
     settings: ViewSettings,
     private readonly onError: (message: string) => void,
     theme: 'light' | 'dark' = 'light',
+    private readonly onCameraHeading?: (heading: number, focus: TerrainPoint | null) => void,
   ) {
     this.settings = settings;
     this.renderer = new THREE.WebGLRenderer({
@@ -211,6 +303,7 @@ export class TerrainScene {
     this.renderer.domElement.setAttribute('role', 'img');
     this.renderer.domElement.tabIndex = 0;
     host.appendChild(this.renderer.domElement);
+    this.renderer.domElement.dataset.projection = 'perspective';
     this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
     if (this.meshBenchmark) {
@@ -349,6 +442,7 @@ export class TerrainScene {
     this.controls.screenSpacePanning = true;
     this.controls.update();
     this.controls.addEventListener('change', () => {
+      this.onCameraHeading?.(this.cameraHeading(), this.cameraTargetPoint());
       this.needsRender = true;
       this.lodDirty = true;
       this.lastCameraChangeMs = performance.now();
@@ -357,6 +451,18 @@ export class TerrainScene {
       this.cameraAdjusted = true;
     });
     this.renderer.domElement.addEventListener('dblclick', this.onFocusTerrain);
+    this.onCameraHeading?.(this.cameraHeading(), this.cameraTargetPoint());
+    this.hoverMarker.visible = false;
+    this.hoverMarker.renderOrder = 10;
+    this.scene.add(this.hoverMarker);
+    for (const marker of this.pinnedMarkers) {
+      marker.visible = false;
+      marker.renderOrder = 10;
+      this.scene.add(marker);
+    }
+    this.inspectLine.visible = false;
+    this.inspectLine.renderOrder = 9;
+    this.scene.add(this.inspectLine);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
@@ -370,6 +476,29 @@ export class TerrainScene {
     this.applyTheme(theme);
     this.resize();
     this.animate();
+  }
+
+  /** The interactive perspective camera controls both projection modes.
+   * Orthographic framing follows its target/distance so OrbitControls zoom
+   * and pan remain continuous when toggling a top-down survey view. */
+  private renderCamera(): THREE.PerspectiveCamera | THREE.OrthographicCamera {
+    if (!this.orthographic) return this.camera;
+    const distance = Math.max(0.03, this.camera.position.distanceTo(this.controls.target));
+    const halfHeight = Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5)) * distance;
+    const aspect = this.camera.aspect;
+    const camera = this.orthographicCamera;
+    camera.left = -halfHeight * aspect;
+    camera.right = halfHeight * aspect;
+    camera.top = halfHeight;
+    camera.bottom = -halfHeight;
+    camera.near = this.camera.near;
+    camera.far = this.camera.far;
+    camera.position.copy(this.camera.position);
+    camera.quaternion.copy(this.camera.quaternion);
+    camera.up.copy(this.camera.up);
+    camera.updateProjectionMatrix();
+    camera.updateMatrixWorld();
+    return camera;
   }
 
   private resize() {
@@ -388,11 +517,36 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
+  /** Maintain approximately constant on-screen marker sizes while zooming
+   * from a whole 8 km tile into an individual cliff face. Fixed-size spheres
+   * otherwise obscure the terrain by hundreds of pixels at close range. */
+  private scaleInspectionMarkers() {
+    const height = this.host.clientHeight;
+    if (height <= 0) return;
+    const fovScale = 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov * 0.5));
+    const orbitDistance = this.camera.position.distanceTo(this.controls.target);
+    const markers = [this.hoverMarker, ...this.pinnedMarkers];
+    for (let i = 0; i < markers.length; i++) {
+      const marker = markers[i];
+      if (!marker.visible) continue;
+      const distance = this.orthographic ? orbitDistance :
+        this.camera.position.distanceTo(marker.position);
+      const worldPerPixel = fovScale * Math.max(0.001, distance) / height;
+      const baseRadius = i === 0 ? 0.019 : 0.023;
+      const pixelRadius = i === 0 ? 4 : 5;
+      const radius = THREE.MathUtils.clamp(worldPerPixel * pixelRadius, 0.0001, 0.06);
+      marker.scale.setScalar(radius / baseRadius);
+      marker.position.y = Number(marker.userData.nhBaseElevation ?? marker.position.y) +
+        THREE.MathUtils.clamp(worldPerPixel * 2, 0.0001, 0.025);
+    }
+  }
+
   private animate = () => {
     if (this.disposed || this.contextLost) return;
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
+    this.scaleInspectionMarkers();
     // Camera changes mark LOD dirty. Don't re-plan 3x/s while idle. When
     // auto-rotating, refresh at most every 1.5 s rather than staying stale.
     const lodNow = performance.now();
@@ -449,7 +603,7 @@ export class TerrainScene {
         if (gpuQuery) gl.beginQuery(this.gpuTimer.TIME_ELAPSED_EXT, gpuQuery);
       }
       try {
-        this.renderer.render(this.scene, this.camera);
+        this.renderer.render(this.scene, this.renderCamera());
       } finally {
         if (gpuQuery && gl && this.gpuTimer) {
           gl.endQuery(this.gpuTimer.TIME_ELAPSED_EXT);
@@ -727,7 +881,7 @@ export class TerrainScene {
     const plan = this.meshBenchmark === 'uniform512'
       ? planUniform512Reference()
       : planTerrainMesh(
-          this.heightSampler, this.camera,
+          this.heightSampler, this.renderCamera(),
           this.host.clientHeight, this.renderer.getPixelRatio(),
           this.project.heightScale, this.project.worldSize,
           this.settings.exaggeration, this.settings.meshQuality,
@@ -1166,20 +1320,80 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
+  /** The orbit focal point projected into the original tile's map coordinates.
+   * Do not clamp targets that are outside the tile: an out-of-bounds camera
+   * focus must not appear pinned to a fictitious edge location. */
+  private cameraTargetPoint(): TerrainPoint | null {
+    const u = this.controls.target.x / TERRAIN_SIZE + 0.5;
+    const v = this.controls.target.z / TERRAIN_SIZE + 0.5;
+    return u >= 0 && u <= 1 && v >= 0 && v <= 1 ? { u, v } : null;
+  }
+
+  /** North is negative Z, matching the source map's first row. */
+  cameraHeading(): number {
+    const dx = this.camera.position.x - this.controls.target.x;
+    const dz = this.camera.position.z - this.controls.target.z;
+    return (Math.atan2(dx, dz) * 180 / Math.PI + 360) % 360;
+  }
+
+  /** Camera bookmarks affect only the viewport, never source terrain. */
+  captureCamera(): { position: [number, number, number]; target: [number, number, number] } {
+    return {
+      position: this.camera.position.toArray() as [number, number, number],
+      target: this.controls.target.toArray() as [number, number, number],
+    };
+  }
+
+  restoreCamera(state: { position: [number, number, number]; target: [number, number, number] }) {
+    if (![...state.position, ...state.target].every(Number.isFinite)) return;
+    this.camera.position.fromArray(state.position);
+    this.controls.target.fromArray(state.target);
+    this.orthographic = false;
+    this.renderer.domElement.dataset.projection = 'perspective';
+    this.cameraAdjusted = true;
+    this.cameraView = 'perspective';
+    this.controls.update();
+    this.needsRender = true;
+    this.lodDirty = true;
+  }
+
+  /** Rotate to a cardinal direction while keeping distance, height, and focal point. */
+  orientCamera(heading: number) {
+    const delta = this.camera.position.clone().sub(this.controls.target);
+    const radius = Math.max(0.01, Math.hypot(delta.x, delta.z));
+    const radians = THREE.MathUtils.degToRad(heading);
+    this.camera.position.set(
+      this.controls.target.x + Math.sin(radians) * radius,
+      this.controls.target.y + delta.y,
+      this.controls.target.z + Math.cos(radians) * radius,
+    );
+    this.orthographic = false;
+    this.renderer.domElement.dataset.projection = 'perspective';
+    this.cameraAdjusted = true;
+    this.cameraView = 'perspective';
+    this.controls.update();
+    this.needsRender = true;
+  }
+
   resetCamera() {
+    this.orthographic = false;
+    this.renderer.domElement.dataset.projection = 'perspective';
     this.cameraAdjusted = false;
     this.cameraView = 'perspective';
     this.fitCamera();
   }
 
   topView() {
+    this.orthographic = true;
+    this.renderer.domElement.dataset.projection = 'orthographic';
     this.cameraAdjusted = false;
     this.cameraView = 'top';
     this.fitCamera();
+    this.lodDirty = true;
   }
 
   downloadSnapshot(name: string) {
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.renderCamera());
     this.renderer.domElement.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);

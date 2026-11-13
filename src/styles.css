@@ -2359,3 +2359,17 @@ input[type='range']::-moz-range-thumb {
   border-radius: 4px;
 }
 .spline-point-row > button:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+
+/* The terrain-first workspace hides editing docks without unmounting the renderer. */
+.app-shell.viewport-focus .library,
+.app-shell.viewport-focus .inspector,
+.app-shell.viewport-focus .graph-area,
+.app-shell.viewport-focus .workspace-divider {
+  display: none;
+}
+.app-shell.viewport-focus .preview-area { min-height: 0; }
+@media (max-height: 640px) {
+  .app-shell { min-height: 0; }
+  .preview-area { min-height: 130px; }
+  .graph-area { min-height: 145px; }
+}
