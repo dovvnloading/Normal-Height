@@ -238,6 +238,7 @@ function MapCanvas({
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
   const clickStart = useRef<{ x: number; y: number } | null>(null);
+  const lastInspectAt = useRef(0);
   const hadPinch = useRef(false);
   const touches = useRef(new globalThis.Map<number, { x: number; y: number }>());
   const pinch = useRef<{
@@ -555,6 +556,11 @@ function MapCanvas({
       return;
     }
     if (!field || event.pointerType === 'touch') return;
+    // A 2D readback/React update at every raw pointer event is expensive in
+    // Split mode. 30 Hz is ample for hover feedback; clicks sample exactly.
+    const now = performance.now();
+    if (now - lastInspectAt.current < 33) return;
+    lastInspectAt.current = now;
     if (tool !== 'navigate' || baseline) onHoverPoint(mapPoint(event.clientX, event.clientY));
     const rect = event.currentTarget.getBoundingClientRect();
     const size = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
