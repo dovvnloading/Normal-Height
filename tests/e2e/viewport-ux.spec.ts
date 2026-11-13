@@ -359,3 +359,30 @@ test.describe('terrain viewport UX', () => {
     });
   });
 });
+
+test('2D comparison remains available when the browser cannot create WebGL', async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext;
+    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+      configurable: true,
+      value: function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+        if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl')
+          return null;
+        return (nativeGetContext as unknown as (...args: unknown[]) => unknown)
+          .call(this, type, ...rest);
+      },
+    });
+  });
+  await page.goto('/');
+  await expect(page.locator('.nh-render-error')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: '3D terrain', exact: true })).toBeDisabled();
+  await expect(page.locator('.nh-map > canvas')).toBeVisible();
+  const pin = page.getByRole('button', { name: 'Pin comparison baseline' });
+  await expect(pin).toBeEnabled({ timeout: 90_000 });
+  await pin.click();
+  await page.getByRole('button', { name: 'Compare', exact: true }).click();
+  await expect(page.locator('.nh-mode-compare')).toBeVisible();
+  await expect(page.locator('.nh-compare-panel')).toBeVisible();
+  await page.getByRole('button', { name: 'Elevation change' }).click();
+  await expect(page.locator('.nh-difference-legend')).toBeVisible({ timeout: 30_000 });
+});
