@@ -1446,3 +1446,38 @@
   color: #e0ede1;
   background: #293c32f3;
 }
+
+/* Tool layout responds to the actual center pane, not only the browser width.
+ * An open inspector/library can leave a 900px workspace on a 1440px screen. */
+.nh-viewport { container-type: inline-size; }
+.nh-view-tabs, .nh-viewport-toolset, .nh-viewport-toolbar-right {
+  flex-shrink: 0;
+}
+@container (max-width: 1120px) {
+  .nh-viewport-toolset button > span,
+  .nh-viewport-toolbar-right .nh-viewport-tool > span { display: none; }
+  .nh-viewport-toolset button { min-width: 31px; padding: 2px 6px; }
+  .nh-viewport-toolbar-right .nh-viewport-tool { width: 30px; padding: 0; }
+}
+@container (max-width: 790px) {
+  .nh-viewport-toolbar {
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 5px 8px;
+  }
+  .nh-viewport-toolset { margin-left: auto; }
+  .nh-viewport-toolbar-right { margin-left: auto; }
+}
+@container (max-width: 600px) {
+  .nh-view-tabs button { min-width: 32px; padding: 0 8px; }
+  .nh-view-tabs button > span { display: none; }
+  .nh-view-tabs { height: 32px; }
+  .nh-viewport-toolset button { min-width: 32px; }
+}
+@container (max-width: 480px) {
+  .nh-viewport-coordinate { bottom: 45px; right: 10px; }
+  .nh-view-hint { display: none; }
+  .nh-scene-resolution { right: 10px; bottom: 9px; }
+}
