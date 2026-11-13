@@ -592,11 +592,13 @@ function MapCanvas({
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={inspect}
+        onContextMenu={(event) => event.preventDefault()}
         onPointerUp={(event) => {
           const start = clickStart.current;
           if (event.pointerType === 'touch') touches.current.delete(event.pointerId);
           if (touches.current.size < 2) pinch.current = null;
-          if (start && !hadPinch.current && !splineEditing && tool !== 'navigate' &&
+          if (start && event.button === 0 && !hadPinch.current &&
+            !splineEditing && tool !== 'navigate' &&
             Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) {
             const point = mapPoint(event.clientX, event.clientY);
             if (point) onChoosePoint(point);
