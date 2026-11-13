@@ -107,6 +107,17 @@ const MATERIAL_WEIGHT_INDEX: Partial<Record<MapChannel, number>> = {
 // an unchanged 1024² field cost 55–75 ms of main thread on every switch, so
 // keep a few finished rasters per field (released with the field itself).
 const MAP_RASTERS_PER_FIELD = 4;
+const MAP_VIEW_STORAGE_KEY = 'normal-height.map-framing.v1';
+function loadMapFraming(): MapFraming {
+  try {
+    const value = JSON.parse(localStorage.getItem(MAP_VIEW_STORAGE_KEY) || 'null');
+    if (value && Number.isFinite(value.zoom) && value.zoom >= 0.35 && value.zoom <= 12 &&
+      Number.isFinite(value.offset?.x) && Number.isFinite(value.offset?.y)) {
+      return { zoom: value.zoom, offset: { x: value.offset.x, y: value.offset.y } };
+    }
+  } catch { /* Non-persistent browsing still supports in-session framing. */ }
+  return { ...DEFAULT_MAP_FRAMING, offset: { ...DEFAULT_MAP_FRAMING.offset } };
+}
 const mapRasters = new WeakMap<HeightField, Map<string, HTMLCanvasElement>>();
 function rememberRaster(field: HeightField, key: string, raster: HTMLCanvasElement) {
   let rasters = mapRasters.get(field);
@@ -752,14 +763,50 @@ export function TerrainViewport({
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [tool, setTool] = useState<ViewportTool>('navigate');
+  const [hoverPoint, setHoverPoint] = useState<TerrainPoint | null>(null);
+  const [inspectionPoints, setInspectionPoints] = useState<TerrainPoint[]>([]);
+  const [splitRatio, setSplitRatio] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem('normal-height.split.v1'));
+      return stored >= 22 && stored <= 78 ? stored : 50;
+    } catch { return 50; }
+  });
+  const [cameraHeading, setCameraHeading] = useState(0);
+  const mapFraming = useRef<MapFraming>(loadMapFraming());
+  const choosePoint = (point: TerrainPoint) =>
+    setInspectionPoints((points) => tool === 'inspect' ? [point] :
+      points.length >= 2 ? [point] : [...points, point]);
+  const interactions = useRef({ tool, choosePoint });
+  interactions.current = { tool, choosePoint };
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const effectiveMode = sceneError ? '2d' : viewMode;
+  const activePoint = hoverPoint ?? inspectionPoints.at(-1) ?? null;
+  const activeSample = useMemo(() =>
+    field && activePoint ? sampleTerrain(field, project, activePoint) : null,
+    [field, project, activePoint]);
+  const profile = useMemo(() =>
+    field && inspectionPoints.length === 2
+      ? terrainProfile(field, project, inspectionPoints[0], inspectionPoints[1]) : null,
+    [field, project, inspectionPoints]);
+  useEffect(() => {
+    try { localStorage.setItem('normal-height.split.v1', String(splitRatio)); } catch { /* optional */ }
+  }, [splitRatio]);
+  useEffect(() => {
+    const save = () => {
+      try { localStorage.setItem(MAP_VIEW_STORAGE_KEY, JSON.stringify(mapFraming.current)); }
+      catch { /* optional */ }
+    };
+    window.addEventListener('pagehide', save);
+    return () => { save(); window.removeEventListener('pagehide', save); };
+  }, []);
 
   useEffect(() => {
     if (!hostRef.current) return;
     try {
-      sceneRef.current = new TerrainScene(hostRef.current, settingsRef.current, setSceneError, theme);
+      sceneRef.current = new TerrainScene(hostRef.current, settingsRef.current, setSceneError,
+        theme, (next) => setCameraHeading((current) => Math.abs(next - current) >= 1 ? next : current));
       setSceneError(null);
     } catch (error) {
       setSceneError(
@@ -776,6 +823,51 @@ export function TerrainViewport({
     if (field) sceneRef.current?.update(field, project, settings);
     else sceneRef.current?.applySettings(settings);
   }, [field, project, settings, attempt]);
+
+  useEffect(() => {
+    sceneRef.current?.setInspection(hoverPoint, inspectionPoints);
+  }, [hoverPoint, inspectionPoints, field, settings.exaggeration, attempt]);
+
+  useEffect(() => {
+    const canvas = hostRef.current?.querySelector('canvas');
+    if (!canvas) return;
+    let pressed: { x: number; y: number } | null = null;
+    let lastHover = 0;
+    const down = (event: PointerEvent) => {
+      if (event.button === 0) pressed = { x: event.clientX, y: event.clientY };
+    };
+    const move = (event: PointerEvent) => {
+      if (interactions.current.tool === 'navigate' || event.pointerType === 'touch') return;
+      const now = performance.now();
+      // Raycasting the adaptive mesh on every pointer event would block orbiting.
+      if (now - lastHover < 100) return;
+      lastHover = now;
+      const p = sceneRef.current?.pickPoint(event.clientX, event.clientY) ?? null;
+      setHoverPoint((old) => old && p &&
+        Math.abs(old.u - p.u) < 0.0002 && Math.abs(old.v - p.v) < 0.0002 ? old : p);
+    };
+    const up = (event: PointerEvent) => {
+      if (pressed && interactions.current.tool !== 'navigate' &&
+        Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) < 6) {
+        const p = sceneRef.current?.pickPoint(event.clientX, event.clientY);
+        if (p) interactions.current.choosePoint(p);
+      }
+      pressed = null;
+    };
+    const leave = () => setHoverPoint(null);
+    canvas.addEventListener('pointerdown', down);
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', leave);
+    canvas.addEventListener('pointerleave', leave);
+    return () => {
+      canvas.removeEventListener('pointerdown', down);
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', leave);
+      canvas.removeEventListener('pointerleave', leave);
+    };
+  }, [attempt]);
 
   useEffect(() => {
     sceneRef.current?.setSplineGuide(
@@ -845,6 +937,17 @@ export function TerrainViewport({
             <span>Split</span>
           </button>
         </div>
+        <div className="nh-viewport-toolset" role="group" aria-label="Viewport tool">
+          {VIEWPORT_TOOLS.map(({ value, label, Icon }) => (
+            <button key={value} type="button" aria-label={label + ' terrain'}
+              title={label + (value === 'measure' || value === 'profile' ? ' · select two points' : '')}
+              aria-pressed={tool === value} disabled={!field && value !== 'navigate'}
+              className={tool === value ? 'active' : ''}
+              onClick={() => { setTool(value); setInspectionPoints([]); setHoverPoint(null); }}>
+              <Icon size={15} /><span>{label}</span>
+            </button>
+          ))}
+        </div>
         <div className="nh-viewport-toolbar-right">
           {effectiveMode !== '3d' && (
             <label className="nh-channel-select">
@@ -863,6 +966,14 @@ export function TerrainViewport({
               <ChevronDown size={12} />
             </label>
           )}
+          <button type="button" className="nh-viewport-tool"
+            title={focusMode ? 'Exit viewport focus mode (F)' : 'Focus viewport (F)'}
+            aria-label={focusMode ? 'Exit viewport focus mode' : 'Focus viewport'}
+            aria-pressed={focusMode}
+            onClick={() => onFocusModeChange(!focusMode)}>
+            {focusMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            <span>{focusMode ? 'Restore' : 'Focus'}</span>
+          </button>
           {effectiveMode !== '2d' && (
             <button
               className={`nh-viewport-tool ${showSettings ? 'active' : ''}`}
@@ -882,15 +993,20 @@ export function TerrainViewport({
       <div className={`nh-preview-surface nh-mode-${effectiveMode}`}>
         <div
           className="nh-three-pane"
-          style={{ display: effectiveMode === '2d' ? 'none' : undefined }}
+          style={{ display: effectiveMode === '2d' ? 'none' : undefined,
+            flex: effectiveMode === 'split' ? `0 0 ${splitRatio}%` : undefined }}
         >
           <div className="nh-three-host" ref={hostRef} />
           {field && (
             <>
               <div className="nh-viewport-coordinate">
-                <span className="nh-compass">
-                  N<span />
-                </span>
+                <button type="button" className="nh-compass-control"
+                  aria-label="Face north" title="Face north · compass follows camera"
+                  onClick={() => sceneRef.current?.orientCamera(0)}>
+                  <span className="nh-compass" style={{ transform: `rotate(${cameraHeading}deg)` }}>
+                    N<span />
+                  </span>
+                </button>
                 <div>
                   <span>
                     {settings.material === 'alpine'
@@ -944,10 +1060,90 @@ export function TerrainViewport({
             </>
           )}
         </div>
+        {effectiveMode === 'split' && (
+          <div className="nh-split-divider" role="separator" aria-label="Resize 3D and map views"
+            aria-orientation="vertical" aria-valuemin={22} aria-valuemax={78}
+            aria-valuenow={Math.round(splitRatio)} tabIndex={0}
+            onPointerDown={e => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); }}
+            onPointerMove={e => {
+              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+              const rect = e.currentTarget.parentElement?.getBoundingClientRect();
+              if (rect) setSplitRatio(Math.max(22, Math.min(78, (e.clientX - rect.left) / rect.width * 100)));
+            }}
+            onPointerUp={e => {
+              if (e.currentTarget.hasPointerCapture(e.pointerId))
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            }}
+            onKeyDown={e => {
+              if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                setSplitRatio(r => Math.max(22, Math.min(78, r + (e.key === 'ArrowRight' ? 5 : -5))));
+              } else if (e.key === 'Home') { e.preventDefault(); setSplitRatio(50); }
+            }}><span /></div>
+        )}
         {effectiveMode !== '3d' && (
           <div className="nh-map-pane">
-            <MapCanvas field={field} channel={channel} project={project} spline={spline} splineEditing={splineEditing} onSplinePath={onSplinePath} />
+            <MapCanvas field={field} channel={channel} project={project} spline={spline}
+              splineEditing={splineEditing} onSplinePath={onSplinePath}
+              initialFraming={mapFraming.current}
+              onFramingChange={next => { mapFraming.current = next; }}
+              tool={tool} hoverPoint={hoverPoint} inspectionPoints={inspectionPoints}
+              onHoverPoint={setHoverPoint} onChoosePoint={choosePoint} />
             <MapLegend field={field} channel={channel} project={project} />
+          </div>
+        )}
+        {field && tool !== 'navigate' && (
+          <div className="nh-inspection-readout" role="status" aria-live="off">
+            <div className="nh-inspect-header">
+              <strong>{tool === 'profile' ? 'Elevation profile' : tool === 'measure'
+                ? 'Measure terrain' : 'Terrain inspector'}</strong>
+              {inspectionPoints.length > 0 && (
+                <button type="button" aria-label="Clear sample points"
+                  title="Clear sample points" onClick={() => setInspectionPoints([])}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+            {activeSample ? (
+              <>
+                <div className="nh-inspect-values">
+                  <span>E {formatMeters(activeSample.easting)}</span>
+                  <span>N {formatMeters(activeSample.northing)}</span>
+                  <b>{formatMeters(activeSample.elevation)} elevation</b>
+                  <span>{activeSample.slope.toFixed(1)}° slope</span>
+                  <span>Flow {activeSample.flow.toPrecision(3)}</span>
+                </div>
+                {profile && tool !== 'inspect' && (
+                  <div className="nh-measure-results">
+                    <span>Distance <b>{formatMeters(profile.horizontalDistance)}</b></span>
+                    <span>Δ elev. <b>{formatMeters(profile.elevationChange)}</b></span>
+                    <span>Grade <b>{profile.grade.toFixed(1)}%</b></span>
+                    <span>Surface <b>{formatMeters(profile.surfaceDistance)}</b></span>
+                    {tool === 'profile' && (() => {
+                      const heights = profile.samples.map(sample => sample.elevation);
+                      const min = Math.min(...heights), max = Math.max(...heights);
+                      const span = Math.max(1, max - min);
+                      const points = heights.map((h, i) =>
+                        `${(i / (heights.length - 1) * 280).toFixed(2)},${(78 - (h - min) / span * 64).toFixed(2)}`).join(' ');
+                      return (
+                        <svg className="nh-profile-chart" role="img" aria-label="Terrain elevation profile"
+                          viewBox="0 0 280 90" preserveAspectRatio="none">
+                          <line x1="0" y1="78" x2="280" y2="78" stroke="currentColor" opacity=".3" />
+                          <polyline points={points} fill="none" stroke="#83c4b0" strokeWidth="2"
+                            strokeLinejoin="round" strokeLinecap="round" />
+                          <text x="3" y="11" fontSize="9" fill="currentColor">
+                            {formatMeters(max)}</text>
+                          <text x="3" y="89" fontSize="9" fill="currentColor">
+                            {formatMeters(min)}</text>
+                        </svg>
+                      );
+                    })()}
+                  </div>
+                )}
+              </>
+            ) : <span>Click a terrain point to begin.</span>}
+            {(tool === 'measure' || tool === 'profile') && inspectionPoints.length < 2 &&
+              <small>{inspectionPoints.length === 0 ? 'Choose point A' : 'Choose point B'}</small>}
           </div>
         )}
         <div className="nh-preview-source">
