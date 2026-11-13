@@ -1081,6 +1081,13 @@ export function TerrainViewport({
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const effectiveMode = sceneError ? '2d' : viewMode;
+  useEffect(() => {
+    // These contextual popovers belong to a specific viewport. Never leave a
+    // hidden 3D menu open while switching to 2D/Compare and then resurrect it.
+    setShowSettings(false);
+    setShowBookmarks(false);
+    setShowLayers(false);
+  }, [effectiveMode]);
   const activePoint = hoverPoint ?? inspectionPoints.at(-1) ?? null;
   const comparisonDelta = useMemo(() => {
     if (!field || !baseline || !activePoint || effectiveMode !== 'compare' ||
@@ -1343,7 +1350,7 @@ export function TerrainViewport({
             {focusMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             <span>{focusMode ? 'Restore' : 'Focus'}</span>
           </button>
-          {effectiveMode !== '2d' && (
+          {(effectiveMode === '3d' || effectiveMode === 'split') && (
             <button
               ref={displayTrigger}
               className={`nh-viewport-tool ${showSettings ? 'active' : ''}`}
@@ -1699,7 +1706,7 @@ export function TerrainViewport({
             </button>
           </div>
         )}
-        {showSettings && effectiveMode !== '2d' && (
+        {showSettings && (effectiveMode === '3d' || effectiveMode === 'split') && (
           <div className="nh-display-panel" ref={displayPanel} tabIndex={-1}
             role="region" aria-label="Display settings">
             <div className="nh-display-title">
