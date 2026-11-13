@@ -1481,3 +1481,26 @@
   .nh-view-hint { display: none; }
   .nh-scene-resolution { right: 10px; bottom: 9px; }
 }
+
+/* Contextual camera teleport is available only after a source sample is pinned. */
+.nh-inspect-focus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 5px 8px;
+  border: 1px solid #97b29f;
+  border-radius: 5px;
+  background: #dcebe0;
+  color: #345640;
+  font: 10px 'Inter Variable', Inter, sans-serif;
+  cursor: pointer;
+}
+.nh-inspect-focus:hover { background: #cbe2d3; }
+.nh-inspect-focus:focus-visible { outline: 2px solid #6f9c7c; outline-offset: 2px; }
+:root[data-theme='dark'] .nh-inspect-focus {
+  background: #3c5445;
+  color: #e0f2e4;
+  border-color: #78947f;
+}
