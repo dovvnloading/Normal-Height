@@ -167,6 +167,22 @@ test.describe('terrain viewport UX', () => {
   });
 
 
+  test('Display panel is keyboard reachable and Escape restores focus without clearing selection', async ({ page }) => {
+    const trigger = page.getByRole('button', { name: 'Display settings' });
+    const originalNode = page.getByRole('textbox', { name: 'Node name' });
+    const label = await originalNode.inputValue();
+    await trigger.click();
+    const panel = page.getByRole('region', { name: 'Display settings' });
+    await expect(panel).toBeVisible();
+    await expect(panel).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Close display settings' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(originalNode).toHaveValue(label);
+  });
+
   test('a pending physical tile edit cannot relabel the last completed terrain', async ({ page }) => {
     const viewport = page.locator('.nh-viewport');
     const originalWidth = Number(await viewport.getAttribute('data-displayed-world-size'));
