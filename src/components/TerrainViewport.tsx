@@ -732,7 +732,7 @@ function MapCanvas({
           `Generating ${CHANNELS.find(c => c.value === channel)?.label}…`}
       </div>}
       {baseline && compareKind === 'difference' && deltaStats && !mapBusy && !mapError &&
-        <div className="nh-difference-legend">
+        <div className="nh-difference-legend" data-peak-delta={deltaStats.maxAbs}>
           <strong>Δ elevation in meters</strong>
           <div className="nh-difference-gradient" />
           <div><span>−{formatMeters(deltaStats.maxAbs)}</span>
