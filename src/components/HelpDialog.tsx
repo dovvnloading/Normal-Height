@@ -57,13 +57,14 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
             ['Undo / redo', '⌘ / Ctrl Z · Shift Z'],
             ['Save project', '⌘ / Ctrl S'],
             ['Duplicate node', '⌘ / Ctrl D'],
-            ['Open node palette', 'Tab (outside a field)'],
+            ['Open node palette', '⌘ / Ctrl K'],
             ['Find a node', '/'],
             ['Delete selection', 'Delete / Backspace'],
             ['Fit graph', 'Home'],
             ['Graph pan', 'Middle / right drag'],
             ['Graph selection', 'Shift + drag'],
             ['3D orbit / pan', 'Left / right drag'],
+            ['Focus viewport', 'F (over preview)'],
             ['Zoom', 'Scroll wheel'],
           ].map(([action, key]) => (
             <div key={action}>
