@@ -286,7 +286,7 @@ test.describe('terrain viewport UX', () => {
       .toHaveAttribute('aria-orientation', 'horizontal');
   });
 
-  test('comparison explains sampled cut/fill estimates and cursor elevation delta', async ({ page }) => {
+  test('comparison explains sampled cut/fill estimates and cursor elevation delta', async ({ page }, testInfo) => {
     await page.getByRole('button', { name: 'Pin comparison baseline' }).click();
     await page.getByRole('button', { name: 'Compare', exact: true }).click();
     await page.getByRole('button', { name: 'Elevation change' }).click();
@@ -298,15 +298,29 @@ test.describe('terrain viewport UX', () => {
     const canvas = page.locator('.nh-map > canvas');
     const rect = (await canvas.boundingBox())!;
     await canvas.hover({ position: { x: rect.width / 2, y: rect.height / 2 } });
-    await expect(page.locator('.nh-compare-sample')).toContainText('Cursor Δ');
+    const sample = page.locator('.nh-compare-sample');
+    await expect(sample).toContainText('Cursor');
+    await expect(sample).toContainText('Current');
+    await expect(sample).toContainText('Δ');
+    await page.getByRole('button', { name: 'Inspect terrain' }).click();
+    await expect(page.locator('.nh-inspection-readout')).toHaveCount(0);
+    await page.screenshot({
+      path: testInfo.outputPath('viewport-compare-inspection.png'),
+      animations: 'disabled',
+    });
   });
 
-  test('stacks split panes on narrow screens and preserves the workspace controls', async ({ page }) => {
+  test('stacks split panes on narrow screens and preserves the workspace controls', async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 420, height: 760 });
     await page.getByRole('button', { name: 'Split', exact: true }).click();
     await expect(page.locator('.nh-mode-split')).toHaveCSS('flex-direction', 'column');
     await expect(page.getByRole('separator', { name: 'Resize 3D and map views' }))
       .toHaveAttribute('aria-orientation', 'horizontal');
     await expect(page.getByRole('button', { name: 'Focus viewport', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '2D map', exact: true }).click();
+    await page.screenshot({
+      path: testInfo.outputPath('viewport-narrow-2d.png'),
+      animations: 'disabled',
+    });
   });
 });
