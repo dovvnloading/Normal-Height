@@ -62,7 +62,7 @@ jobs:
       MESH_BENCH_HEADLESS: '1'
       MESH_LIFE_RESOLUTIONS: '128'
       MESH_LIFE_QUALITY: 'high'
-      MESH_LIFE_CYCLES: '3'
+      MESH_LIFE_CYCLES: '5'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

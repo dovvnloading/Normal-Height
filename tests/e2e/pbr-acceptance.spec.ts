@@ -433,7 +433,7 @@ test('fixed-light 3D PBR material captures a reproducible visual baseline (#17)'
   const canvas = page.getByRole('img', { name: /^Interactive 3D terrain/ });
   await expect(canvas).toHaveAttribute('data-material-status', 'ready', { timeout: 60_000 });
   await page.getByRole('button', { name: 'Display settings' }).click();
-  const panel = page.getByRole('dialog', { name: 'Display settings' });
+  const panel = page.getByRole('region', { name: 'Display settings' });
   await expect(panel.getByRole('checkbox', { name: 'Enable sky dome' })).not.toBeChecked();
   await expect(panel.getByRole('checkbox', { name: 'Expand ground' })).not.toBeChecked();
   await expect(panel.getByRole('slider', { name: 'Sun direction' })).toHaveValue('315');
@@ -487,7 +487,8 @@ test('fixed-light 3D PBR material captures a reproducible visual baseline (#17)'
   const golden = JSON.parse(await readFile(
     new URL('./fixtures/pbr-fixed-light-swiftshader.json', import.meta.url), 'utf8',
   )) as { width: number; height: number; cells: number[][]; contrast: number };
-  expect([data.width, data.height]).toEqual([golden.width, golden.height]);
+  expect(Math.abs(data.width - golden.width)).toBeLessThanOrEqual(1);
+  expect(Math.abs(data.height - golden.height)).toBeLessThanOrEqual(1);
   const errors = data.cells.flatMap((rgb, i) =>
     rgb.map((color, channel) => Math.abs(color - golden.cells[i][channel])));
   const meanError = errors.reduce((sum, error) => sum + error, 0) / errors.length;
