@@ -1,0 +1,37 @@
+name: Differential pre-displacement software mesh lifecycle baseline
+on:
+  push:
+    branches: [audit/subpoly-baseline-lifecycle-20261123]
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      MESH_BENCH_SOFTWARE: '1'
+      MESH_BENCH_REQUIRE_HARDWARE: '0'
+      MESH_BENCH_HEADLESS: '1'
+      MESH_LIFE_RESOLUTIONS: '128'
+      MESH_LIFE_QUALITY: 'high'
+      MESH_LIFE_CYCLES: '5'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Measure equivalent pre-PR40 view transition stalls and resource lifetime
+        run: npx playwright test --config playwright.mesh-perf.config.ts tests/perf/mesh-lifecycle.spec.ts --workers=1 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pre-subpoly-lifecycle-baseline
+          path: |
+            mesh-benchmark-results/
+            playwright-report/
+            test-results/
+          retention-days: 7
