@@ -99,7 +99,7 @@ export function encodeRawHeight(field: HeightField, heightScale: number) {
 }
 export type ExportFormat = 'png16' | 'raw32' | 'normal' | 'flow' | 'wear' | 'deposition'
   | 'pbr' | 'basecolor' | 'roughness' | 'ao' | 'metallic' | 'orm'
-  | 'splat' | 'curvature' | 'normalDX';
+  | 'splat' | 'curvature' | 'normalGL' | 'normalDX' | 'detailNormal';
 export function makeExport(
   field: HeightField,
   project: TerrainProject,
@@ -206,10 +206,10 @@ export function makeExport(
     bytes = encodeRawHeight(field, project.heightScale);
     filename = `${name}-${field.resolution}-elevation-f32le.raw`;
   } else {
-    const pbrChannels = ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature'];
-    const pixels = pbrChannels.includes(format) || format === 'normalDX'
+    const pbrChannels = ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'detailNormal', 'normalGL', 'normalDX'];
+    const pixels = pbrChannels.includes(format)
       ? pbrPixels(generatePBR(field, project), field, project,
-          format === 'normalDX' ? 'normal' : format as PBRChannel, format === 'normalDX')
+          format === 'normalDX' || format === 'normalGL' ? 'normal' : format as PBRChannel, format === 'normalDX')
       : format === 'normal'
         ? normalMapPixels(field, project.worldSize, project.heightScale)
         : colorizeMap(field, format as 'flow' | 'wear' | 'deposition', project.worldSize, project.heightScale);
@@ -224,6 +224,8 @@ export function makeExport(
     orm: ['occlusion', 'roughness', 'metallic', 'alpha'],
     splat: [...SPLAT_LAYERS],
     curvature: ['curvature', 'curvature', 'curvature', 'alpha'],
+    normalGL: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'],
+    detailNormal: ['microNormalX', 'microNormalY_OpenGL', 'microNormalZ', 'alpha'],
     normalDX: ['normalX', 'normalY_DirectX', 'normalZ', 'alpha'],
     normal: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'],
   };
@@ -250,12 +252,12 @@ export function makeExport(
           ? 'Little-endian IEEE 754 Float32 elevation in meters, no header'
           : undefined,
     normalConvention:
-      format === 'normal'
+      ['normal', 'normalGL', 'detailNormal'].includes(format)
         ? 'OpenGL +Y: G encodes north/up, RGB maps [-1,1] to [0,255].'
         : format === 'normalDX'
           ? 'DirectX -Y: green is inverted relative to OpenGL +Y, RGB maps [-1,1] to [0,255].'
           : undefined,
-    materialEncoding: ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalDX'].includes(format)
+    materialEncoding: ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalDX', 'normalGL', 'detailNormal'].includes(format)
       ? 'Procedural PBR material map; see complete PBR bundle for channel packing and color-space conventions.'
       : undefined,
     diagnosticEncoding: ['flow', 'wear', 'deposition'].includes(format)

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { MaterialStroke, PaintPoint } from '../materials/materialPaint';
 import { MAX_STROKE_POINTS } from '../materials/materialPaint';
-
+import type { HeightField, TerrainProject } from '../model/types';
 import type { BrushSettings, BrushFeedback } from '../render/brushFeedback';
 
 interface BrushBinding {
@@ -13,11 +13,17 @@ interface BrushBinding {
 export function useBrushInput(
   canvas: () => HTMLCanvasElement | null,
   binding: BrushBinding | null,
-  revision: unknown,
+  field: HeightField | null,
+  project: TerrainProject,
+  canvasGeneration = 0,
 ) {
   const current = useRef({ canvas, binding });
   current.current = { canvas, binding };
   const feedback = binding?.feedback;
+  const cancelDrawing = useRef<(() => void) | null>(null);
+  // A second pointer can activate a history button or load a project while a
+  // stylus is still down. Never append its old draft to the restored project.
+  useEffect(() => { cancelDrawing.current?.(); }, [project]);
   useEffect(() => {
     const element = current.current.canvas();
     if (!element || !feedback) return;
@@ -64,7 +70,7 @@ export function useBrushInput(
       if (e.button !== 0 && e.isPrimary) return;
       e.stopImmediatePropagation();
       e.preventDefault();
-      if (pointer !== null || !e.isPrimary || !current.current.binding) return;
+      if (pointer !== null || !e.isPrimary || !current.current.binding || !feedback.begin()) return;
       pointer = e.pointerId;
       settings = { ...current.current.binding.settings };
       strokes = [];
@@ -75,7 +81,8 @@ export function useBrushInput(
       sample(e);
     };
     const move = (e: PointerEvent) => {
-      if (!e.isPrimary || (pointer !== null && pointer !== e.pointerId)) return;
+      if (!e.isPrimary || (pointer !== null && pointer !== e.pointerId) ||
+          (pointer === null && feedback.drawing)) return;
       if (pointer === null && e.buttons !== 0) {
         feedback.hover(null, feedback.settings);
         return;
@@ -107,16 +114,32 @@ export function useBrushInput(
       frame = 0;
       queued = null;
       if (pointer !== null) feedback.finish(false);
-      feedback.hover(null, feedback.settings);
+      if (!feedback.drawing) feedback.hover(null, feedback.settings);
       reset();
     };
+    cancelDrawing.current = () => { if (pointer !== null) cancel(); };
     const leave = () => {
+      if (pointer === null && feedback.drawing) return;
       flush();
       segment = null;
       feedback.hover(null, feedback.settings);
     };
-    const escape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && pointer !== null) { e.preventDefault(); e.stopImmediatePropagation(); cancel(); }
+    const key = (e: KeyboardEvent) => {
+      if (pointer === null) return;
+      const history = (e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase());
+      if (e.key === 'Escape' || history) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        cancel();
+      }
+    };
+    const wheel = (e: WheelEvent) => {
+      // Preserve the picking transform throughout a drag. Between gestures
+      // navigation owns the wheel and the next hover repicks the new surface.
+      if (pointer !== null) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      } else if (!feedback.drawing) leave();
     };
     const blockFocus = (e: MouseEvent) => { e.stopImmediatePropagation(); };
     element.addEventListener('pointerdown', down, true);
@@ -126,7 +149,8 @@ export function useBrushInput(
     element.addEventListener('lostpointercapture', cancel, true);
     element.addEventListener('pointerleave', leave, true);
     element.addEventListener('dblclick', blockFocus, true);
-    window.addEventListener('keydown', escape, true);
+    element.addEventListener('wheel', wheel, { capture: true, passive: false });
+    window.addEventListener('keydown', key, true);
     window.addEventListener('blur', leaveWindow);
     function leaveWindow() { cancel(); }
     return () => {
@@ -137,9 +161,11 @@ export function useBrushInput(
       element.removeEventListener('lostpointercapture', cancel, true);
       element.removeEventListener('pointerleave', leave, true);
       element.removeEventListener('dblclick', blockFocus, true);
-      window.removeEventListener('keydown', escape, true);
+      element.removeEventListener('wheel', wheel, true);
+      window.removeEventListener('keydown', key, true);
+      cancelDrawing.current = null;
       window.removeEventListener('blur', leaveWindow);
       cancel();
     };
-  }, [feedback, revision]);
+  }, [feedback, field, canvasGeneration]);
 }

@@ -34,6 +34,7 @@ import { createNode } from './model/registry';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
 import { loadViewSettings, saveViewSettings } from './model/viewSettings';
+import { resolveSurface } from './materials/pbr';
 import { canAppendMaterialStroke, type MaterialStroke } from './materials/materialPaint';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
@@ -751,6 +752,10 @@ export default function App() {
               splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
               onSplinePath={changeSplinePath}
               onPaint={paintMaterial}
+              onLayerColor={(layer, color) => {
+                const surface = resolveSurface(projectRef.current.surface);
+                updateProject({ surface: { ...surface, layerColors: { ...surface.layerColors, [layer]: color } } });
+              }}
               theme={theme}
               field={engine.result?.field ?? null}
               project={displayedProject}

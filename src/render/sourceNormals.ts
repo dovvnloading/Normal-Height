@@ -169,7 +169,7 @@ export function patchedNormalFragmentBegin(): string {
   // first, then apply the display transform to the complete perturbed normal.
   return chunk.replace(VERTEX_NORMAL, VERTEX_NORMAL + '\n' + GLSL_APPLY) + `
 #ifdef USE_NORMALMAP_TANGENTSPACE
-  vec3 nhDisplayedN = inverseTransformDirection(normal, viewMatrix);
+  vec3 nhDisplayedN = transformDirectionByInverseViewMatrix(normal, viewMatrix);
   vec3 nhPhysicalN = normalize(nhDisplayedN * vec3(1.0, nhVerticalScale, 1.0));
   vec3 nhEastT = normalize(cross(nhPhysicalN, vec3(0.0, 0.0, 1.0)));
   vec3 nhNorthB = cross(nhPhysicalN, nhEastT);

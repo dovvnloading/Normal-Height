@@ -1,4 +1,5 @@
-import { synthesizeMaterials } from './layerSynthesis';
+import { materialRanges, synthesizeMaterials, type MaterialRanges } from './layerSynthesis';
+import { tileRect, type TexelRect } from './materialRegion';
 export { AO_RADII_METERS } from './terrainAnalysis';
 import type { HeightField, TerrainProject } from '../model/types';
 
@@ -58,10 +59,12 @@ export type PBRChannel =
   | 'curvature'
   | 'normal'
   | 'detailNormal'
+  | 'relief'
   | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
 
-export interface PBRMaps {
-  resolution: number;
+export interface PBRMaps extends MaterialBuffers { resolution: number }
+
+export interface MaterialBuffers {
   basecolor: Uint8ClampedArray;
   splat: Uint8ClampedArray;
   roughness: Uint8Array;
@@ -121,12 +124,17 @@ const LINEAR_PALETTES: Record<SurfaceBiome, number[][]> = {
  * microstructure live in independent modules; map encoding remains unchanged.
  */
 export function generatePBR(field: HeightField, project: TerrainProject): PBRMaps {
+  const resolution = field.resolution;
+  return { resolution, ...generateMaterialRegion(field, project, tileRect(resolution), materialRanges(field)) };
+}
+
+export function generateMaterialRegion(field: HeightField, project: TerrainProject, rect: TexelRect, ranges: MaterialRanges): MaterialBuffers {
   const params = resolveSurface(project.surface);
   const palette = params.layerColors ? SPLAT_LAYERS.map(layer => {
     const color = layerColorHex(params, layer);
     return [1, 3, 5].map(offset => srgbByteToLinear(parseInt(color.slice(offset, offset + 2), 16)));
   }) : LINEAR_PALETTES[params.biome];
-  return synthesizeMaterials(field, project, params, palette, linearToSrgbByte);
+  return synthesizeMaterials(field, project, params, palette, linearToSrgbByte, rect, ranges);
 }
 
 function grayscale(values: Uint8Array): Uint8ClampedArray {
@@ -147,18 +155,29 @@ export function materialNormalPixels(
   detailOnly = false,
   directX = false,
 ): Uint8ClampedArray {
-  const n = maps.resolution;
-  const pixels = new Uint8ClampedArray(n * n * 4);
+  const full = tileRect(maps.resolution);
+  return materialNormalRegion(maps.detail, full, full, field, project, detailOnly, directX);
+}
+
+/** Read from a tile with the derivative halo, write only the requested pixels. */
+export function materialNormalRegion(detail: Float32Array, source: TexelRect, target: TexelRect,
+  field: HeightField, project: TerrainProject, detailOnly: boolean, directX = false,
+): Uint8ClampedArray {
+  const n = field.resolution;
+  const stride = source.right - source.left;
+  const pixels = new Uint8ClampedArray((target.right - target.left) * (target.bottom - target.top) * 4);
   const cell = project.worldSize / Math.max(1, n - 1);
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
+  let p = 0;
+  for (let y = target.top; y < target.bottom; y++) {
+    for (let x = target.left; x < target.right; x++, p += 4) {
       const l = Math.max(0, x - 1), r = Math.min(n - 1, x + 1);
       const t = Math.max(0, y - 1), b = Math.min(n - 1, y + 1);
       const xSpan = (r - l || 1) * cell, ySpan = (b - t || 1) * cell;
       const gx = (field.height[y * n + r] - field.height[y * n + l]) * project.heightScale / xSpan;
       const gy = (field.height[b * n + x] - field.height[t * n + x]) * project.heightScale / ySpan;
-      const dx = (maps.detail[y * n + r] - maps.detail[y * n + l]) / xSpan;
-      const dy = (maps.detail[b * n + x] - maps.detail[t * n + x]) / ySpan;
+      const local = (y - source.top) * stride + x - source.left;
+      const dx = (detail[local + r - x] - detail[local + l - x]) / xSpan;
+      const dy = (detail[local + (b - y) * stride] - detail[local + (t - y) * stride]) / ySpan;
       // Full normal in east/north/up coordinates. For the micro map, express
       // the same normal relative to the displaced mesh's orthonormal TBN.
       // Simply differentiating microheight on a horizontal plane exaggerates
@@ -172,7 +191,6 @@ export function materialNormalPixels(
         nz = normalLength + (gx * dx + gy * dy) / normalLength;
       }
       const length = Math.hypot(nx, ny, nz);
-      const p = (y * n + x) * 4;
       pixels[p] = Math.round((nx / length * 0.5 + 0.5) * 255);
       const green = Math.round((ny / length * 0.5 + 0.5) * 255);
       pixels[p + 1] = directX ? 255 - green : green;
@@ -192,6 +210,18 @@ export function pbrPixels(
 ): Uint8ClampedArray {
   if (channel === 'basecolor') return maps.basecolor;
   if (channel === 'splat') return maps.splat;
+  if (channel === 'relief') {
+    let extent = 0;
+    for (const h of maps.detail) extent = Math.max(extent, Math.abs(h));
+    const scale = extent > 0 ? 127.5 / extent : 0;
+    const rgba = new Uint8ClampedArray(maps.detail.length * 4);
+    for (let i = 0; i < maps.detail.length; i++) {
+      const p = i * 4;
+      rgba[p] = rgba[p + 1] = rgba[p + 2] = 127.5 + maps.detail[i] * scale;
+      rgba[p + 3] = 255;
+    }
+    return rgba;
+  }
   // Inspect individual physically synthesized coverage masks as opaque grayscale
   // percentages. These are derived from the exact exported RGBA splat bytes.
   const weightIndex = channel === 'rockWeight' ? 0 :

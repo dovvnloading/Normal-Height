@@ -1,6 +1,6 @@
 import { CanvasTexture, Color, LinearFilter, Mesh, ShaderMaterial, SRGBColorSpace, Vector2 } from 'three';
 import type { BufferGeometry } from 'three';
-import { BRUSH_COLORS, type BrushFeedback } from './brushFeedback';
+import type { BrushFeedback } from './brushFeedback';
 
 /** Depth-tested overlay shares the live adaptive geometry with its parent.
  * Both the ring and coverage follow the terrain exactly, including cliffs. */
@@ -60,7 +60,7 @@ export class MaterialBrushOverlay {
       uniforms.center.value.set(point?.u ?? -2, point?.v ?? -2);
       uniforms.radius.value = feedback.settings.radius;
       uniforms.hardness.value = feedback.settings.hardness;
-      uniforms.ink.value.set(BRUSH_COLORS[feedback.settings.layer]);
+      uniforms.ink.value.set(feedback.colors[feedback.settings.layer]);
       if (revision !== feedback.revision) {
         this.texture.needsUpdate = true;
         revision = feedback.revision;

@@ -1,4 +1,4 @@
-import { BookOpen, Command, GitBranch, MousePointer2, Droplets, Download } from 'lucide-react';
+import { BookOpen, Command, GitBranch, MousePointer2, Droplets, Download, Paintbrush } from 'lucide-react';
 import { Modal } from './Modal';
 export function HelpDialog({ onClose }: { onClose: () => void }) {
   return (
@@ -31,8 +31,13 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
               'Hydraulic erosion moves sediment downhill. Try Flow, Wear, and Deposit in 2D to understand the result. Thermal weathering settles loose slopes.',
             ],
             [
+              Paintbrush,
+              '04 · Paint',
+              'Select Paint above the viewport. Drag on the terrain or map to place a material. Erase reveals the procedural surface. Each stroke can be undone.',
+            ],
+            [
               Download,
-              '04 · Take it with you',
+              '05 · Take it with you',
               'Save a project to preserve the graph. Export reruns the graph at your chosen grid size and writes a precise heightmap.',
             ],
           ].map(([Icon, title, copy]) => {

@@ -461,14 +461,74 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
   await page.mouse.click(mx, my);
   await expect.poll(async () => (await strokes()).length).toBe(2);
   await expect.poll(pixel).toBe(base);
-  // Escape abandons an in-flight stroke, leaving the undo stack unchanged.
+  // Escape and undo both abandon an uncommitted gesture before history moves.
   await page.getByRole('button', { name: 'Soil', exact: true }).click();
-  await page.mouse.move(mx, my);
-  await page.mouse.down();
-  await page.mouse.move(mx + 28, my + 6, { steps: 4 });
-  await page.keyboard.press('Escape');
-  await page.mouse.up();
+  for (const interrupt of ['Escape', 'Control+z']) {
+    await page.mouse.move(mx, my);
+    await page.mouse.down();
+    await page.mouse.move(mx + 28, my + 6, { steps: 4 });
+    await page.keyboard.press(interrupt);
+    await page.mouse.up();
+  }
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(pixel).toBe(255);
+  await expect.poll(async () => (await strokes()).length).toBe(1);
+
+  // Change the material definition under the existing stroke.
+  await page.getByRole('button', { name: 'Snow', exact: true }).click();
+  await page.getByLabel('Map channel').selectOption('basecolor');
+  await page.getByLabel('Edit snow layer color').evaluate((input: HTMLInputElement) => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setValue.call(input, '#205f9a');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject;
+    return saved.surface?.layerColors?.snow;
+  })).toBe('#205f9a');
+  await expect.poll(async () => {
+    const red = await pixel();
+    return red > 0 && red < 100;
+  }).toBe(true);
+  await expect.poll(async () => (await strokes()).length).toBe(1);
+
+  // The complete brush and channel selector remain reachable on a small phone.
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Paint terrain' })).toBeInViewport();
+  await expect(page.getByRole('slider', { name: 'Brush hardness' })).toBeInViewport();
+  await expect(page.getByLabel('Map channel')).toBeInViewport();
+  expect(errors).toEqual([]);
+});
+
+test('paints an alpine outcrop with the close-range material shader active', async ({ page }, info) => {
+  test.setTimeout(150_000);
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => {
+    if (m.type() === 'error' && /WebGLProgram|shader|GLSL/i.test(m.text())) errors.push(m.text());
+  });
+  await page.goto('/');
+  const terrain = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(terrain).toHaveAttribute('data-material-status', 'ready', { timeout: 90_000 });
+  await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
+  await info.attach('Alpine watershed with rebuilt materials', {
+    body: await terrain.screenshot(), contentType: 'image/png',
+  });
+  await terrain.dblclick();
+  await terrain.hover();
+  await page.mouse.wheel(0, -4000);
+  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 20_000 });
+  await page.getByRole('button', { name: 'Paint terrain' }).click();
+  await page.getByRole('button', { name: 'Rock', exact: true }).click();
+  const uploads = Number(await terrain.getAttribute('data-pbr-upload-count'));
+  await terrain.click();
+  await expect.poll(async () => Number(await terrain.getAttribute('data-pbr-upload-count')), {
+    timeout: 30_000,
+  }).toBeGreaterThan(uploads);
+  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active');
+  await info.attach('Painted alpine rock at close range', {
+    body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png',
+  });
   expect(errors).toEqual([]);
 });

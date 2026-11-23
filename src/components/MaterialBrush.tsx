@@ -1,31 +1,41 @@
 import { useEffect, useRef } from 'react';
 import { Eraser, Paintbrush } from 'lucide-react';
-import type { MaterialStroke } from '../materials/materialPaint';
-import { SPLAT_LAYERS } from '../materials/pbr';
-import { BRUSH_COLORS, type BrushFeedback, type BrushSettings } from '../render/brushFeedback';
+import type { MaterialLayer } from '../materials/materialPaint';
+import { layerColorHex, SPLAT_LAYERS, type SurfaceSettings } from '../materials/pbr';
+import type { BrushFeedback, BrushSettings } from '../render/brushFeedback';
 
-export function MaterialBrushControls({ value, worldSize, onChange }: {
+export function MaterialBrushControls({ value, previousLayer, worldSize, surface, onChange, onLayerColor }: {
   value: BrushSettings;
+  previousLayer: MaterialLayer;
   worldSize: number;
+  surface: SurfaceSettings;
+  onLayerColor: (layer: MaterialLayer, color: string) => void;
   onChange: (value: BrushSettings) => void;
 }) {
-  const previous = useRef<MaterialStroke['layer']>('rock');
   return (
     <div className="nh-material-brush" role="region" aria-label="Surface brush">
       <div className="nh-brush-layer-list" role="group" aria-label="Brush material">
         <Paintbrush size={15} aria-hidden="true"/>
         {SPLAT_LAYERS.map(layer => (
           <button type="button" key={layer} aria-pressed={layer === value.layer}
-            onClick={() => { previous.current = layer; onChange({ ...value, layer }); }}>
-            <i style={{ backgroundColor: BRUSH_COLORS[layer] }}/>
+            onClick={() => onChange({ ...value, layer })}>
+            <i style={{ backgroundColor: layerColorHex(surface, layer) }}/>
             {layer[0].toUpperCase() + layer.slice(1)}
           </button>
         ))}
         <button type="button" aria-pressed={value.layer === 'erase'} title="Restore procedural material"
-          onClick={() => onChange({ ...value, layer: value.layer === 'erase' ? previous.current : 'erase' })}>
+          onClick={() => onChange({ ...value, layer: value.layer === 'erase' ? previousLayer : 'erase' })}>
           <Eraser size={13}/> Erase
         </button>
       </div>
+      {value.layer !== 'erase' && (
+        <label className="nh-brush-albedo" title="Change the reference color everywhere this layer appears">
+          Layer color
+          <input type="color" aria-label={'Edit ' + value.layer + ' layer color'}
+            value={layerColorHex(surface, value.layer)}
+            onChange={e => { if (value.layer !== 'erase') onLayerColor(value.layer, e.target.value); }}/>
+        </label>
+      )}
       <div className="nh-brush-properties">
         <label>Radius <output>{(value.radius * worldSize).toLocaleString(undefined, { maximumFractionDigits: 1 })} m</output>
           <input aria-label="Brush radius" type="range" min="0" max="100" step="1"

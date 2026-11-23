@@ -2,7 +2,21 @@ import type { HeightField, TerrainProject } from '../model/types';
 import { resolveSurface } from './pbr';
 import type { PBRMaps } from './pbr';
 
+import { paintChangeBounds, rectArea, type TexelRect } from './materialRegion';
+import type { MaterialRanges } from './layerSynthesis';
+import type { MaterialStroke } from './materialPaint';
+import {
+  assemblePreview,
+  type PreviewSnapshot,
+  type PackedPreview,
+  type PreviewBake,
+} from './previewBake';
+export type { PackedPreview } from './previewBake';
+
 interface Job {
+  surface: string;
+  strokes: readonly MaterialStroke[];
+  snapshot?: PreviewSnapshot;
   worker: Worker | null;
   promise: Promise<PBRMaps>;
   reject: (error: Error) => void;
@@ -14,11 +28,8 @@ interface Job {
 // erosion field; a physical/material signature distinguishes its PBR variants.
 const cache = new WeakMap<HeightField, Map<string, Job>>();
 
-/** Live-preview textures packed by the worker alongside each set of maps. */
-export interface PackedPreview {
-  orm: Uint8ClampedArray;
-  microNormal: Uint8ClampedArray;
-}
+const ranges = new WeakMap<HeightField, MaterialRanges>();
+
 // Kept for as long as the maps themselves, so a cached material variant
 // (e.g. an artist toggling between two settings) never repacks on the main thread.
 const previews = new WeakMap<PBRMaps, PackedPreview>();
@@ -32,6 +43,14 @@ export function packedPreview(maps: PBRMaps): PackedPreview | null {
 // avoid serializing thousands of coordinates on each camera or project update.
 const paintIds = new WeakMap<NonNullable<TerrainProject['materialPaint']>, number>();
 let nextPaintId = 0;
+function surfaceKey(project: TerrainProject) {
+  return JSON.stringify([
+    project.seed,
+    project.worldSize,
+    project.heightScale,
+    resolveSurface(project.surface),
+  ]);
+}
 export function pbrVariantKey(project: TerrainProject): string {
   const history = project.materialPaint;
   let paintId = 0;
@@ -39,12 +58,43 @@ export function pbrVariantKey(project: TerrainProject): string {
     paintId = paintIds.get(history) ?? ++nextPaintId;
     paintIds.set(history, paintId);
   }
-  return JSON.stringify([
-    project.seed, project.worldSize, project.heightScale, resolveSurface(project.surface), paintId,
-  ]);
+  return `${surfaceKey(project)}|${paintId}`;
 }
 
-export function requestPBR(field: HeightField, project: TerrainProject): {
+function incrementalBase(
+  variants: Map<string, Job>,
+  surface: string,
+  strokes: readonly MaterialStroke[],
+  n: number,
+) {
+  let best: { snapshot: PreviewSnapshot; dirty: TexelRect } | undefined;
+  // A large rewrite has little spatial locality. A full transferred bake also
+  // avoids copying a previous full set of maps to apply a large patch.
+  let bestArea = n * n * 0.45;
+  for (const job of variants.values()) {
+    if (!job.snapshot || job.surface !== surface) continue;
+    const dirty = paintChangeBounds(job.strokes, strokes, n);
+    if (!dirty) continue;
+    const area = rectArea(dirty);
+    if (area < bestArea) {
+      bestArea = area;
+      best = { snapshot: job.snapshot, dirty };
+    }
+  }
+  return best;
+}
+
+function prune(variants: Map<string, Job>, keep: string) {
+  for (const [key, entry] of variants) {
+    if (variants.size <= 2) break;
+    if (key !== keep && entry.finished && !entry.users) variants.delete(key);
+  }
+}
+
+export function requestPBR(
+  field: HeightField,
+  project: TerrainProject,
+): {
   promise: Promise<PBRMaps>;
   release: () => void;
 } {
@@ -65,7 +115,10 @@ export function requestPBR(field: HeightField, project: TerrainProject): {
     // The main thread never executes generatePBR. Only field buffers are
     // structured-cloned because terrain/3D callers still own their originals.
     const worker = new Worker(new URL('./pbr.worker.ts', import.meta.url), { type: 'module' });
-    job = { worker, promise, reject, users: 0, finished: false };
+    const surface = surfaceKey(project),
+      strokes = project.materialPaint ?? [];
+    const base = incrementalBase(variants, surface, strokes, field.resolution);
+    job = { worker, promise, reject, surface, strokes, users: 0, finished: false };
     const running = job;
     const entries = variants;
     const fail = (message: string) => {
@@ -76,38 +129,39 @@ export function requestPBR(field: HeightField, project: TerrainProject): {
       entries.delete(key);
       reject(new Error(message));
     };
-    worker.onmessage = (event: MessageEvent<
-      { type: 'result'; maps: PBRMaps; preview?: PackedPreview } |
-      { type: 'error'; message: string }
-    >) => {
+    worker.onmessage = (
+      event: MessageEvent<
+        { type: 'result'; bake: PreviewBake } | { type: 'error'; message: string }
+      >,
+    ) => {
       if (running.finished) return;
       const message = event.data;
       if (message.type === 'error') {
         fail(message.message);
         return;
       }
-      running.finished = true;
-      running.worker?.terminate();
-      running.worker = null;
-      if (message.preview) previews.set(message.maps, message.preview);
-      accept(message.maps);
+      try {
+        const snapshot = assemblePreview(field.resolution, message.bake, base?.snapshot);
+        previews.set(snapshot.maps, snapshot.packed);
+        ranges.set(field, message.bake.ranges);
+        running.snapshot = snapshot;
+        running.finished = true;
+        running.worker?.terminate();
+        running.worker = null;
+        accept(snapshot.maps);
+        prune(entries, key);
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'Could not apply material pixels.');
+      }
     };
     worker.onerror = (event) => fail(event.message || 'PBR material worker failed.');
     variants.set(key, running);
     try {
-      worker.postMessage({ field, project });
+      worker.postMessage({ field, project, dirty: base?.dirty, ranges: ranges.get(field) });
     } catch (error) {
       fail(error instanceof Error ? error.message : 'Could not send terrain to material worker.');
     }
-    // Do not retain an unbounded material history when an artist drags controls.
-    if (variants.size > 2) {
-      for (const [oldKey, oldJob] of variants) {
-        if (oldKey !== key && oldJob.finished && oldJob.users === 0) {
-          variants.delete(oldKey);
-          break;
-        }
-      }
-    }
+    prune(variants, key);
   }
   const active = job;
   active.users++;
@@ -125,6 +179,7 @@ export function requestPBR(field: HeightField, project: TerrainProject): {
         variants!.delete(key);
         active.reject(new Error('PBR request superseded.'));
       }
+      prune(variants!, key);
     },
   };
 }

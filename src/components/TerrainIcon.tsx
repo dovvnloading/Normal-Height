@@ -64,6 +64,9 @@ export const PRESET_ICON_NAMES: Record<string, TerrainIconName> = {
 export const MAP_ICON_NAMES: Record<MapChannel, TerrainIconName> = {
   height: 'heightmap',
   terrain: 'shaded-relief',
+  materialNormal: 'normal-map',
+  detailNormal: 'normal-map',
+  relief: 'heightmap',
   normal: 'normal-map',
   slope: 'slope-map',
   flow: 'water-flow-map',
@@ -85,6 +88,8 @@ export const EXPORT_ICON_NAMES: Record<ExportFormat, TerrainIconName> = {
   raw32: 'heightmap',
   normal: 'normal-map',
   normalDX: 'normal-map',
+  normalGL: 'normal-map',
+  detailNormal: 'normal-map',
   flow: 'water-flow-map',
   wear: 'erosion-map',
   deposition: 'deposition-map',

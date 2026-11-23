@@ -49,7 +49,7 @@ import type { DifferenceMapResult, DifferenceStatistics } from '../render/compar
 import type { MapFraming, TerrainPoint, ViewportTool } from '../model/viewportUX';
 import { TerrainIcon, MAP_ICON_NAMES } from './TerrainIcon';
 import { colorizeMap, sampleSlope } from '../render/maps';
-import { pbrPixels } from '../materials/pbr';
+import { pbrPixels, resolveSurface, layerColorHex, SPLAT_LAYERS } from '../materials/pbr';
 import { requestPBR } from '../materials/pbrClient';
 import type { PBRChannel, PBRMaps } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/splines';
@@ -58,7 +58,7 @@ import type { TerrainNode } from '../model/types';
 import { BrushFeedback, type BrushSettings } from '../render/brushFeedback';
 import { useBrushInput } from '../hooks/useBrushInput';
 import { MaterialBrushControls, MapBrushPreview } from './MaterialBrush';
-import type { MaterialStroke } from '../materials/materialPaint';
+import type { MaterialLayer, MaterialStroke } from '../materials/materialPaint';
 import './TerrainViewport.css';
 
 type Baseline = { field: HeightField; project: TerrainProject; label: string };
@@ -87,6 +87,7 @@ interface TerrainViewportProps {
   baseline: Baseline | null;
   onCaptureBaseline: () => void;
   onClearBaseline: () => void;
+  onLayerColor: (layer: MaterialLayer, color: string) => void;
   onPaint: (strokes: MaterialStroke[]) => boolean;
 }
 
@@ -99,6 +100,9 @@ const CHANNELS: { value: MapChannel; label: string }[] = [
   { value: 'wear', label: 'Erosion' },
   { value: 'deposition', label: 'Deposition' },
   { value: 'basecolor', label: 'PBR base color' },
+  { value: 'materialNormal', label: 'Combined material normal' },
+  { value: 'detailNormal', label: 'Detail normal' },
+  { value: 'relief', label: 'Material relief' },
   { value: 'roughness', label: 'PBR roughness' },
   { value: 'ao', label: 'PBR occlusion' },
   { value: 'splat', label: 'Material weights' },
@@ -131,7 +135,7 @@ function readCameraBookmarks(): CameraBookmark[] {
 const CHANNEL_GROUPS = [
   { label: 'Terrain', values: ['height', 'terrain', 'normal', 'slope'] },
   { label: 'Water & erosion', values: ['flow', 'wear', 'deposition'] },
-  { label: 'PBR textures', values: ['basecolor', 'roughness', 'ao', 'curvature', 'orm'] },
+  { label: 'PBR textures', values: ['basecolor', 'materialNormal', 'detailNormal', 'relief', 'roughness', 'ao', 'curvature', 'orm'] },
   { label: 'Material distribution', values: ['splat', 'rockWeight', 'soilWeight',
     'vegetationWeight', 'snowWeight'] },
 ] as const;
@@ -292,7 +296,7 @@ function MapCanvas({
   };
   useBrushInput(() => canvasRef.current, brushFeedback ? {
     feedback: brushFeedback, settings: brushSettings, pick: mapPoint, commit: onPaint,
-  } : null, field);
+  } : null, field, project);
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
   const zoomAt = useRef<(next: number, x: number, y: number) => void>(() => {});
@@ -413,7 +417,7 @@ function MapCanvas({
       return () => { active = false; worker.terminate(); };
     }
     const material = [
-      'basecolor', 'roughness', 'ao', 'splat', 'curvature', 'orm',
+      'basecolor', 'materialNormal', 'detailNormal', 'relief', 'roughness', 'ao', 'splat', 'curvature', 'orm',
       'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight',
     ].includes(channel);
     if (material) {
@@ -423,7 +427,7 @@ function MapCanvas({
         if (!active) return;
         materialMapsRef.current = maps;
         feedbackRef.current?.baked(project.materialPaint);
-        paintPixels(pbrPixels(maps, field, project, channel as PBRChannel));
+        paintPixels(pbrPixels(maps, field, project, channel === 'materialNormal' ? 'normal' : channel as PBRChannel));
         setMapBusy(false);
       }).catch(() => {
         if (!active) return;
@@ -600,6 +604,8 @@ function MapCanvas({
       value = `${CHANNELS.find((c) => c.value === channel)?.label}: ${field[channel][index].toPrecision(3)}`;
     if (channel === 'slope')
       value = `${sampleSlope(field, x, y, project.worldSize, project.heightScale).degrees.toFixed(1)}° slope`;
+    if (channel === 'relief' && materialMapsRef.current)
+      value = `${materialMapsRef.current.detail[index].toFixed(3)} m relief`;
     const weightChannel = MATERIAL_WEIGHT_INDEX[channel];
     if (weightChannel !== undefined && materialMapsRef.current)
       value = `${CHANNELS.find(c => c.value === channel)?.label}: ${(
@@ -946,7 +952,9 @@ function MapLegend({
 }) {
   const legend = useMemo(() => {
     if (!field) return null;
-    if (channel === 'normal')
+    if (channel === 'relief')
+      return { label: 'Signed material relief · gray at zero', start: 'Recessed', end: 'Raised', empty: false };
+    if (channel === 'normal' || channel === 'materialNormal' || channel === 'detailNormal')
       return { label: 'Tangent normals · OpenGL', start: '+X', end: '+Y', empty: false };
     if (channel === 'slope')
       return { label: 'Surface slope', start: '0°', end: '70°+', empty: false };
@@ -1045,6 +1053,7 @@ export function TerrainViewport({
   baseline,
   onCaptureBaseline,
   onClearBaseline,
+  onLayerColor,
   onPaint,
 }: TerrainViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -1057,6 +1066,9 @@ export function TerrainViewport({
   const [brushSettings, setBrushSettings] = useState<BrushSettings>({
     layer: 'rock', radius: 0.035, strength: 0.9, hardness: 0.55,
   });
+  const surface = useMemo(() => resolveSurface(project.surface), [project.surface]);
+  const previousLayer = useRef<MaterialLayer>('rock');
+  if (brushSettings.layer !== 'erase') previousLayer.current = brushSettings.layer;
   const brushFeedback = useMemo(() => tool === 'paint' ? new BrushFeedback() : null, [tool]);
   // Spline handles own the 2D pointer surface while editing. Suppress
   // competing inspection tools instead of allowing inert tool selections.
@@ -1130,8 +1142,13 @@ export function TerrainViewport({
     activeBrush?.sync(project.materialPaint);
   }, [activeBrush, project.materialPaint]);
   useEffect(() => {
-    if (activeBrush) activeBrush.hover(activeBrush.cursor, brushSettings);
-  }, [activeBrush, brushSettings]);
+    if (activeBrush) {
+      activeBrush.setLayerColors(Object.fromEntries(
+        SPLAT_LAYERS.map(layer => [layer, layerColorHex(surface, layer)]),
+      ));
+      activeBrush.hover(activeBrush.cursor, brushSettings);
+    }
+  }, [activeBrush, brushSettings, surface]);
   const activePoint = hoverPoint ?? inspectionPoints.at(-1) ?? null;
   const comparisonDelta = useMemo(() => {
     if (!field || !baseline || !activePoint || effectiveMode !== 'compare' ||
@@ -1199,7 +1216,7 @@ export function TerrainViewport({
   useBrushInput(() => hostRef.current?.querySelector('canvas') ?? null, sceneBrush ? {
     feedback: sceneBrush, settings: brushSettings, commit: onPaint,
     pick: (x, y) => sceneRef.current?.pickPoint(x, y) ?? null,
-  } : null, field);
+  } : null, field, project, attempt);
 
   useEffect(() => {
     sceneRef.current?.setInspection(hoverPoint, inspectionPoints);
@@ -1382,7 +1399,7 @@ export function TerrainViewport({
                 value={channel}
                 onChange={(event) => {
                   const next = event.target.value as MapChannel;
-                  if (tool === 'paint' && !['basecolor', 'roughness', 'splat', 'orm',
+                  if (tool === 'paint' && !['basecolor', 'materialNormal', 'detailNormal', 'relief', 'roughness', 'splat', 'orm',
                     'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight'].includes(next)) {
                     setTool('navigate');
                   }
@@ -1439,8 +1456,8 @@ export function TerrainViewport({
           )}
         </div>
       </div>
-      {activeBrush && <MaterialBrushControls value={brushSettings} worldSize={project.worldSize}
-        onChange={setBrushSettings}/>}
+      {activeBrush && <MaterialBrushControls value={brushSettings} previousLayer={previousLayer.current} worldSize={project.worldSize}
+        surface={surface} onLayerColor={onLayerColor} onChange={setBrushSettings}/>}
       <div className={`nh-preview-surface nh-mode-${effectiveMode}${activeBrush ? ' nh-painting' : ''}`}>
         <div
           className="nh-three-pane"

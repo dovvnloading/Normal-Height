@@ -167,6 +167,25 @@ describe('material maps', () => {
       expect(linearToSrgbByte(srgbByteToLinear(sample))).toBe(sample);
   });
 
+  it('round-trips signed substrate relief in meters through the 16-bit export', () => {
+    const field = fixture(33);
+    const project = { ...createProject(), worldSize: 120, heightScale: 40 };
+    const detail = generatePBR(field, project).detail;
+    const files = unzipSync(makeExport(field, project, 'pbr', false).bytes);
+    const relief = decodePNG(files['alpine-watershed-33-relief16.png']);
+    const metadata = JSON.parse(strFromU8(files['alpine-watershed-material-metadata.json']));
+    const { minMeters, maxMeters } = metadata.materialRelief;
+    expect(relief.bitDepth).toBe(16);
+    expect(relief.colorType).toBe(0);
+    expect(minMeters).toBeLessThan(0);
+    expect(maxMeters).toBeGreaterThan(0);
+    const step = (maxMeters - minMeters) / 65535;
+    for (let i = 0; i < detail.length; i++) {
+      const code = 256 * relief.pixels[i * 2] + relief.pixels[i * 2 + 1];
+      expect(Math.abs(detail[i] - (minMeters + step * code))).toBeLessThanOrEqual(step / 2 + 1e-12);
+    }
+  });
+
   it('decodes every exported PBR PNG and compares actual channel pixels and row order', () => {
     const field = fixture(16);
     const project = createProject();

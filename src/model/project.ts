@@ -126,7 +126,7 @@ export function parseProject(raw: unknown): TerrainProject {
       throw new Error('Invalid PBR surface settings.');
     const rawSurface = p.surface as Record<string, unknown>;
     const biome = rawSurface.biome;
-    if (biome !== undefined && !['alpine', 'arid', 'volcanic'].includes(String(biome)))
+    if (biome !== undefined && (typeof biome !== 'string' || !['alpine', 'arid', 'volcanic'].includes(biome)))
       throw new Error('Unknown PBR biome.');
     const clean = resolveSurface();
     if (biome !== undefined) clean.biome = biome as typeof clean.biome;

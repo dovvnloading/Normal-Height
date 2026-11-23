@@ -1,7 +1,7 @@
 import type { MaterialStroke, PaintPoint } from '../materials/materialPaint';
 
 export type BrushSettings = Omit<MaterialStroke, 'points'>;
-export const BRUSH_COLORS: Record<MaterialStroke['layer'], string> = {
+const BRUSH_COLORS: Record<MaterialStroke['layer'], string> = {
   rock: '#989291', soil: '#b48662', vegetation: '#78934b', snow: '#e7f0f3', erase: '#70c4c3',
 };
 
@@ -10,6 +10,7 @@ export const BRUSH_COLORS: Record<MaterialStroke['layer'], string> = {
  * at pointer-up, so a gesture makes one undo step and one worker request. */
 export class BrushFeedback {
   canvas = document.createElement('canvas');
+  readonly colors = { ...BRUSH_COLORS };
   revision = 0;
   cursor: PaintPoint | null = null;
   settings: BrushSettings = { layer: 'rock', radius: 0.035, hardness: 0.55, strength: 0.9 };
@@ -18,6 +19,22 @@ export class BrushFeedback {
   private listeners = new Set<() => void>();
   private frame = 0;
   private dirty = false;
+  private held = false;
+
+  get drawing() { return this.held; }
+
+  begin() {
+    if (this.held) return false;
+    this.held = true;
+    return true;
+  }
+
+  setLayerColors(next: Partial<typeof BRUSH_COLORS>) {
+    if (Object.entries(next).every(([key, color]) =>
+      this.colors[key as MaterialStroke['layer']] === color)) return;
+    Object.assign(this.colors, next);
+    this.refresh(this.hasMarks);
+  }
 
   get hasMarks() { return this.draft.length > 0 || this.pending.length > 0; }
 
@@ -43,6 +60,7 @@ export class BrushFeedback {
   }
 
   finish(committed: boolean) {
+    this.held = false;
     if (committed) this.pending.push(...this.draft);
     this.draft = [];
     this.refresh(true);
@@ -90,7 +108,7 @@ export class BrushFeedback {
       // A sub-pixel segment gives a click the same round cap as a drag.
       path.lineTo(first.u * n + 0.001, first.v * n);
       for (const p of tail) path.lineTo(p.u * n, p.v * n);
-      ctx.strokeStyle = BRUSH_COLORS[stroke.layer];
+      ctx.strokeStyle = this.colors[stroke.layer];
       let previousAlpha = 0;
       for (let band = 1; band <= 10; band++) {
         const t = band / 10;

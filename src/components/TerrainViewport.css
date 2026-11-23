@@ -9,15 +9,16 @@
   position: relative;
 }
 .nh-viewport-toolbar {
-  height: 44px;
   min-height: 44px;
   display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 0 13px;
+  padding: 5px 13px;
   background: #f4f5f1;
   border-bottom: 1px solid #ccd1cb;
-  gap: 10px;
+  gap: 4px 10px;
   z-index: 4;
 }
 .nh-view-tabs {
@@ -1642,6 +1643,8 @@
   border: 1px solid #30362d55;
   border-radius: 50%;
 }
+.nh-brush-albedo { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; }
+.nh-brush-albedo input { width: 27px; height: 22px; padding: 0; cursor: pointer; }
 .nh-brush-properties { flex: 1 1 232px; gap: 6px 12px; }
 .nh-brush-properties label {
   display: grid;
@@ -1664,6 +1667,11 @@
 .nh-painting .nh-three-host canvas, .nh-painting .nh-map > canvas { cursor: crosshair; }
 @container (max-width: 480px) {
   .nh-material-brush { padding: 4px 7px; }
+  .nh-channel-select select {
+    width: clamp(84px, calc(100cqw - 205px), 144px);
+    min-width: 0;
+    text-overflow: ellipsis;
+  }
   .nh-brush-layer-list { gap: 1px; }
   .nh-brush-layer-list > svg { display: none; }
   .nh-brush-layer-list button { font-size: 10px; padding: 4px; }

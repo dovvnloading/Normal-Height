@@ -1,6 +1,7 @@
 import type { HeightField, TerrainProject } from '../model/types';
-import type { PBRMaps } from '../materials/pbr';
-import { pbrPixels } from '../materials/pbr';
+import type { MaterialBuffers, PBRMaps } from '../materials/pbr';
+import { materialNormalRegion } from '../materials/pbr';
+import { tileRect, rectArea, type TexelRect } from '../materials/materialRegion';
 
 /**
  * Compact, preview-only material classification sidecar. MeshStandardMaterial
@@ -17,14 +18,27 @@ export function packPreviewPBR(
   field: HeightField,
   project: TerrainProject,
 ): { orm: Uint8ClampedArray; microNormal: Uint8ClampedArray } {
-  const orm = pbrPixels(maps, field, project, 'orm');
-  const microNormal = pbrPixels(maps, field, project, 'detailNormal');
-  const n = maps.resolution;
-  if (maps.splat.length !== n * n * 4) throw new Error('Preview splat dimensions do not match.');
-  for (let p = 0; p < n * n * 4; p += 4) {
-    orm[p + 2] = maps.splat[p];      // Rock; B not sampled by MeshStandardMaterial
-    orm[p + 3] = maps.splat[p + 1];  // Soil; A is not used in opaque ORM sampling
-    microNormal[p + 3] = maps.splat[p + 2]; // Vegetation; normalMap consumes RGB only
+  const full = tileRect(maps.resolution);
+  return packPreviewRegion(maps, full, full, field, project);
+}
+
+export function packPreviewRegion(maps: MaterialBuffers, source: TexelRect, target: TexelRect,
+  field: HeightField, project: TerrainProject,
+): { orm: Uint8ClampedArray; microNormal: Uint8ClampedArray } {
+  if (maps.splat.length !== rectArea(source) * 4) throw new Error('Preview splat dimensions do not match.');
+  const orm = new Uint8ClampedArray(rectArea(target) * 4);
+  const microNormal = materialNormalRegion(maps.detail, source, target, field, project, true);
+  const stride = source.right - source.left;
+  let p = 0;
+  for (let y = target.top; y < target.bottom; y++) {
+    let i = (y - source.top) * stride + target.left - source.left;
+    for (let x = target.left; x < target.right; x++, i++, p += 4) {
+      orm[p] = maps.ao[i];
+      orm[p + 1] = maps.roughness[i];
+      orm[p + 2] = maps.splat[i * 4];
+      orm[p + 3] = maps.splat[i * 4 + 1];
+      microNormal[p + 3] = maps.splat[i * 4 + 2];
+    }
   }
   return { orm, microNormal };
 }

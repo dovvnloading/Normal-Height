@@ -98,6 +98,7 @@ export type WorkerResponse =
   | { type: 'error'; id: number; message: string };
 export type MapChannel = 'height' | 'terrain' | 'normal' | 'slope' | 'flow' | 'wear' | 'deposition'
   | 'basecolor' | 'roughness' | 'ao' | 'splat' | 'curvature' | 'orm'
+  | 'materialNormal' | 'detailNormal' | 'relief'
   | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
 export type ViewMode = '3d' | '2d' | 'split' | 'compare';
 export interface ViewSettings {

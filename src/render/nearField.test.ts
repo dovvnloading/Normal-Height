@@ -67,11 +67,11 @@ describe('close-range shader integration', () => {
     installNearFieldShader(shader, uniforms);
     expect(shader.uniforms.nhMetersPerUnit).toBe(uniforms.nhMetersPerUnit);
     expect(shader.fragmentShader).toContain('vNHPosition * nhMetersPerUnit');
-    expect(shader.fragmentShader).toContain('gain*wavelength*dot(layers');
+    expect(shader.fragmentShader).toContain('gain*wavelength/span');
     expect(shader.fragmentShader).toContain('textureGrad(roughnessMap, vRoughnessMapUv');
     expect(shader.fragmentShader).toContain('textureGrad(normalMap, vNormalMapUv');
-    expect(shader.fragmentShader).toContain('dFdx(nhReliefMeters)');
-    expect(shader.fragmentShader).toContain('dFdy(nhReliefMeters)');
+    expect(shader.fragmentShader).toContain('sb.height-sa.height');
+    expect(shader.fragmentShader).toContain('sc.height-sa.height');
     expect(shader.fragmentShader).toContain('nhDetailStrength > 0.0001');
     expect(shader.fragmentShader).toContain('nhPulseIntegral');
     expect(() => installNearFieldShader({ fragmentShader: 'unknown', uniforms: {} }, uniforms))

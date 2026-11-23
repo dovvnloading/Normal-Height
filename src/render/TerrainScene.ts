@@ -9,6 +9,7 @@ import {
 } from './terrainMesh';
 import type { BudgetedStep, TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 import { resolveSurface } from '../materials/pbr';
+import { fabricFrame } from '../materials/surfaceFabric';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
 import { createSlopeTexture, createSourceNormalUniforms, installSourceNormals } from './sourceNormals';
@@ -1215,12 +1216,6 @@ export class TerrainScene {
       return;
     }
     const field = this.field, project = this.project;
-    const surface = resolveSurface(project.surface);
-    this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
-    this.nearField.nhDetailMeters.value = surface.detailMeters;
-    this.nearField.nhBiome.value = surface.biome === 'alpine' ? 0 : surface.biome === 'arid' ? 1 : 2;
-    this.nearField.nhDetailStrength.value = surface.detailStrength;
-    this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
     const surfaceKey = pbrVariantKey(project);
     if (this.lastPBRField === field && this.lastPBRSurface === surfaceKey) return;
     this.pbrRelease?.();
@@ -1239,6 +1234,15 @@ export class TerrainScene {
       this.pbrRelease?.();
       this.pbrRelease = null;
       const preparedAt = performance.now();
+      // Switch the close-up model and the worker-baked maps together after
+      // the generation check. Rapid biome/brush edits may supersede this job.
+      const surface = resolveSurface(project.surface);
+      this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
+      this.nearField.nhDetailMeters.value = surface.detailMeters;
+      this.nearField.nhFabricAzimuth.value = fabricFrame(project.seed).azimuth;
+      this.nearField.nhBiome.value = surface.biome === 'alpine' ? 0 : surface.biome === 'arid' ? 1 : 2;
+      this.nearField.nhDetailStrength.value = surface.detailStrength;
+      this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
       const n = maps.resolution;
       const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
       const existing = this.pbrTextures;
