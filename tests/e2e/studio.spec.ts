@@ -232,7 +232,7 @@ test('uses a legible light stone workspace with muted earth controls', async ({ 
   for (const ratio of contrast) expect(ratio).toBeGreaterThan(4.5);
 
   await page.getByRole('button', { name: 'Display settings' }).click();
-  await expect(page.getByRole('dialog', { name: 'Display settings' })).toHaveCSS(
+  await expect(page.getByRole('region', { name: 'Display settings' })).toHaveCSS(
     'background-color',
     'rgba(250, 250, 246, 0.98)',
   );
@@ -790,7 +790,7 @@ test('the sky and expanded meadow change rendered pixels without rebuilding the 
   });
 
   await page.getByRole('button', { name: 'Display settings' }).click();
-  const panel = page.getByRole('dialog', { name: 'Display settings' });
+  const panel = page.getByRole('region', { name: 'Display settings' });
   // Freeze procedural drift while comparing the actual WebGL framebuffers.
   const wind = panel.getByRole('slider', { name: 'Wind speed' });
   await wind.focus();
@@ -837,7 +837,7 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
     return hash >>> 0;
   });
   await page.getByRole('button', { name: 'Display settings' }).click();
-  const dialog = page.getByRole('dialog', { name: 'Display settings' });
+  const dialog = page.getByRole('region', { name: 'Display settings' });
   await dialog.getByRole('slider', { name: 'Wind speed' }).focus();
   await dialog.getByRole('slider', { name: 'Wind speed' }).press('Home');
   await dialog.getByRole('button', { name: 'Clear day sky preset' }).click();
@@ -889,7 +889,7 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
   await ready(page);
   await page.getByRole('button', { name: 'Display settings' }).click();
-  const restored = page.getByRole('dialog', { name: 'Display settings' });
+  const restored = page.getByRole('region', { name: 'Display settings' });
   await expect(restored.getByRole('checkbox', { name: 'Enable sky dome' })).toBeChecked();
   await expect(restored.getByRole('checkbox', { name: 'Expand ground' })).toBeChecked();
   await expect(restored.getByRole('slider', { name: 'Cloud cover' })).toHaveValue('0.88');
@@ -904,7 +904,7 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   // camera: turning off the direct-light attenuation must change terrain pixels.
   await page.getByRole('button', { name: '3D terrain', exact: true }).click();
   await page.getByRole('button', { name: 'Display settings' }).click();
-  const weather = page.getByRole('dialog', { name: 'Display settings' });
+  const weather = page.getByRole('region', { name: 'Display settings' });
   const shadows = weather.getByRole('slider', { name: 'Cloud shadow strength' });
   await shadows.focus();
   await shadows.press('Home');
@@ -926,7 +926,7 @@ test('sky look presets survive a reload and keep the split map responsive', asyn
   await captureTerrain(canvas, testInfo, 'atmosphere-overcast-horizon.png');
 
   await page.getByRole('button', { name: 'Display settings' }).click();
-  await page.getByRole('dialog', { name: 'Display settings' })
+  await page.getByRole('region', { name: 'Display settings' })
     .getByRole('button', { name: 'Golden hour sky preset' }).click();
   await page.getByRole('button', { name: 'Close display settings' }).click();
   await captureTerrain(canvas, testInfo, 'atmosphere-golden-horizon.png');
