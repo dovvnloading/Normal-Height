@@ -6,6 +6,7 @@ import {
   CloudSun,
   Sprout,
   Wind,
+  Waves,
   Check,
   ChevronDown,
   Columns2,
@@ -43,6 +44,7 @@ import type {
   ViewSettings,
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
+import { resolveWaterLevelMeters, WATER_PALETTES, waterHeightRange } from '../render/water';
 import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
 import { DEFAULT_MAP_FRAMING, sampleGrid, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
 import type { DifferenceMapResult, DifferenceStatistics } from '../render/compareMap';
@@ -1075,6 +1077,15 @@ export function TerrainViewport({
     layer: 'rock', radius: 0.035, strength: 0.9, hardness: 0.55,
   });
   const surface = useMemo(() => resolveSurface(project.surface), [project.surface]);
+  const waterRange = useMemo(() => waterHeightRange(field, project), [field, project.heightScale]);
+  const autoWaterLevel = useMemo(() => resolveWaterLevelMeters(project, {
+    ...settings, waterLevelMode: 'coast',
+  }, field), [field, project.graph, project.heightScale]);
+  const displayedWaterLevel = settings.waterLevelMode === 'manual'
+    ? settings.waterLevel : autoWaterLevel;
+  const waterSpan = Math.max(25, waterRange.max - waterRange.min);
+  const waterSliderMin = Math.floor((waterRange.min - waterSpan * 0.1) / 10) * 10;
+  const waterSliderMax = Math.ceil((waterRange.max + waterSpan * 0.1) / 10) * 10;
   const previousLayer = useRef<MaterialLayer>('rock');
   if (brushSettings.layer !== 'erase') previousLayer.current = brushSettings.layer;
   const brushFeedback = useMemo(() => tool === 'paint' ? new BrushFeedback() : null, [tool]);
@@ -1455,6 +1466,17 @@ export function TerrainViewport({
             <span>{focusMode ? 'Restore' : 'Focus'}</span>
           </button>
           {(effectiveMode === '3d' || effectiveMode === 'split') && (
+            <button type="button"
+              className={`nh-viewport-tool nh-water-toggle ${settings.waterEnabled ? 'active' : ''}`}
+              title={settings.waterEnabled ? 'Hide cinematic water' : 'Show cinematic water'}
+              aria-label="Toggle water rendering"
+              aria-pressed={settings.waterEnabled}
+              onClick={() => change({ waterEnabled: !settings.waterEnabled })}>
+              <Waves size={16} />
+              <span>Water</span>
+            </button>
+          )}
+          {(effectiveMode === '3d' || effectiveMode === 'split') && (
             <button
               ref={displayTrigger}
               className={`nh-viewport-tool ${showSettings ? 'active' : ''}`}
@@ -1578,6 +1600,12 @@ export function TerrainViewport({
                   : <>Drag to orbit<span>·</span>Double-click to focus</>}
                 <span>·</span>Right-drag to pan<span>·</span>Scroll to zoom
               </div>
+              {settings.waterEnabled && (
+                <div className="nh-water-readout" role="status">
+                  <Waves size={13} />
+                  <span>{WATER_PALETTES[settings.waterPalette].label} · {Math.round(displayedWaterLevel).toLocaleString()} m</span>
+                </div>
+              )}
               <div
                 className="nh-scene-resolution"
                 title="Adaptive triangle count from the current camera view. Original heightfields and exports remain at their full source resolution."
@@ -1851,6 +1879,78 @@ export function TerrainViewport({
                 </button>
               ))}
             </div>
+            <div className="nh-display-divider" />
+            <div className="nh-display-section-heading"><Waves size={13} /> Water & coastline</div>
+            <label className="nh-display-check">
+              <input type="checkbox" aria-label="Enable water rendering"
+                checked={settings.waterEnabled}
+                onChange={e => change({ waterEnabled: e.target.checked })} />
+              <span>Render cinematic water</span>
+            </label>
+            {settings.waterEnabled && (
+              <div className="nh-water-settings">
+                <div className="nh-water-palettes" role="group" aria-label="Water appearance">
+                  {(Object.keys(WATER_PALETTES) as ViewSettings['waterPalette'][]).map(id => (
+                    <button key={id} type="button" title={WATER_PALETTES[id].label}
+                      aria-label={WATER_PALETTES[id].label}
+                      aria-pressed={settings.waterPalette === id}
+                      className={settings.waterPalette === id ? 'active' : ''}
+                      onClick={() => change({ waterPalette: id })}>
+                      <span className="nh-water-swatch"
+                        style={{ background: `linear-gradient(145deg, ${WATER_PALETTES[id].shallow}, ${WATER_PALETTES[id].deep})` }} />
+                      <span>{id === 'lagoon' ? 'Lagoon' : id === 'ocean' ? 'Ocean' :
+                        id === 'dusk' ? 'Dusk' : 'Alpine'}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="nh-water-level-mode" role="group" aria-label="Water level source">
+                  <button type="button" aria-pressed={settings.waterLevelMode === 'coast'}
+                    className={settings.waterLevelMode === 'coast' ? 'active' : ''}
+                    onClick={() => change({ waterLevelMode: 'coast' })}>Follow coastline</button>
+                  <button type="button" aria-pressed={settings.waterLevelMode === 'manual'}
+                    className={settings.waterLevelMode === 'manual' ? 'active' : ''}
+                    onClick={() => change({ waterLevelMode: 'manual', waterLevel: displayedWaterLevel })}>
+                    Custom</button>
+                </div>
+                <label className="nh-display-range">
+                  <span>Water elevation<b>{Math.round(displayedWaterLevel).toLocaleString()} m</b></span>
+                  <input type="range" aria-label="Water level"
+                    min={waterSliderMin} max={waterSliderMax}
+                    step={Math.max(0.5, Math.round(waterSpan / 600 * 2) / 2)}
+                    value={Math.min(waterSliderMax, Math.max(waterSliderMin, displayedWaterLevel))}
+                    onChange={e => change({ waterLevelMode: 'manual', waterLevel: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Wave height<b>{settings.waterWaveHeight.toFixed(1)} m</b></span>
+                  <input type="range" aria-label="Water wave height" min="0" max="5" step="0.1"
+                    value={settings.waterWaveHeight}
+                    onChange={e => change({ waterWaveHeight: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Wave motion<b>{settings.waterSpeed.toFixed(2)}×</b></span>
+                  <input type="range" aria-label="Water wave speed" min="0" max="2" step="0.05"
+                    value={settings.waterSpeed}
+                    onChange={e => change({ waterSpeed: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Water clarity<b>{Math.round(settings.waterClarity * 100)}%</b></span>
+                  <input type="range" aria-label="Water clarity" min="0" max="1" step="0.02"
+                    value={settings.waterClarity}
+                    onChange={e => change({ waterClarity: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Shoreline foam<b>{Math.round(settings.waterFoam * 100)}%</b></span>
+                  <input type="range" aria-label="Shoreline foam" min="0" max="1" step="0.02"
+                    value={settings.waterFoam}
+                    onChange={e => change({ waterFoam: Number(e.target.value) })} />
+                </label>
+                <p className="nh-display-help">
+                  Moving swells, Fresnel reflections, shallow color and terrain-following foam.
+                  Follow coastline uses the connected Coastal shelf node. Slide the waterline
+                  to override it. These effects never change terrain or exported maps.
+                </p>
+              </div>
+            )}
             <div className="nh-display-divider" />
             <div className="nh-display-section-heading"><CloudSun size={13} /> Atmosphere & lighting</div>
             <div className="nh-sky-presets" role="group" aria-label="Sky lighting presets">
