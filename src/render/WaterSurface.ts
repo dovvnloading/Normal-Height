@@ -23,6 +23,7 @@ const waterVertex = String.raw`
   varying vec3 vWaterWorld;
   varying vec2 vWaterUV;
   varying vec2 vMetric;
+  #include <fog_pars_vertex>
 
   void main() {
     vec3 positionWater = position;
@@ -34,7 +35,9 @@ const waterVertex = String.raw`
     vWaterWorld = world.xyz;
     vMetric = metric;
     vWaterUV = metric / (uTileSize * uMetersPerUnit) + 0.5;
-    gl_Position = projectionMatrix * viewMatrix * world;
+    vec4 mvPosition = viewMatrix * world;
+    gl_Position = projectionMatrix * mvPosition;
+    #include <fog_vertex>
   }
 `;
 
