@@ -11,6 +11,8 @@ export type MeshQuality = 'balanced' | 'high' | 'ultra';
 
 export interface TerrainMeshPlan {
   readonly segments: readonly number[];
+  /** Number of square tiles along one world axis. Defaults to the reference 8. */
+  readonly tilesPerSide?: number;
   readonly key: string;
   readonly vertexCount: number;
   readonly triangleCount: number;
@@ -19,6 +21,8 @@ export interface TerrainMeshPlan {
 
 export interface TerrainSampler {
   readonly resolution: number;
+  /** Smallest authored material period in metres. Enables sub-source refinement. */
+  readonly detailPeriodMeters?: number;
   height(u: number, v: number): number;
   normal(u: number, v: number): readonly [number, number, number];
   /**
@@ -61,7 +65,7 @@ function monotoneCubic(
  * whose 4×4 stencil lies inside the grid read it directly; border cells
  * extrapolate linearly (at() gives identical values elsewhere).
  */
-function monotoneSurface(height: Float32Array, n: number): (u: number, v: number) => number {
+export function monotoneSurface(height: Float32Array, n: number): (u: number, v: number) => number {
   const inside = (x: number, y: number) => height[y * n + x];
   const at = (x: number, y: number): number => {
     const xx = clamp(x, 0, n - 1);
@@ -305,9 +309,16 @@ export function planTerrainMesh(
   previous?: TerrainMeshPlan | null,
 ): TerrainMeshPlan {
   const n = sampler.resolution;
-  const base = baseSegments(n);
-  const maximum = Math.min(256, Math.max(base,
-    2 ** Math.ceil(Math.log2(Math.max(1, (n - 1) / TERRAIN_TILES))) * 2,
+  // A 256-segment tile on the 36 km uplands used to stop at 17.6 m
+  // spacing: even maximum zoom could never resolve a 24 m material period.
+  // Smaller regions let the same budget go further around the camera.
+  const period = sampler.detailPeriodMeters;
+  const tiles = period
+    ? clamp(2 ** Math.ceil(Math.log2(3.5 * worldSize / (256 * period))), TERRAIN_TILES, 64)
+    : TERRAIN_TILES;
+  const base = Math.max(2, baseSegments(n) * TERRAIN_TILES / tiles);
+  const maximum = period ? 256 : Math.min(256, Math.max(base,
+    2 ** Math.ceil(Math.log2(Math.max(1, (n - 1) / tiles))) * 2,
   ));
   const budget = MESH_VERTEX_BUDGET[quality];
   const targetPixelSize = quality === 'ultra' ? 2.1 :
@@ -317,25 +328,25 @@ export function planTerrainMesh(
   const orthographic = camera instanceof THREE.OrthographicCamera;
   const focal = orthographic
     ? Math.max(1, viewportHeight * pixelRatio) /
-      Math.max(0.001, camera.top - camera.bottom)
+      Math.max(0.001, (camera.top - camera.bottom) / camera.zoom)
     : 0.5 * Math.max(1, viewportHeight * pixelRatio) /
       Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  const tileWidth = TERRAIN_SIZE / TERRAIN_TILES;
+  const tileWidth = TERRAIN_SIZE / tiles;
   const terrainScale = TERRAIN_SIZE * heightScale / worldSize;
-  const segments = new Array<number>(TERRAIN_TILES * TERRAIN_TILES).fill(base);
+  const segments = new Array<number>(tiles * tiles).fill(base);
   let vertices = segments.length * vertexCost(base);
   const candidates: Array<{ index: number; desired: number; score: number }> = [];
   camera.updateMatrixWorld();
   const point = new THREE.Vector3();
   const projected = new THREE.Vector3();
-  for (let y = 0; y < TERRAIN_TILES; y++) for (let x = 0; x < TERRAIN_TILES; x++) {
-    const u = (x + 0.5) / TERRAIN_TILES;
-    const v = (y + 0.5) / TERRAIN_TILES;
+  for (let y = 0; y < tiles; y++) for (let x = 0; x < tiles; x++) {
+    const u = (x + 0.5) / tiles;
+    const v = (y + 0.5) / tiles;
     point.set((u - 0.5) * TERRAIN_SIZE,
       sampler.height(u, v) * terrainScale * exaggeration,
       (v - 0.5) * TERRAIN_SIZE);
     projected.copy(point).project(camera);
-    const index = y * TERRAIN_TILES + x;
+    const index = y * tiles + x;
     const withinTile = Math.abs(camera.position.x - point.x) <= tileWidth &&
       Math.abs(camera.position.z - point.z) <= tileWidth;
     const visible = withinTile ||
@@ -351,7 +362,7 @@ export function planTerrainMesh(
     // meaningfully. Otherwise a camera hovering near a power-of-two boundary
     // repeatedly allocates/reuploads both the terrain and its ground apron.
     // Re-planning at a fixed camera remains deterministic without a previous.
-    const old = previous?.key.startsWith(`${quality}:`)
+    const old = previous?.segments.length === segments.length && previous.key.startsWith(`${quality}:`)
       ? previous.segments[index] : undefined;
     if (old && old > base) {
       if (desired < old && ideal >= old * 0.65)
@@ -377,7 +388,8 @@ export function planTerrainMesh(
   const triangleCount = segments.reduce((total, value) => total + 2 * value * value, 0);
   return {
     segments,
-    key: `${quality}:${segments.join(',')}`,
+    tilesPerSide: tiles,
+    key: `${quality}:${tiles}:${segments.join(',')}`,
     vertexCount: vertices,
     triangleCount,
     maxSegments: Math.max(...segments),
@@ -470,10 +482,12 @@ export function* adaptiveTerrainGeometrySteps(
   heightScale: number,
   worldSize: number,
 ): Generator<void, THREE.BufferGeometry, undefined> {
-  if (plan.segments.length !== TERRAIN_TILES * TERRAIN_TILES)
+  const tiles = plan.tilesPerSide ?? TERRAIN_TILES;
+  if (plan.segments.length !== tiles * tiles)
     throw new Error('Adaptive terrain plan must cover all tiles.');
   const positions = new Float32Array(plan.vertexCount * 3);
   const normals = new Float32Array(plan.vertexCount * 3);
+  const detailSlopes = new Float32Array(plan.vertexCount * 2);
   const uvs = new Float32Array(plan.vertexCount * 2);
   const colors = new Float32Array(plan.vertexCount * 3);
   const indices = new Uint32Array(plan.triangleCount * 3);
@@ -481,7 +495,7 @@ export function* adaptiveTerrainGeometrySteps(
   let vertex = 0, triangle = 0;
   const heightFactor = TERRAIN_SIZE * heightScale / worldSize;
   const tileAt = (x: number, y: number) =>
-    plan.segments[y * TERRAIN_TILES + x];
+    plan.segments[y * tiles + x];
   // Each tile samples the source prefiltered to its own vertex spacing, so a
   // coarse tile is the smooth surface it can represent instead of aliased
   // point samples of full detail.
@@ -490,7 +504,7 @@ export function* adaptiveTerrainGeometrySteps(
     let surface = surfaces.get(segments);
     if (!surface) {
       surface = sampler.heightForSpacing?.(
-        (sampler.resolution - 1) / (TERRAIN_TILES * segments)) ?? sampler.height;
+        (sampler.resolution - 1) / (tiles * segments)) ?? sampler.height;
       surfaces.set(segments, surface);
     }
     return surface;
@@ -502,14 +516,14 @@ export function* adaptiveTerrainGeometrySteps(
   const cornerHeight = (cx: number, cy: number): number => {
     let coarsest = Infinity;
     for (let y = cy - 1; y <= cy; y++) for (let x = cx - 1; x <= cx; x++)
-      if (x >= 0 && y >= 0 && x < TERRAIN_TILES && y < TERRAIN_TILES)
+      if (x >= 0 && y >= 0 && x < tiles && y < tiles)
         coarsest = Math.min(coarsest, tileAt(x, y));
-    return surfaceFor(coarsest)(cx / TERRAIN_TILES, cy / TERRAIN_TILES);
+    return surfaceFor(coarsest)(cx / tiles, cy / tiles);
   };
   /** The edge as its `lowSegments`-segment side draws it: linear between vertices. */
   const lockedEdge = (u: number, v: number, lowSegments: number,
     origin: number, fixed: number, vertical: boolean): number => {
-    const t = clamp((vertical ? v : u) * TERRAIN_TILES - origin);
+    const t = clamp((vertical ? v : u) * tiles - origin);
     const step = Math.min(lowSegments - 1, Math.floor(t * lowSegments));
     const f = t * lowSegments - step;
     const coarse = surfaceFor(lowSegments);
@@ -517,24 +531,24 @@ export function* adaptiveTerrainGeometrySteps(
       if (k === 0) return vertical ? cornerHeight(fixed, origin) : cornerHeight(origin, fixed);
       if (k === lowSegments)
         return vertical ? cornerHeight(fixed, origin + 1) : cornerHeight(origin + 1, fixed);
-      const p = (origin + k / lowSegments) / TERRAIN_TILES;
-      return vertical ? coarse(fixed / TERRAIN_TILES, p) : coarse(p, fixed / TERRAIN_TILES);
+      const p = (origin + k / lowSegments) / tiles;
+      return vertical ? coarse(fixed / tiles, p) : coarse(p, fixed / tiles);
     };
     return point(step) * (1 - f) + point(step + 1) * f;
   };
   const lockedNormal = (u: number, v: number, lowSegments: number,
     origin: number, fixed: number, vertical: boolean): readonly [number, number, number] => {
-    const t = clamp((vertical ? v : u) * TERRAIN_TILES - origin);
+    const t = clamp((vertical ? v : u) * tiles - origin);
     const step = Math.min(lowSegments - 1, Math.floor(t * lowSegments));
     const f = t * lowSegments - step;
-    const p0 = (origin + step / lowSegments) / TERRAIN_TILES;
-    const p1 = (origin + (step + 1) / lowSegments) / TERRAIN_TILES;
+    const p0 = (origin + step / lowSegments) / tiles;
+    const p1 = (origin + (step + 1) / lowSegments) / tiles;
     const a = vertical
-      ? sampler.normal(fixed / TERRAIN_TILES, p0)
-      : sampler.normal(p0, fixed / TERRAIN_TILES);
+      ? sampler.normal(fixed / tiles, p0)
+      : sampler.normal(p0, fixed / tiles);
     const b = vertical
-      ? sampler.normal(fixed / TERRAIN_TILES, p1)
-      : sampler.normal(p1, fixed / TERRAIN_TILES);
+      ? sampler.normal(fixed / tiles, p1)
+      : sampler.normal(p1, fixed / tiles);
     // Deliberately *not* normalized: GPU interpolation must exactly match the
     // coarser tile's linearly interpolated vertex normals along the same edge.
     return [
@@ -562,8 +576,8 @@ export function* adaptiveTerrainGeometrySteps(
     const fade = (distance: number) => transitionFade(distance, s);
     const surface = surfaceFor(s);
     for (let ix = 0; ix <= s; ix++) {
-      const u = (tx + ix / s) / TERRAIN_TILES;
-      const v = (ty + iy / s) / TERRAIN_TILES;
+      const u = (tx + ix / s) / tiles;
+      const v = (ty + iy / s) / tiles;
       const onLeft = ix === 0, onRight = ix === s, onTop = iy === 0, onBottom = iy === s;
       let h: number;
       let shadingNormal = sampler.normal(u, v);
@@ -571,12 +585,12 @@ export function* adaptiveTerrainGeometrySteps(
         h = cornerHeight(onLeft ? tx : tx + 1, onTop ? ty : ty + 1);
       } else if (onLeft || onRight) {
         const nx = onLeft ? tx - 1 : tx + 1, fixed = onLeft ? tx : tx + 1;
-        const other = nx >= 0 && nx < TERRAIN_TILES ? tileAt(nx, ty) : s;
-        h = other < s ? lockedEdge(fixed / TERRAIN_TILES, v, other, ty, fixed, true) : surface(u, v);
+        const other = nx >= 0 && nx < tiles ? tileAt(nx, ty) : s;
+        h = other < s ? lockedEdge(fixed / tiles, v, other, ty, fixed, true) : surface(u, v);
       } else if (onTop || onBottom) {
         const ny = onTop ? ty - 1 : ty + 1, fixed = onTop ? ty : ty + 1;
-        const other = ny >= 0 && ny < TERRAIN_TILES ? tileAt(tx, ny) : s;
-        h = other < s ? lockedEdge(u, fixed / TERRAIN_TILES, other, tx, fixed, false) : surface(u, v);
+        const other = ny >= 0 && ny < tiles ? tileAt(tx, ny) : s;
+        h = other < s ? lockedEdge(u, fixed / tiles, other, tx, fixed, false) : surface(u, v);
       } else {
         h = surface(u, v);
       }
@@ -584,30 +598,30 @@ export function* adaptiveTerrainGeometrySteps(
       // neighbour's edge line; boundary vertices were set exactly above.
       const interior = !onLeft && !onRight && !onTop && !onBottom;
       if (tx > 0 && tileAt(tx - 1, ty) < s && ix < Math.max(3, s / 24)) {
-        const edgeU = tx / TERRAIN_TILES;
+        const edgeU = tx / tiles;
         const amount = fade(ix);
         if (interior) h += (lockedEdge(edgeU, v, tileAt(tx - 1, ty), ty, tx, true) -
           surface(edgeU, v)) * amount;
         shadingNormal = transitionNormal(shadingNormal, edgeU, v, tileAt(tx - 1, ty), ty, tx, true, amount);
       }
-      if (tx + 1 < TERRAIN_TILES && tileAt(tx + 1, ty) < s &&
+      if (tx + 1 < tiles && tileAt(tx + 1, ty) < s &&
           s - ix < Math.max(3, s / 24)) {
-        const edgeU = (tx + 1) / TERRAIN_TILES;
+        const edgeU = (tx + 1) / tiles;
         const amount = fade(s - ix);
         if (interior) h += (lockedEdge(edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true) -
           surface(edgeU, v)) * amount;
         shadingNormal = transitionNormal(shadingNormal, edgeU, v, tileAt(tx + 1, ty), ty, tx + 1, true, amount);
       }
       if (ty > 0 && tileAt(tx, ty - 1) < s && iy < Math.max(3, s / 24)) {
-        const edgeV = ty / TERRAIN_TILES;
+        const edgeV = ty / tiles;
         const amount = fade(iy);
         if (interior) h += (lockedEdge(u, edgeV, tileAt(tx, ty - 1), tx, ty, false) -
           surface(u, edgeV)) * amount;
         shadingNormal = transitionNormal(shadingNormal, u, edgeV, tileAt(tx, ty - 1), tx, ty, false, amount);
       }
-      if (ty + 1 < TERRAIN_TILES && tileAt(tx, ty + 1) < s &&
+      if (ty + 1 < tiles && tileAt(tx, ty + 1) < s &&
           s - iy < Math.max(3, s / 24)) {
-        const edgeV = (ty + 1) / TERRAIN_TILES;
+        const edgeV = (ty + 1) / tiles;
         const amount = fade(s - iy);
         if (interior) h += (lockedEdge(u, edgeV, tileAt(tx, ty + 1), tx, ty + 1, false) -
           surface(u, edgeV)) * amount;
@@ -624,6 +638,48 @@ export function* adaptiveTerrainGeometrySteps(
       vertex++;
     }
   };
+  // Shading already has the DEM and baked relief slopes per pixel. Only the
+  // difference introduced by the new sub-source samples belongs in this
+  // vertex attribute. Sample a one-vertex halo so equal LODs agree on edges.
+  function* writeDetailSlopes(tx: number, ty: number, s: number, start: number) {
+    const across = s * tiles;
+    if (!sampler.detailPeriodMeters || across <= sampler.resolution - 1) return;
+    const surface = surfaceFor(s);
+    const stride = s + 3;
+    const residual = new Float32Array(stride * stride);
+    for (let y = -1; y <= s + 1; y++) {
+      for (let x = -1; x <= s + 1; x++) {
+        const u = clamp((tx * s + x) / across), v = clamp((ty * s + y) / across);
+        residual[(y + 1) * stride + x + 1] = (surface(u, v) - sampler.height(u, v)) * heightScale;
+      }
+      yield;
+    }
+    const spacing = worldSize / across;
+    const left = tx > 0 && tileAt(tx - 1, ty) !== s;
+    const right = tx < tiles - 1 && tileAt(tx + 1, ty) !== s;
+    const top = ty > 0 && tileAt(tx, ty - 1) !== s;
+    const bottom = ty < tiles - 1 && tileAt(tx, ty + 1) !== s;
+    for (let y = 0; y <= s; y++) {
+      for (let x = 0; x <= s; x++) {
+        // A mixed-LOD seam has a single shared edge normal (the source normal).
+        const edge = Math.min(left ? x : s, right ? s - x : s, top ? y : s, bottom ? s - y : s);
+        const gain = Math.min(1, edge * 0.5) / spacing;
+        const i = (y + 1) * stride + x + 1, k = start + y * (s + 1) + x;
+        const spanX = (tx * s + x === 0 || tx * s + x === across) ? 1 : 2;
+        const spanZ = (ty * s + y === 0 || ty * s + y === across) ? 1 : 2;
+        const gx = detailSlopes[k * 2] = (residual[i + 1] - residual[i - 1]) * gain / spanX;
+        const gz = detailSlopes[k * 2 + 1] = (residual[i + stride] - residual[i - stride]) * gain / spanZ;
+        if (gx || gz) {
+          // The meadow and fallback vertex lighting read this normal directly.
+          const ny = normals[k * 3 + 1];
+          const nx = normals[k * 3] - ny * gx, nz = normals[k * 3 + 2] - ny * gz;
+          const inv = 1 / Math.hypot(nx, ny, nz);
+          normals[k * 3] = nx * inv; normals[k * 3 + 1] = ny * inv; normals[k * 3 + 2] = nz * inv;
+        }
+      }
+      yield;
+    }
+  }
   const writeIndices = (start: number, s: number) => {
     const row = s + 1;
     for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
@@ -633,8 +689,8 @@ export function* adaptiveTerrainGeometrySteps(
       indices[triangle++] = b; indices[triangle++] = c; indices[triangle++] = d;
     }
   };
-  for (let ty = 0; ty < TERRAIN_TILES; ty++) for (let tx = 0; tx < TERRAIN_TILES; tx++) {
-    const tile = ty * TERRAIN_TILES + tx;
+  for (let ty = 0; ty < tiles; ty++) for (let tx = 0; tx < tiles; tx++) {
+    const tile = ty * tiles + tx;
     const s = plan.segments[tile];
     if (!Number.isInteger(s) || s < 2 || s > 256 || (s & (s - 1)))
       throw new Error('Adaptive terrain segments must be powers of two within bounds.');
@@ -643,33 +699,35 @@ export function* adaptiveTerrainGeometrySteps(
       writeRow(tx, ty, s, iy);
       yield;
     }
+    yield* writeDetailSlopes(tx, ty, s, offsets[tile]);
     writeIndices(offsets[tile], s);
     yield;
   }
   const perimeter: number[] = [];
   // Counter-clockwise in XZ when viewed from above; never duplicate corners.
-  for (let tx = 0; tx < TERRAIN_TILES; tx++) {
+  for (let tx = 0; tx < tiles; tx++) {
     const tile = tx, s = plan.segments[tile], offset = offsets[tile];
     for (let x = 0; x < s; x++) perimeter.push(offset + x);
   }
-  for (let ty = 0; ty < TERRAIN_TILES; ty++) {
-    const tile = ty * TERRAIN_TILES + TERRAIN_TILES - 1;
+  for (let ty = 0; ty < tiles; ty++) {
+    const tile = ty * tiles + tiles - 1;
     const s = plan.segments[tile], offset = offsets[tile];
     for (let y = 0; y < s; y++) perimeter.push(offset + y * (s + 1) + s);
   }
-  for (let tx = TERRAIN_TILES - 1; tx >= 0; tx--) {
-    const tile = (TERRAIN_TILES - 1) * TERRAIN_TILES + tx;
+  for (let tx = tiles - 1; tx >= 0; tx--) {
+    const tile = (tiles - 1) * tiles + tx;
     const s = plan.segments[tile], offset = offsets[tile];
     for (let x = s; x > 0; x--) perimeter.push(offset + s * (s + 1) + x);
   }
-  for (let ty = TERRAIN_TILES - 1; ty >= 0; ty--) {
-    const tile = ty * TERRAIN_TILES;
+  for (let ty = tiles - 1; ty >= 0; ty--) {
+    const tile = ty * tiles;
     const s = plan.segments[tile], offset = offsets[tile];
     for (let y = s; y > 0; y--) perimeter.push(offset + y * (s + 1));
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geometry.setAttribute('nhDetailSlope', new THREE.BufferAttribute(detailSlopes, 2));
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));

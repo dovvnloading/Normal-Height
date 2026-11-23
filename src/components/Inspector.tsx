@@ -386,7 +386,7 @@ export function Inspector({
                   label: 'Terrain mesh fidelity',
                   type: 'select',
                   default: 'high',
-                  description: 'Adaptive preview-only geometry. High is the default; Ultra spends more polygons on visible cliffs and gullies without increasing the full-tile polygon count indefinitely. Never changes exported heightfields.',
+                  description: 'Controls how finely the 3D mesh subdivides nearby terrain. Higher fidelity resolves smaller features in silhouettes and shadows.',
                   options: [
                     { value: 'balanced', label: 'Balanced · faster' },
                     { value: 'high', label: 'High · adaptive' },
@@ -397,6 +397,21 @@ export function Inspector({
                 onChange={v => onSettingsChange({
                   ...settings, meshQuality: v as ViewSettings['meshQuality'],
                 })}
+              />
+              <ParamControl
+                definition={{
+                  key: 'detailStrength',
+                  label: 'Sub-polygon displacement',
+                  type: 'range',
+                  default: 0.65,
+                  min: 0,
+                  max: 2,
+                  step: 0.05,
+                  unit: '×',
+                  description: 'Scales the signed relief of rock, soil, vegetation and snow on every terrain mesh. Zero shows the underlying terrain elevation.',
+                }}
+                value={surface.detailStrength}
+                onChange={v => onProjectChange({ surface: { ...surface, detailStrength: Number(v) } })}
               />
               <ParamControl
                 definition={{
@@ -431,7 +446,7 @@ export function Inspector({
             </section>
             <section className="parameter-section open">
               <h3>PBR material studio</h3>
-              <p className="parameter-hint">These settings control exported PBR textures and the live PBR preview. Changing them does not rerun terrain erosion.</p>
+              <p className="parameter-hint">Biome and layer coverage shape the relief in every 3D view. The PBR preview also shows the exported surface colors and roughness.</p>
               <ParamControl
                 definition={{
                   key: 'biome', label: 'Material biome', type: 'select',
@@ -484,8 +499,6 @@ export function Inspector({
                   description: 'Controls vegetation coverage and wet surface response.' },
                 { key: 'detailMeters', label: 'Surface detail scale', min: 4, max: 200, step: 1, unit: 'm',
                   description: 'Approximate spatial wavelength of generated microstructure.' },
-                { key: 'detailStrength', label: 'Microdetail depth', min: 0, max: 2, step: 0.05,
-                  description: 'Physical micro-normal height, without modifying terrain displacement.' },
                 { key: 'strataMeters', label: 'Rock bedding separation', min: 12, max: 500,
                   step: 2, unit: 'm',
                   description: 'Geological stratum thickness in elevation meters; bands follow actual rock heights and fade if unresolved.' },

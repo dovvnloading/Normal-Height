@@ -62,20 +62,25 @@ describe('per-pixel source normals', () => {
   it('installs into the real standard-material shader and rejects shaders missing its inputs', () => {
     const uniforms = createSourceNormalUniforms();
     const shader = {
+      vertexShader: THREE.ShaderLib.standard.vertexShader,
       fragmentShader: 'varying vec3 vNHPosition;\nuniform float nhMeadowBlend;\n' +
         THREE.ShaderLib.standard.fragmentShader,
       uniforms: {} as Record<string, { value: unknown }>,
     };
     installSourceNormals(shader, uniforms);
     expect(shader.fragmentShader).not.toContain('#include <normal_fragment_begin>');
-    expect(shader.fragmentShader).toContain('#include <normal_fragment_maps>');
+    expect(shader.fragmentShader).not.toContain('#include <normal_fragment_maps>');
+    expect(shader.vertexShader).toContain('vNHDetailSlope = nhDetailSlope;');
+    expect(shader.fragmentShader).toContain('slope + vNHDetailSlope');
     expect(shader.fragmentShader).toContain('uniform sampler2D nhSlopeMap;');
     expect(shader.uniforms.nhSlopeMap).toBe(uniforms.nhSlopeMap);
     expect(shader.uniforms.nhVerticalScale).toBe(uniforms.nhVerticalScale);
     expect(() => installSourceNormals({
+      vertexShader: THREE.ShaderLib.standard.vertexShader,
       fragmentShader: THREE.ShaderLib.standard.fragmentShader, uniforms: {},
     }, uniforms)).toThrow(/varying/);
     expect(() => installSourceNormals({
+      vertexShader: THREE.ShaderLib.standard.vertexShader,
       fragmentShader: 'varying vec3 vNHPosition; uniform float nhMeadowBlend; void main() {}',
       uniforms: {},
     }, uniforms)).toThrow(/normal_fragment_begin/);

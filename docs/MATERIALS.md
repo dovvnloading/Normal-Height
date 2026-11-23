@@ -55,7 +55,7 @@ The terrain classifier uses slope in meters per meter, aspect, signed multiscale
 
 The bake mixes reference pigments in linear light and encodes the result as sRGB. It averages squared perceptual roughness as a single-lobe GGX approximation. Combined normals follow the derivatives of terrain elevation plus relief. Detail normals express the combined surface normal in the terrain's east/north tangent frame. Eight azimuths and three physical radii (50, 150 and 425 m) estimate terrain horizons. Integration from each local tangent angle to the sampled horizon gives cosine-weighted sky visibility.
 
-A 512-pixel grid across 8 km has samples about 15.7 m apart. The bake filters features according to that spacing. Zooming in activates additional world-space shading for smaller features. The PNGs contain the detail resolved at their export spacing. Biome colors and the ecological placement model are artist-authored. Physical units describe feature spacing, relief and gradients.
+A 512-pixel grid across 8 km has samples about 15.7 m apart. The bake filters features according to that spacing. In 3D, zooming in allows the mesh to subdivide and sample the material relief at a finer spacing. PBR also adds per-pixel detail. Use **Scene → Surface & light → Sub-polygon displacement** to scale the relief in every 3D material. The PNGs contain the detail resolved at their export spacing. Biome colors and the ecological placement model are artist-authored. Physical units describe feature spacing, relief and gradients.
 
 ![Previous and rebuilt terrain materials shaded on the same three heightfields](images/material-terrain-comparison.webp)
 

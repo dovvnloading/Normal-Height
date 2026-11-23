@@ -6,10 +6,13 @@ on:
     paths:
       - 'src/components/TerrainViewport.*'
       - 'src/render/TerrainScene.ts'
+      - 'src/render/terrainMesh.ts'
+      - 'src/render/terrainDisplacement.ts'
       - 'src/render/compare.worker.ts'
       - 'src/model/viewportUX*'
       - 'src/App.tsx'
       - 'tests/e2e/viewport-ux.spec.ts'
+      - 'tests/e2e/subpoly-displacement.spec.ts'
       - '.github/workflows/viewport-ux-qa.yml'
   workflow_dispatch:
 
@@ -35,8 +38,8 @@ jobs:
       - run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
-      - name: Verify viewport UX against bundled app
-        run: npx playwright test tests/e2e/viewport-ux.spec.ts --workers=1
+      - name: Verify viewport interactions and displaced silhouettes
+        run: npx playwright test tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts --workers=1
       - name: Save screenshots, traces and browser report
         if: always()
         uses: actions/upload-artifact@v4

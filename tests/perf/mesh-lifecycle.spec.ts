@@ -34,7 +34,7 @@ for (const resolution of resolutions)
     const rect = (await canvas.boundingBox())!;
     const cx = rect.x + rect.width * 0.5, cy = rect.y + rect.height * 0.55;
     const counter = async (name: string) => Number(await canvas.getAttribute(name) ?? 0);
-    const detail = page.getByRole('spinbutton', { name: 'Microdetail depth value' });
+    const detail = page.getByRole('spinbutton', { name: 'Sub-polygon displacement value' });
 
     const sample = async (label: string) => {
       await settleMesh(canvas, page);
