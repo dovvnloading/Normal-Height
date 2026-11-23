@@ -1,0 +1,85 @@
+name: Post-merge independent displacement regression audit
+on:
+  push:
+    branches:
+      - audit/subpoly-crosscheck-20261123
+permissions:
+  contents: read
+jobs:
+  studio-and-resources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Cross-check studio, PBR editing, resources, view transitions
+        run: npx playwright test tests/e2e/studio.spec.ts tests/e2e/mesh-resource.spec.ts --retries=0 --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subpoly-crosscheck-studio
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+  one-k-materials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PBR_BROWSER_BENCH: '1'
+      PBR_VISUAL_GOLDEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Cross-check 512/1024 material edits, 1K exports and lighting
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep 'rapid material edits|1K browser export|fixed-light 3D PBR|near-field material shader' --retries=0 --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subpoly-crosscheck-pbr
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+  software-mesh-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      MESH_BENCH_SOFTWARE: '1'
+      MESH_BENCH_REQUIRE_HARDWARE: '0'
+      MESH_BENCH_HEADLESS: '1'
+      MESH_LIFE_RESOLUTIONS: '128'
+      MESH_LIFE_QUALITY: 'high'
+      MESH_LIFE_CYCLES: '3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Cross-check geometry, GPU buffer lifetime and post-edit worker churn
+        run: npx playwright test --config playwright.mesh-perf.config.ts tests/perf/mesh-lifecycle.spec.ts --retries=0 --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subpoly-crosscheck-lifecycle
+          path: |
+            playwright-report/
+            test-results/
+            mesh-benchmark-results/
+          retention-days: 7
