@@ -1,0 +1,32 @@
+name: Independent sub-polygon Metal GPU regression audit
+on:
+  push:
+    branches: [audit/subpoly-metal-check-20261123]
+permissions:
+  contents: read
+jobs:
+  metal-materials:
+    runs-on: macos-latest
+    timeout-minutes: 22
+    env:
+      PBR_BROWSER_BENCH: '1'
+      PBR_REAL_GPU: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium
+      - name: Verify actual Metal 512/1024 edits, close-range normals and mesh resources
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts tests/e2e/mesh-resource.spec.ts --grep 'rapid material edits|near-field material shader|adaptive 3D mesh stays idle' --retries=0 --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: subpoly-metal-check
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
