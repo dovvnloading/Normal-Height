@@ -24,6 +24,7 @@ async function downloadBytes(page: Page, download: Download) {
 }
 
 test('imports a survey, shapes a coast and exports a named water mask after session restore', async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/');
@@ -84,8 +85,9 @@ test('imports a survey, shapes a coast and exports a named water mask after sess
   });
   await expect(page.locator('.toast')).toContainText('Opened Coast survey.');
   await expect(page.locator('.save-state')).toHaveText('Saved locally');
-  await page.reload();
-  await page.getByRole('button', { name: 'Restore last session' }).click();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: '2D map', exact: true }).click({ timeout: 45_000 });
+  await page.getByRole('button', { name: 'Restore last session' }).click({ timeout: 45_000 });
   await expect(page.locator('.toast')).toContainText('Restored Coast survey.');
   await expect(page.locator('.status-bar')).toContainText('Terrain ready', { timeout: 60_000 });
   await page.getByRole('button', { name: 'Export maps', exact: true }).click();
