@@ -185,6 +185,10 @@ export class WaterSurface {
       toneMapped: true,
       fog: true,
       uniforms: {
+        // WebGLRenderer refreshFogUniforms mutates these during draw. Custom
+        // ShaderMaterial uniforms must explicitly include them when fog=true,
+        // otherwise the water pass throws before reaching the GPU.
+        ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
         uHeightMap: { value: null },
         uResolution: { value: 1 },
         uTileSize: { value: TERRAIN_SIZE },

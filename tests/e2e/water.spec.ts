@@ -5,6 +5,7 @@ test('cinematic water is drawn, adjustable, coastline-linked, persistent, and op
   page,
 }, testInfo) => {
   const shaderErrors: string[] = [];
+  page.on('pageerror', (error) => shaderErrors.push(error.message));
   page.on('console', (message) => {
     if (message.type() === 'error' &&
         /THREE.WebGLProgram|shader|ERROR: 0:|VALIDATE_STATUS|GL_INVALID/i.test(message.text())) {
@@ -30,14 +31,16 @@ test('cinematic water is drawn, adjustable, coastline-linked, persistent, and op
 
   // The same completed mesh must render different pixels when the water pass
   // is enabled. This also catches shader errors that do not throw JS errors.
-  const dry = await canvas.screenshot();
+  const clip = await canvas.boundingBox();
+  expect(clip).not.toBeNull();
+  const dry = await page.screenshot({ clip: clip!, timeout: 30_000 });
   const toggle = page.getByRole('button', { name: 'Toggle water rendering' });
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await expect(canvas).toHaveAttribute('data-water-status', 'ready');
   await expect(canvas).toHaveAttribute('data-water-level-meters', '504.00');
   await page.waitForTimeout(300);
-  const wet = await canvas.screenshot();
+  const wet = await page.screenshot({ clip: clip!, timeout: 30_000 });
   expect(wet.equals(dry), 'water must change actual pixels').toBe(false);
   await testInfo.attach('volcanic-island-with-water.png', {
     body: wet, contentType: 'image/png',
