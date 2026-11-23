@@ -128,6 +128,17 @@ export interface ViewSettings {
   cloudShadowStrength: number;
   expandGround: boolean;
   groundReach: number;
+  /** Optional preview-only water; never changes the graph, PBR maps or exported data. */
+  waterEnabled: boolean;
+  waterLevelMode: 'coast' | 'manual';
+  /** Manual waterline in physical meters, independent of vertical exaggeration. */
+  waterLevel: number;
+  waterPalette: 'lagoon' | 'alpine' | 'ocean' | 'dusk';
+  /** Wave amplitude in meters. */
+  waterWaveHeight: number;
+  waterSpeed: number;
+  waterClarity: number;
+  waterFoam: number;
 }
 export interface ParamDefinition {
   key: string;
