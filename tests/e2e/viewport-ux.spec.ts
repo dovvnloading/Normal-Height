@@ -508,27 +508,75 @@ test('paints an alpine outcrop with the close-range material shader active', asy
   page.on('console', m => {
     if (m.type() === 'error' && /WebGLProgram|shader|GLSL/i.test(m.text())) errors.push(m.text());
   });
+  // Keep SwiftShader's close-range fragment workload bounded on shared runners.
+  await page.setViewportSize({ width: 960, height: 660 });
   await page.goto('/');
   const terrain = page.getByRole('img', { name: /^Interactive 3D terrain/ });
   await expect(terrain).toHaveAttribute('data-material-status', 'ready', { timeout: 90_000 });
   await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
+
+  // The renderer preserves its color buffer for snapshot export. Read the
+  // actual frame directly, after the scene has had time to present the upload.
+  // This avoids compositor screenshot actionability waits on software WebGL.
+  const capture = () => terrain.evaluate(async (source: HTMLCanvasElement) => {
+    await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    const sample = document.createElement('canvas');
+    sample.width = 96;
+    sample.height = 64;
+    const ctx = sample.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(source, 0, 0, sample.width, sample.height);
+    const pixels = ctx.getImageData(0, 0, sample.width, sample.height).data;
+    const colors = new Set<number>();
+    const center: number[] = [];
+    for (let y = 0; y < sample.height; y++) {
+      for (let x = 0; x < sample.width; x++) {
+        const p = 4 * (y * sample.width + x);
+        colors.add((pixels[p] << 16) | (pixels[p + 1] << 8) | pixels[p + 2]);
+        // A terrain-centered patch inside the brush, clear of its cursor and falloff.
+        if (x >= 45 && x < 51 && y >= 30 && y < 34)
+          center.push(0.2126 * pixels[p] + 0.7152 * pixels[p + 1] + 0.0722 * pixels[p + 2]);
+      }
+    }
+    return { colors: colors.size, center, png: source.toDataURL('image/png').split(',')[1] };
+  });
+
+  const wide = await capture();
+  expect(wide.colors).toBeGreaterThan(32);
   await info.attach('Alpine watershed with rebuilt materials', {
-    body: await terrain.screenshot(), contentType: 'image/png',
+    body: Buffer.from(wide.png, 'base64'), contentType: 'image/png',
   });
   await terrain.dblclick();
   await terrain.hover();
   await page.mouse.wheel(0, -4000);
-  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 20_000 });
+  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 30_000 });
   await page.getByRole('button', { name: 'Paint terrain' }).click();
-  await page.getByRole('button', { name: 'Rock', exact: true }).click();
-  const uploads = Number(await terrain.getAttribute('data-pbr-upload-count'));
-  await terrain.click();
-  await expect.poll(async () => Number(await terrain.getAttribute('data-pbr-upload-count')), {
-    timeout: 30_000,
-  }).toBeGreaterThan(uploads);
+  await page.getByRole('slider', { name: 'Brush strength' }).focus();
+  await page.keyboard.press('End');
+  const paintCenter = async (layer: 'Snow' | 'Rock') => {
+    await page.getByRole('button', { name: layer, exact: true }).click();
+    const rect = (await terrain.boundingBox())!;
+    const uploads = Number(await terrain.getAttribute('data-pbr-upload-count'));
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.mouse.move(1, 1);
+    await expect.poll(async () => Number(await terrain.getAttribute('data-pbr-upload-count')), {
+      timeout: 30_000,
+    }).toBeGreaterThan(uploads);
+    await expect(terrain).toHaveAttribute('data-material-status', 'ready');
+  };
+  await paintCenter('Snow');
+  const snow = await capture();
+  await info.attach('Painted alpine snow at close range', {
+    body: Buffer.from(snow.png, 'base64'), contentType: 'image/png',
+  });
+  await paintCenter('Rock');
+  const rock = await capture();
   await expect(terrain).toHaveAttribute('data-near-field-detail', 'active');
   await info.attach('Painted alpine rock at close range', {
-    body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png',
+    body: Buffer.from(rock.png, 'base64'), contentType: 'image/png',
   });
+  expect(rock.colors).toBeGreaterThan(32);
+  const darker = rock.center.filter((luma, i) => snow.center[i] - luma > 8).length;
+  expect(darker / rock.center.length, 'fraction of brush center darkened by replacing snow with rock')
+    .toBeGreaterThan(0.65);
   expect(errors).toEqual([]);
 });
