@@ -79,7 +79,7 @@ it('records isolated full-bundle PBR allocation, completion and compressed bytes
     platform: process.platform,
     node: process.version,
     resolution: n,
-    mapCount: 12,
+    mapCount: 13,
     source: 'seeded, fully procedural synthetic terrain and diagnostics',
     preflightEstimateMiB: estimatePBRPeakMiB(n),
     initialProcessRssMiB: toMiB(before),

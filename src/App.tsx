@@ -34,6 +34,7 @@ import { createNode } from './model/registry';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
 import { loadViewSettings, saveViewSettings } from './model/viewSettings';
+import { canAppendMaterialStroke, type MaterialStroke } from './materials/materialPaint';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
@@ -271,6 +272,19 @@ export default function App() {
       apply({ ...projectRef.current, ...patch }, Object.keys(patch).join('-')),
     [apply],
   );
+  const paintMaterial = useCallback((strokes: MaterialStroke[]) => {
+    const current = projectRef.current;
+    const next = [...(current.materialPaint ?? [])];
+    for (const stroke of strokes) {
+      if (!canAppendMaterialStroke(next, stroke)) {
+        notify('This stroke exceeds the project paint limit. Undo a stroke or use a shorter drag.');
+        return false;
+      }
+      next.push(stroke);
+    }
+    apply({ ...current, materialPaint: next });
+    return true;
+  }, [apply, notify]);
   const updateNode = useCallback(
     (patch: Partial<NonNullable<typeof selected>>, group = '') => {
       if (!selectedId) return;
@@ -736,6 +750,7 @@ export default function App() {
               spline={selectedSpline}
               splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
               onSplinePath={changeSplinePath}
+              onPaint={paintMaterial}
               theme={theme}
               field={engine.result?.field ?? null}
               project={displayedProject}

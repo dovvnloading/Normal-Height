@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import type { TerrainProject } from '../../src/model/types';
+import { resolveSurface } from '../../src/materials/pbr';
 
 test.describe('terrain viewport UX', () => {
   test.beforeEach(async ({ page }) => {
@@ -386,4 +388,87 @@ test('2D comparison remains available when the browser cannot create WebGL', asy
   await expect(page.locator('.nh-render-error')).toHaveCount(0);
   await page.getByRole('button', { name: 'Elevation change' }).click();
   await expect(page.locator('.nh-difference-legend')).toBeVisible({ timeout: 30_000 });
+});
+
+test('paints the displayed terrain, commits one undo step, and erases back to the procedural map', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error' && /shader|webgl/i.test(message.text())) errors.push(message.text());
+  });
+  const project: TerrainProject = {
+    name: 'Brush test', version: 1, presetId: 'custom', resolution: 128,
+    seed: 284, surface: resolveSurface({ biome: 'arid' }), worldSize: 5000, heightScale: 750, graph: {
+      nodes: [
+        { id: 'rock', kind: 'mountain', label: 'Massif', position: { x: 0, y: 0 },
+          params: { profile: 'massif' } },
+        { id: 'out', kind: 'output', label: 'Output', position: { x: 240, y: 0 }, params: {} },
+      ],
+      edges: [{ id: 'terrain', source: 'rock', target: 'out', sourceHandle: 'height', targetHandle: 'in' }],
+    },
+  };
+  await page.goto('/');
+  await page.getByLabel('Import terrain project file').setInputFiles({
+    name: 'brush.nhterrain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)),
+  });
+  const scene = page.locator('.nh-three-host canvas');
+  const strokes = () => page.evaluate(() =>
+    (JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject).materialPaint ?? []);
+  await expect(page.locator('.nh-viewport')).toHaveAttribute('data-displayed-world-size', '5000');
+  await page.getByRole('button', { name: 'Paint terrain' }).click();
+  await page.getByRole('button', { name: 'Snow', exact: true }).click();
+  await page.getByRole('slider', { name: 'Brush strength' }).focus();
+  await page.keyboard.press('End');
+  await expect(scene).toHaveAttribute('data-material-status', 'ready');
+  const beforeUpload = Number(await scene.getAttribute('data-pbr-upload-count'));
+  const rect = (await scene.boundingBox())!;
+  const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 36, y + 6, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await strokes()).length).toBe(1);
+  const [stroke] = await strokes();
+  expect(stroke.layer).toBe('snow');
+  expect(stroke.points.length).toBeGreaterThan(1);
+  expect(stroke.strength).toBe(1);
+  await expect(scene).toHaveAttribute('data-material-status', 'ready');
+  await expect.poll(async () => Number(await scene.getAttribute('data-pbr-upload-count'))).toBeGreaterThan(beforeUpload);
+  await testInfo.attach('Painted terrain', {
+    body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png',
+  });
+
+  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await page.getByLabel('Map channel').selectOption('snowWeight');
+  const map = page.locator('.nh-map > canvas');
+  const maskRect = (await page.locator('.nh-map-brush-preview').boundingBox())!;
+  const point = stroke.points[0];
+  const mx = maskRect.x + point.u * maskRect.width, my = maskRect.y + point.v * maskRect.height;
+  const pixel = () => map.evaluate((element: HTMLCanvasElement, p) => {
+    const b = element.getBoundingClientRect();
+    return element.getContext('2d')!.getImageData(
+      (p.x - b.x) * element.width / b.width, (p.y - b.y) * element.height / b.height, 1, 1,
+    ).data[0];
+  }, { x: mx, y: my });
+  await expect.poll(pixel).toBe(255);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(async () => (await strokes()).length).toBe(0);
+  await expect.poll(pixel).toBeLessThan(255);
+  const base = await pixel();
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect.poll(pixel).toBe(255);
+  await page.getByRole('button', { name: 'Erase', exact: true }).click();
+  await page.mouse.click(mx, my);
+  await expect.poll(async () => (await strokes()).length).toBe(2);
+  await expect.poll(pixel).toBe(base);
+  // Escape abandons an in-flight stroke, leaving the undo stack unchanged.
+  await page.getByRole('button', { name: 'Soil', exact: true }).click();
+  await page.mouse.move(mx, my);
+  await page.mouse.down();
+  await page.mouse.move(mx + 28, my + 6, { steps: 4 });
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(pixel).toBe(255);
+  expect(errors).toEqual([]);
 });

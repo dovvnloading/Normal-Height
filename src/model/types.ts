@@ -1,3 +1,4 @@
+import type { MaterialStroke } from '../materials/materialPaint';
 import type { SplinePoint } from './splines';
 import type { SurfaceSettings } from '../materials/pbr';
 import type { SedimentBudget } from '../engine/erosion';
@@ -51,6 +52,7 @@ export interface TerrainProject {
   presetId: string;
   /** Optional, backward-compatible PBR material configuration. */
   surface?: SurfaceSettings;
+  materialPaint?: MaterialStroke[];
   graph: TerrainGraph;
 }
 export interface HeightField {

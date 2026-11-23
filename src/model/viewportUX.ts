@@ -1,7 +1,7 @@
 import type { HeightField, TerrainProject } from './types';
 
 export type TerrainPoint = { u: number; v: number };
-export type ViewportTool = 'navigate' | 'inspect' | 'measure' | 'profile';
+export type ViewportTool = 'navigate' | 'inspect' | 'measure' | 'profile' | 'paint';
 export type MapFraming = { zoom: number; offset: { x: number; y: number } };
 export type TerrainSample = {
   point: TerrainPoint;

@@ -28,6 +28,22 @@ export function packedPreview(maps: PBRMaps): PackedPreview | null {
   return previews.get(maps) ?? null;
 }
 
+// Immutable stroke lists are shared by undo/redo snapshots. Use identity to
+// avoid serializing thousands of coordinates on each camera or project update.
+const paintIds = new WeakMap<NonNullable<TerrainProject['materialPaint']>, number>();
+let nextPaintId = 0;
+export function pbrVariantKey(project: TerrainProject): string {
+  const history = project.materialPaint;
+  let paintId = 0;
+  if (history?.length) {
+    paintId = paintIds.get(history) ?? ++nextPaintId;
+    paintIds.set(history, paintId);
+  }
+  return JSON.stringify([
+    project.seed, project.worldSize, project.heightScale, resolveSurface(project.surface), paintId,
+  ]);
+}
+
 export function requestPBR(field: HeightField, project: TerrainProject): {
   promise: Promise<PBRMaps>;
   release: () => void;
@@ -37,9 +53,7 @@ export function requestPBR(field: HeightField, project: TerrainProject): {
     variants = new Map();
     cache.set(field, variants);
   }
-  const key = JSON.stringify([
-    project.seed, project.worldSize, project.heightScale, resolveSurface(project.surface),
-  ]);
+  const key = pbrVariantKey(project);
   let job = variants.get(key);
   if (!job) {
     let accept!: (maps: PBRMaps) => void;

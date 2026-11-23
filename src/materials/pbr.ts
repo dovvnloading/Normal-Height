@@ -2,9 +2,13 @@ import { synthesizeMaterials } from './layerSynthesis';
 export { AO_RADII_METERS } from './terrainAnalysis';
 import type { HeightField, TerrainProject } from '../model/types';
 
+import type { MaterialLayer } from './materialPaint';
+
 export type SurfaceBiome = 'alpine' | 'arid' | 'volcanic';
 export interface SurfaceSettings {
   biome: SurfaceBiome;
+  /** Artist-authored sRGB reference colors for the individual substrates. */
+  layerColors?: Partial<Record<MaterialLayer, string>>;
   snowLine: number;
   rockSlope: number;
   moisture: number;
@@ -82,7 +86,7 @@ const PALETTES: Record<SurfaceBiome, readonly (readonly number[])[]> = {
     [154, 119, 86],
     [191, 151, 102],
     [110, 111, 70],
-    [231, 210, 161],
+    [228, 232, 235],
   ],
   volcanic: [
     [68, 67, 68],
@@ -101,6 +105,11 @@ export function linearToSrgbByte(value: number): number {
   const c = clamp(value);
   return Math.round(255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055));
 }
+export function layerColorHex(settings: SurfaceSettings, layer: MaterialLayer): string {
+  return settings.layerColors?.[layer] ?? '#' + PALETTES[settings.biome][SPLAT_LAYERS.indexOf(layer)]
+    .map(value => value.toString(16).padStart(2, '0')).join('');
+}
+
 const LINEAR_PALETTES: Record<SurfaceBiome, number[][]> = {
   alpine: PALETTES.alpine.map((layer) => layer.map(srgbByteToLinear)),
   arid: PALETTES.arid.map((layer) => layer.map(srgbByteToLinear)),
@@ -113,9 +122,11 @@ const LINEAR_PALETTES: Record<SurfaceBiome, number[][]> = {
  */
 export function generatePBR(field: HeightField, project: TerrainProject): PBRMaps {
   const params = resolveSurface(project.surface);
-  return synthesizeMaterials(
-    field, project, params, LINEAR_PALETTES[params.biome], linearToSrgbByte,
-  );
+  const palette = params.layerColors ? SPLAT_LAYERS.map(layer => {
+    const color = layerColorHex(params, layer);
+    return [1, 3, 5].map(offset => srgbByteToLinear(parseInt(color.slice(offset, offset + 2), 16)));
+  }) : LINEAR_PALETTES[params.biome];
+  return synthesizeMaterials(field, project, params, palette, linearToSrgbByte);
 }
 
 function grayscale(values: Uint8Array): Uint8ClampedArray {
@@ -143,18 +154,29 @@ export function materialNormalPixels(
     for (let x = 0; x < n; x++) {
       const l = Math.max(0, x - 1), r = Math.min(n - 1, x + 1);
       const t = Math.max(0, y - 1), b = Math.min(n - 1, y + 1);
-      const dx = (maps.detail[y * n + r] - maps.detail[y * n + l] +
-        (detailOnly ? 0 : (field.height[y * n + r] - field.height[y * n + l]) * project.heightScale)) /
-        ((r - l || 1) * cell);
-      const dy = (maps.detail[b * n + x] - maps.detail[t * n + x] +
-        (detailOnly ? 0 : (field.height[b * n + x] - field.height[t * n + x]) * project.heightScale)) /
-        ((b - t || 1) * cell);
-      const length = Math.hypot(dx, dy, 1);
+      const xSpan = (r - l || 1) * cell, ySpan = (b - t || 1) * cell;
+      const gx = (field.height[y * n + r] - field.height[y * n + l]) * project.heightScale / xSpan;
+      const gy = (field.height[b * n + x] - field.height[t * n + x]) * project.heightScale / ySpan;
+      const dx = (maps.detail[y * n + r] - maps.detail[y * n + l]) / xSpan;
+      const dy = (maps.detail[b * n + x] - maps.detail[t * n + x]) / ySpan;
+      // Full normal in east/north/up coordinates. For the micro map, express
+      // the same normal relative to the displaced mesh's orthonormal TBN.
+      // Simply differentiating microheight on a horizontal plane exaggerates
+      // relief on a cliff and shears the north gradient on oblique slopes.
+      let nx = -gx - dx, ny = gy + dy, nz = 1;
+      if (detailOnly) {
+        const eastLength = Math.sqrt(1 + gx * gx);
+        const normalLength = Math.sqrt(1 + gx * gx + gy * gy);
+        nx = -dx / eastLength;
+        ny = ((1 + gx * gx) * dy - gx * gy * dx) / (eastLength * normalLength);
+        nz = normalLength + (gx * dx + gy * dy) / normalLength;
+      }
+      const length = Math.hypot(nx, ny, nz);
       const p = (y * n + x) * 4;
-      pixels[p] = Math.round((-dx / length * 0.5 + 0.5) * 255);
-      const green = Math.round((dy / length * 0.5 + 0.5) * 255);
+      pixels[p] = Math.round((nx / length * 0.5 + 0.5) * 255);
+      const green = Math.round((ny / length * 0.5 + 0.5) * 255);
       pixels[p + 1] = directX ? 255 - green : green;
-      pixels[p + 2] = Math.round((1 / length * 0.5 + 0.5) * 255);
+      pixels[p + 2] = Math.round((nz / length * 0.5 + 0.5) * 255);
       pixels[p + 3] = 255;
     }
   }
