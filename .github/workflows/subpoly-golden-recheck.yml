@@ -1,0 +1,31 @@
+name: Independently recheck displaced PBR fixed-light reference
+on:
+  push:
+    branches: [audit/subpoly-fixed-light-recheck-20261123]
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    env:
+      PBR_VISUAL_GOLDEN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Compare fixed-light framebuffer against committed 3D PBR reference
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep 'fixed-light 3D PBR' --workers=1 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: displacement-fixed-light-evidence
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
