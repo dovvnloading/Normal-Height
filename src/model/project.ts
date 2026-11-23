@@ -1,3 +1,4 @@
+import { MAX_PROJECT_RASTER_BYTES, parseHeightRaster, rasterBytes } from './heightRaster';
 import { parseMaterialPaint } from '../materials/materialPaint';
 import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
 import { resolveSurface, SPLAT_LAYERS, SURFACE_LIMITS } from '../materials/pbr';
@@ -22,6 +23,7 @@ export function parseProject(raw: unknown): TerrainProject {
     g.edges.length > 512
   )
     throw new Error('The project graph is missing or exceeds the 128-node limit.');
+  let remainingRasterBytes = MAX_PROJECT_RASTER_BYTES;
   const ids = new Set<string>();
   const nodes: TerrainNode[] = g.nodes.map((rawNode) => {
     if (!rawNode || typeof rawNode !== 'object') throw new Error('A node is not valid.');
@@ -57,6 +59,10 @@ export function parseProject(raw: unknown): TerrainProject {
         if (!def.options?.some((o) => o.value === value)) throw new Error(`Unknown ${def.label}.`);
         clean.params[def.key] = value as ParamValue;
       } else if (typeof value === 'string') clean.params[def.key] = value.slice(0, 4000);
+    }
+    if (kind === 'heightImport' && n.raster !== undefined) {
+      clean.raster = parseHeightRaster(n.raster, remainingRasterBytes);
+      remainingRasterBytes -= rasterBytes(clean.raster);
     }
     if (kind === 'spline') {
       if (

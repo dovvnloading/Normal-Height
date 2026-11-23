@@ -1,3 +1,5 @@
+import { HeightImportControl } from './HeightImportControl';
+import type { HeightRaster } from '../model/heightRaster';
 import { useState } from 'react';
 import {
   SlidersHorizontal,
@@ -21,6 +23,7 @@ import { TerrainIcon } from './TerrainIcon';
 import type { TerrainNode, TerrainProject, ParamValue, ViewSettings } from '../model/types';
 
 interface Props {
+  onImportRaster: (raster: HeightRaster) => void;
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
   onSplineEdit: () => void;
@@ -39,6 +42,7 @@ interface Props {
   onClose?: () => void;
 }
 export function Inspector({
+  onImportRaster,
   splineEditing,
   onSplinePath,
   onSplineEdit,
@@ -93,6 +97,7 @@ export function Inspector({
               {node.kind !== 'note' &&
                 node.kind !== 'group' &&
                 node.kind !== 'output' &&
+                node.kind !== 'maskOutput' &&
                 definition.inputs.length > 0 && (
                   <label className="toggle-row node-enabled">
                     <span>Node enabled</span>
@@ -105,6 +110,9 @@ export function Inspector({
                     <span className="switch" aria-hidden="true" />
                   </label>
                 )}
+              {node.kind === 'heightImport' && (
+                <HeightImportControl key={node.id} raster={node.raster} onImport={onImportRaster} />
+              )}
               {sections.map((section) => (
                 <details
                   className="parameter-section"

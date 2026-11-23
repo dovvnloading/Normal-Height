@@ -1,3 +1,4 @@
+import { lowerParabolicEnvelope } from './distanceTransform';
 import { Noise } from './noise';
 import { accumulateDrainage, createDrainageWorkspace, routeDrainage } from './hydrology';
 import type { DrainageWorkspace } from './hydrology';
@@ -850,44 +851,18 @@ export function roundHilltops(z: Float64Array, n: number, curvature: number): vo
       line[pad + n - 1 + k] = 2 * values[n - 1] - values[Math.max(n - 1 - k, 0)];
     }
   };
-  // Lower envelope: out[p] = min_q line[q] + c·(p − q)².
-  const envelope = (c: number) => {
-    let k = 0;
-    sites[0] = 0;
-    bounds[0] = -Infinity;
-    bounds[1] = Infinity;
-    for (let q = 1; q < total; q++) {
-      let r = sites[k];
-      let cross = (line[q] + c * q * q - (line[r] + c * r * r)) / (2 * c * (q - r));
-      while (cross <= bounds[k]) {
-        k--;
-        r = sites[k];
-        cross = (line[q] + c * q * q - (line[r] + c * r * r)) / (2 * c * (q - r));
-      }
-      k++;
-      sites[k] = q;
-      bounds[k] = cross;
-      bounds[k + 1] = Infinity;
-    }
-    k = 0;
-    for (let p = 0; p < total; p++) {
-      while (bounds[k + 1] < p) k++;
-      const q = sites[k];
-      out[p] = line[q] + c * (p - q) * (p - q);
-    }
-  };
   // Separable 2D lower envelope of field·sign (in place on work).
   const lower = (work: Float64Array) => {
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) values[x] = work[y * n + x];
       extend();
-      envelope(curvature);
+      lowerParabolicEnvelope(line, out, sites, bounds, curvature);
       for (let x = 0; x < n; x++) work[y * n + x] = out[pad + x];
     }
     for (let x = 0; x < n; x++) {
       for (let y = 0; y < n; y++) values[y] = work[y * n + x];
       extend();
-      envelope(curvature);
+      lowerParabolicEnvelope(line, out, sites, bounds, curvature);
       for (let y = 0; y < n; y++) work[y * n + x] = out[pad + y];
     }
   };

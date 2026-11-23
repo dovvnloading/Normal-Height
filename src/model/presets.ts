@@ -1,6 +1,6 @@
 import { createNode } from './registry';
 import { resolveSurface } from '../materials/pbr';
-import type { TerrainProject, TerrainNode, NodeKind, ParamValue } from './types';
+import type { TerrainProject, TerrainNode, TerrainEdge, NodeKind, ParamValue } from './types';
 
 export interface Preset {
   id: string;
@@ -12,6 +12,8 @@ export interface Preset {
   /** Physical tile width in meters (default 8 km). */
   worldSize?: number;
   build: () => TerrainNode[];
+  /** Explicit wiring for branched presets. Linear presets follow node order. */
+  connections?: [source: string, target: string, sourceHandle?: string][];
 }
 function node(
   id: string,
@@ -56,6 +58,25 @@ export const PRESETS: Preset[] = [
       node('erosion', 'hydraulic', 540, { hillslope: 0.03, cycles: 24, bedrockPreserve: true }, 'Carve the watershed'),
       node('thermal', 'thermal', 810, { iterations: 3, talus: 0.03, strength: 0.18 }, 'Settle the scree'),
       node('output', 'output', 1080, {}, 'Terrain output'),
+    ],
+  },
+  {
+    id: 'volcanic-island',
+    name: 'Volcanic island',
+    eyebrow: 'COAST / PLACEMENT MASKS',
+    description: 'A volcanic island with a graded beach and submerged shelf. Export its shore band and open water as separate placement masks.',
+    seed: 93217,
+    color: '#658c88',
+    worldSize: 4800,
+    build: () => [
+      node('island', 'mountain', 0, { profile: 'volcano', width: 0.86, relief: 0.95, warp: 0.7 }, 'Volcanic island'),
+      node('coast', 'coast', 240, { seaLevel: 0.21, beachWidth: 120, shelfWidth: 280 }, 'Grade the coast'),
+      node('out', 'output', 500),
+      { ...node('beach', 'maskOutput', 500, {}, 'Shore band'), position: { x: 500, y: 280 } },
+      { ...node('ocean', 'maskOutput', 500, {}, 'Open water'), position: { x: 500, y: 460 } },
+    ],
+    connections: [
+      ['island', 'coast'], ['coast', 'out'], ['coast', 'beach', 'shore'], ['coast', 'ocean', 'water'],
     ],
   },
   {
@@ -263,6 +284,11 @@ export const PRESETS: Preset[] = [
 export function createProject(presetId = 'alpine'): TerrainProject {
   const preset = PRESETS.find((p) => p.id === presetId) ?? PRESETS[0];
   const nodes = preset.build();
+  const connections: NonNullable<Preset['connections']> = preset.connections ??
+    nodes.slice(1).map((n, i) => [nodes[i].id, n.id]);
+  const edges: TerrainEdge[] = connections.map(([source, target, sourceHandle = 'height']) => ({
+    id: `${source}-${target}`, source, target, sourceHandle, targetHandle: 'in',
+  }));
   return {
     version: 1,
     name: preset.name,
@@ -275,18 +301,9 @@ export function createProject(presetId = 'alpine'): TerrainProject {
     // Imported projects retain their separately saved surface configuration.
     surface: preset.id === 'badlands'
       ? { ...resolveSurface(), biome: 'arid', moisture: 0.16, snowLine: 1 }
-      : preset.id === 'volcano'
+      : (preset.id === 'volcano' || preset.id === 'volcanic-island')
         ? { ...resolveSurface(), biome: 'volcanic', moisture: 0.24, snowLine: 0.92 }
         : resolveSurface(),
-    graph: {
-      nodes,
-      edges: nodes.slice(1).map((n, i) => ({
-        id: `${nodes[i].id}-${n.id}`,
-        source: nodes[i].id,
-        target: n.id,
-        sourceHandle: 'height',
-        targetHandle: 'in',
-      })),
-    },
+    graph: { nodes, edges },
   };
 }

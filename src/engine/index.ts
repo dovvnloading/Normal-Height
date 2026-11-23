@@ -13,6 +13,10 @@ import type { SedimentBudget } from './erosion';
 import { generateOrogenicRelief } from './orogeny';
 import { evolveFluvialLandscape, FLUVIAL_DEFAULTS, FLUVIAL_MAX_RESOLUTION } from './fluvial';
 import type { FluvialOptions } from './fluvial';
+import { rasterBytes } from '../model/heightRaster';
+import { NODE_DEFINITIONS } from '../model/registry';
+import { COAST_DEFAULTS, shapeCoast } from './coast';
+import { sampleImportedHeight } from './heightImport';
 import { sculptSpline } from './spline';
 import { validSplinePoint, MAX_SPLINE_POINTS } from '../model/splines';
 
@@ -25,21 +29,6 @@ interface WorkingField extends HeightField {
   exportedSediment: number;
   sedimentBudget?: SedimentBudget;
 }
-const kinds = new Set([
-  'mountain',
-  'noise',
-  'warp',
-  'spline',
-  'hydraulic',
-  'thermal',
-  'terrace',
-  'remap',
-  'blend',
-  'mask',
-  'output',
-  'note',
-  'group',
-]);
 const metadata = (node: TerrainNode) => node.kind === 'note' || node.kind === 'group';
 const number = (
   node: TerrainNode,
@@ -65,7 +54,7 @@ export function validateGraph(graph: TerrainGraph): string | null {
   const nodes = new Map<string, TerrainNode>();
   for (const node of graph.nodes) {
     if (!node.id || nodes.has(node.id)) return 'Each node must have a unique identifier.';
-    if (!kinds.has(node.kind)) return `Unknown node type: ${String(node.kind)}.`;
+    if (!Object.hasOwn(NODE_DEFINITIONS, node.kind)) return `Unknown node type: ${String(node.kind)}.`;
     if (!node.params || typeof node.params !== 'object')
       return `“${node.label || node.id}” has invalid parameters.`;
     if (node.kind === 'spline' &&
@@ -86,17 +75,11 @@ export function validateGraph(graph: TerrainGraph): string | null {
     if (metadata(source) || metadata(target)) return 'Notes and groups cannot carry terrain data.';
     if (source.id === target.id) return 'A node cannot connect to itself.';
     const handle = inputHandle(edge, target);
-    const inputs =
-      target.kind === 'blend'
-        ? ['a', 'b', 'mask']
-        : target.kind === 'hydraulic'
-          ? ['in', 'mask']
-          : ['mountain', 'noise'].includes(target.kind)
-            ? []
-            : ['in'];
-    if (!inputs.includes(handle)) return `“${target.label}” does not have a “${handle}” input.`;
-    if (!['height', 'flow', 'wear', 'deposition'].includes(edge.sourceHandle || 'height'))
-      return 'A connection uses an unknown output channel.';
+    if (!NODE_DEFINITIONS[target.kind].inputs.some((port) => port.id === handle))
+      return `“${target.label}” does not have a “${handle}” input.`;
+    const sourceHandle = edge.sourceHandle || 'height';
+    if (!NODE_DEFINITIONS[source.kind].outputs.some((port) => port.id === sourceHandle))
+      return `“${source.label}” does not have a “${sourceHandle}” output.`;
     const port = `${target.id}:${handle}`;
     if (ports.has(port))
       return `“${target.label}” already has a connection on its “${handle}” input.`;
@@ -151,15 +134,21 @@ export function estimatedWorkingBytes(
   // scratch and both old/new UI result buffers. A fixed reserve covers the
   // display mesh, encoding bookkeeping and small JS allocations.
   let buffers = 12;
+  let importScratchBytes = 0;
   for (const node of graph.nodes) {
     if (!needed.has(node.id) || metadata(node) || node.kind === 'output') continue;
     // A source has no input to forward; marking it bypassed still generates it.
-    if (node.bypassed && node.kind !== 'mountain' && node.kind !== 'noise') continue;
-    buffers += ['hydraulic', 'warp', 'blend', 'spline'].includes(node.kind) ? 4 : 1;
+    if (node.bypassed && NODE_DEFINITIONS[node.kind].inputs.length && node.kind !== 'maskOutput') continue;
+    if (node.kind === 'heightImport' && node.raster) {
+      // Embedded source + decoded bytes are independent of the requested output grid.
+      importScratchBytes = Math.max(importScratchBytes, 3 * rasterBytes(node.raster));
+    }
+    if (node.kind === 'coast') buffers += 3; // Height, shore and water also serve as scratch.
+    else buffers += ['hydraulic', 'warp', 'blend', 'spline'].includes(node.kind) ? 4 : 1;
   }
   for (const edge of graph.edges)
-    if (needed.has(edge.target) && edge.sourceHandle && edge.sourceHandle !== 'height') buffers++;
-  const reserve = 64 * 1024 * 1024;
+    if (needed.has(edge.target) && ['flow', 'wear', 'deposition'].includes(edge.sourceHandle ?? '')) buffers++;
+  const reserve = 64 * 1024 * 1024 + importScratchBytes;
   const cell = resolution * resolution * Float32Array.BYTES_PER_ELEMENT;
   const settled = reserve + buffers * cell;
   // Fluvial uplands hold a transient Float64/routing working set (~144 B
@@ -381,6 +370,9 @@ export function evaluateGraph(
     );
   }
   const fields = new Map<string, WorkingField>();
+  // These unit-range ports belong to their producing node, independently of
+  // the erosion diagnostics carried along the terrain pipeline.
+  const coastMasks = new Map<string, { shore: Float32Array; water: Float32Array }>();
   const thumbnails: Record<string, Float32Array> = {},
     nodeTimings: Record<string, number> = {};
   const empty = new Float32Array(length);
@@ -402,7 +394,9 @@ export function evaluateGraph(
     for (const edge of incoming.get(node.id) || []) {
       let field = calculate(byId.get(edge.source)!);
       const handle = edge.sourceHandle || 'height';
-      if (handle !== 'height')
+      if (handle === 'shore' || handle === 'water')
+        field = baseField(coastMasks.get(edge.source)?.[handle] ?? empty);
+      else if (handle !== 'height')
         field = {
           ...field,
           height: normalizeDiagnostic(
@@ -423,11 +417,13 @@ export function evaluateGraph(
       0;
     const noise = new Noise(seed);
     let field: WorkingField;
-    if (node.bypassed && input) field = input;
+    if (node.bypassed && input && node.kind !== 'maskOutput') field = input;
     else if (node.kind === 'mountain')
       field = baseField(createMountains(node, n, noise, seed, {
         worldSize: project.worldSize, heightScale: project.heightScale,
       }));
+    else if (node.kind === 'heightImport')
+      field = baseField(sampleImportedHeight(node, n, project.heightScale));
     else if (node.kind === 'noise') field = baseField(createNoise(node, n, noise));
     else {
       if (!input) throw new Error(`Connect a height input to “${node.label}”.`);
@@ -435,6 +431,27 @@ export function evaluateGraph(
       switch (node.kind) {
         case 'output':
           break;
+        case 'maskOutput':
+          field = baseField(input.height.some((v) => v < 0 || v > 1)
+            ? input.height.map((value) => clamp(value))
+            : input.height);
+          break;
+        case 'coast': {
+          const { height, shore, water } = shapeCoast(input.height, n, {
+            worldSize: project.worldSize,
+            heightScale: project.heightScale,
+            seaLevel: number(node, 'seaLevel', COAST_DEFAULTS.seaLevel, -1, 2),
+            beachWidth: number(node, 'beachWidth', COAST_DEFAULTS.beachWidth, 0, 3000),
+            shelfWidth: number(node, 'shelfWidth', COAST_DEFAULTS.shelfWidth, 0, 5000),
+            beachSlope: number(node, 'beachSlope', COAST_DEFAULTS.beachSlope, 0.1, 35),
+            shelfSlope: number(node, 'shelfSlope', COAST_DEFAULTS.shelfSlope, 0.1, 25),
+            strength: number(node, 'strength', COAST_DEFAULTS.strength, 0, 1),
+            includeLakes: node.params.includeLakes === true,
+          });
+          field.height = height;
+          coastMasks.set(node.id, { shore, water });
+          break;
+        }
         case 'spline':
           field.height = sculptSpline(input.height, n, node.path, {
             mode: text(node, 'mode', 'river') === 'ridge' ? 'ridge' : 'river',

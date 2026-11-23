@@ -64,6 +64,7 @@ import './TerrainViewport.css';
 type Baseline = { field: HeightField; project: TerrainProject; label: string };
 
 interface TerrainViewportProps {
+  maskPreview: boolean;
   spline: TerrainNode | null;
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
@@ -184,6 +185,7 @@ function rememberRaster(field: HeightField, key: string, raster: HTMLCanvasEleme
 }
 
 function MapCanvas({
+  maskWeights,
   field,
   channel,
   project,
@@ -206,6 +208,7 @@ function MapCanvas({
   cameraFocus,
   cameraBearing,
 }: {
+  maskWeights: boolean;
   field: HeightField | null;
   channel: MapChannel;
   project: TerrainProject;
@@ -250,9 +253,10 @@ function MapCanvas({
   const [sample, setSample] = useState<{
     x: number;
     y: number;
-    elevation: number;
+    height: number;
     value: string;
   } | null>(null);
+  useEffect(() => setSample(null), [field, channel]);
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
   const clickStart = useRef<{ x: number; y: number } | null>(null);
@@ -611,14 +615,14 @@ function MapCanvas({
       value = `${CHANNELS.find(c => c.value === channel)?.label}: ${(
         materialMapsRef.current.splat[index * 4 + weightChannel] / 255 * 100
       ).toFixed(1)}%`;
-    setSample({ x, y, elevation: field.height[index] * project.heightScale, value });
+    setSample({ x, y, height: field.height[index], value });
   }
 
   return (
     <div className="nh-map" ref={hostRef}>
       <canvas
         ref={canvasRef}
-        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. ${tool === 'navigate'
+        aria-label={`${maskWeights ? 'Mask weight' : CHANNELS.find((c) => c.value === channel)?.label} map. ${tool === 'navigate'
           ? 'Drag to pan' : tool === 'paint' ? 'Drag to paint, arrows to move, Enter to dab' : 'Click to sample, right or middle drag to pan'}, scroll to zoom.
           Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
         role="img"
@@ -929,7 +933,7 @@ function MapCanvas({
             <span>
               {sample.x}, {sample.y}
             </span>
-            <b>{sample.elevation.toFixed(1)} m</b>
+            <b>{maskWeights ? `${(sample.height * 100).toFixed(1)}% weight` : `${(sample.height * project.heightScale).toFixed(1)} m`}</b>
             {sample.value && <span>{sample.value}</span>}
           </>
         ) : (
@@ -942,16 +946,19 @@ function MapCanvas({
 }
 
 function MapLegend({
+  maskWeights,
   field,
   channel,
   project,
 }: {
+  maskWeights: boolean;
   field: HeightField | null;
   channel: MapChannel;
   project: TerrainProject;
 }) {
   const legend = useMemo(() => {
     if (!field) return null;
+    if (maskWeights) return { label: 'Mask weight', start: '0%', end: '100%', empty: false };
     if (channel === 'relief')
       return { label: 'Signed material relief · gray at zero', start: 'Recessed', end: 'Raised', empty: false };
     if (channel === 'normal' || channel === 'materialNormal' || channel === 'detailNormal')
@@ -1011,7 +1018,7 @@ function MapLegend({
       end: max.toPrecision(3),
       empty: max === 0,
     };
-  }, [field, channel, project.heightScale]);
+  }, [field, channel, project.heightScale, maskWeights]);
   if (!legend) return null;
   return (
     <div className={`nh-map-legend nh-map-legend-${channel}`}>
@@ -1030,6 +1037,7 @@ function MapLegend({
 }
 
 export function TerrainViewport({
+  maskPreview,
   spline,
   splineEditing,
   onSplinePath,
@@ -1124,6 +1132,7 @@ export function TerrainViewport({
   settingsRef.current = settings;
   // A WebGL failure disables only modes that require 3D. Compare is an
   // entirely 2D analysis mode and must remain usable on software-only devices.
+  const weightMap = maskPreview && channel === 'height';
   const effectiveMode = sceneError && (viewMode === '3d' || viewMode === 'split')
     ? '2d' : viewMode;
   useEffect(() => {
@@ -1390,7 +1399,7 @@ export function TerrainViewport({
           ))}
         </div>
         <div className="nh-viewport-toolbar-right">
-          {effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+          {!weightMap && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
             <button type="button" className={`nh-viewport-tool ${showLayers ? 'active' : ''}`}
               title="Map overlays" aria-label="Map overlays" aria-expanded={showLayers}
               onClick={() => setShowLayers(v => !v)}>
@@ -1415,7 +1424,7 @@ export function TerrainViewport({
                 {CHANNEL_GROUPS.map(group => (
                   <optgroup key={group.label} label={group.label}>
                     {CHANNELS.filter(c => (group.values as readonly string[]).includes(c.value))
-                      .map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      .map(c => <option key={c.value} value={c.value}>{maskPreview && c.value === 'height' ? 'Mask weight' : c.label}</option>)}
                   </optgroup>
                 ))}
               </select>
@@ -1607,7 +1616,7 @@ export function TerrainViewport({
         )}
         {effectiveMode !== '3d' && (
           <div className="nh-map-pane">
-            <MapCanvas field={field} channel={effectiveMode === 'compare' ? 'terrain' : channel}
+            <MapCanvas maskWeights={weightMap && effectiveMode !== 'compare'} field={field} channel={effectiveMode === 'compare' ? 'terrain' : channel}
               project={project} spline={spline} splineEditing={splineEditing}
               onSplinePath={onSplinePath} brushFeedback={activeBrush} brushSettings={brushSettings} onPaint={onPaint}
               initialFraming={mapFraming.current}
@@ -1617,14 +1626,14 @@ export function TerrainViewport({
               baseline={effectiveMode === 'compare' && baseline?.project.worldSize === project.worldSize
                 ? baseline : null}
               compareKind={compareKind} wipe={wipe}
-              overlayChannel={effectiveMode === 'compare' ? null : overlayChannel}
+              overlayChannel={weightMap || effectiveMode === 'compare' ? null : overlayChannel}
               overlayOpacity={overlayOpacity}
               cameraFocus={effectiveMode === 'split' ? cameraFocus : null}
               cameraBearing={cameraHeading} />
-            {effectiveMode !== 'compare' && <MapLegend field={field} channel={channel} project={project} />}
+            {effectiveMode !== 'compare' && <MapLegend maskWeights={weightMap} field={field} channel={channel} project={project} />}
           </div>
         )}
-        {showLayers && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+        {showLayers && !weightMap && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
           <div className="nh-overlay-panel" role="region" aria-label="Map overlays">
             <div className="nh-overlay-heading">
               <strong>Map overlay</strong>

@@ -1,3 +1,4 @@
+import { COAST_DEFAULTS } from '../engine/coast';
 import { DEFAULT_SPLINE_PATH } from './splines';
 import type { NodeDefinition, NodeKind, ParamDefinition, TerrainNode } from './types';
 
@@ -249,6 +250,20 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
       seed,
     ],
   },
+  heightImport: {
+    kind: 'heightImport',
+    label: 'Heightmap import',
+    category: 'Source',
+    color: '#617b63',
+    description: 'Bring a grayscale PNG or a RAW elevation grid into the terrain pipeline. The project embeds the original samples.',
+    inputs: [],
+    outputs: output,
+    params: [
+      range('gain', 'Vertical gain', 1, 0, 4, 0.01, 'Scale relief before applying the elevation offset.', 'Elevation'),
+      range('offsetMeters', 'Elevation offset', 0, -20000, 20000, 1, 'Shift the imported datum in project meters.', 'Elevation', 'm'),
+      { key: 'flipY', label: 'Flip north / south', type: 'toggle', default: false, section: 'Orientation' },
+    ],
+  },
   noise: {
     kind: 'noise',
     label: 'Procedural noise',
@@ -442,6 +457,31 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         description: 'Enforce a continuous downstream grade from point one to the last point. Draw from headwaters to outlet.',
         section: 'River',
       },
+    ],
+  },
+  coast: {
+    kind: 'coast',
+    label: 'Coastal shelf',
+    category: 'Shape',
+    color: '#597e88',
+    description: 'Shape a beach and submerged shelf along the waterline. Route the shore band or water mask to blends, erosion, or a named mask output.',
+    inputs: input,
+    outputs: [...output, { id: 'shore', label: 'Shore band' }, { id: 'water', label: 'Water mask' }],
+    params: [
+      range('seaLevel', 'Sea level', COAST_DEFAULTS.seaLevel, -1, 2, 0.005,
+        'Water elevation as a fraction of the project elevation scale.', 'Waterline'),
+      { key: 'includeLakes', label: 'Include inland lakes', type: 'toggle', default: COAST_DEFAULTS.includeLakes,
+        description: 'Also shape enclosed basins below sea level. By default, water must reach a tile edge.', section: 'Waterline' },
+      range('beachWidth', 'Beach width', COAST_DEFAULTS.beachWidth, 0, 3000, 1,
+        'Landward reach from the waterline in project meters.', 'Coastal profile', 'm'),
+      range('beachSlope', 'Beach angle', COAST_DEFAULTS.beachSlope, 0.1, 35, 0.1,
+        'Target angle of the beach above water.', 'Coastal profile', '°'),
+      range('shelfWidth', 'Shelf width', COAST_DEFAULTS.shelfWidth, 0, 5000, 1,
+        'Seaward reach of the underwater shelf in project meters.', 'Coastal profile', 'm'),
+      range('shelfSlope', 'Shelf angle', COAST_DEFAULTS.shelfSlope, 0.1, 25, 0.1,
+        'Target angle of the submerged shelf.', 'Coastal profile', '°'),
+      range('strength', 'Profile strength', COAST_DEFAULTS.strength, 0, 1, 0.01,
+        'Blend the coastal profile into the original terrain. Zero preserves elevation and still generates both masks.', 'Coastal profile'),
     ],
   },
   hydraulic: {
@@ -852,6 +892,16 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         section: 'Selection',
       },
     ],
+  },
+  maskOutput: {
+    kind: 'maskOutput',
+    label: 'Mask output',
+    category: 'Utility',
+    color: '#977f5a',
+    description: 'Connect a scalar field and name this node. Choose its name in Export to bake a linear 16-bit mask with a fixed 0–1 range.',
+    inputs: [{ id: 'in', label: 'Mask' }],
+    outputs: [],
+    params: [],
   },
   output: {
     kind: 'output',

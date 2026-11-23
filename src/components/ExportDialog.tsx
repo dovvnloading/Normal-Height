@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Package, Check, LoaderCircle, ArrowUpRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { TerrainIcon, EXPORT_ICON_NAMES } from './TerrainIcon';
 import { createTerrainWorker } from '../hooks/useTerrainEngine';
 import type { ExportFormat } from '../export/heightmap';
+import { listMaskOutputs } from '../export/maskOutputs';
 import { pbrBudgetMiB, checkPBRExportBudget } from '../export/budget';
 import { downloadBlob } from '../model/project';
 import type { TerrainProject, WorkerResponse } from '../model/types';
@@ -18,7 +19,10 @@ export function ExportDialog({
   onClose: () => void;
 }) {
   const [resolution, setResolution] = useState<number>(() => EXPORT_RESOLUTIONS.find((n) => n >= Math.max(512, project.resolution)) ?? 2048);
-  const [format, setFormat] = useState<ExportFormat>('png16');
+  const [choice, setChoice] = useState('png16');
+  const maskOutputs = useMemo(() => listMaskOutputs(project.graph), [project.graph]);
+  const format = choice.startsWith('mask16:') ? 'mask16' : choice as ExportFormat;
+  const mask = maskOutputs.find((output) => choice === 'mask16:' + output.id);
   const [bundle, setBundle] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -46,6 +50,7 @@ export function ExportDialog({
     setStage('Export cancelled');
   };
   const run = () => {
+    if (format === 'mask16' && !mask?.input) return;
     const memoryGiB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const memoryBudgetMiB = pbrBudgetMiB(memoryGiB);
     if (format === 'pbr') {
@@ -62,7 +67,7 @@ export function ExportDialog({
     setProgress(0);
     setError('');
     setSuccess('');
-    setStage('Preparing full-resolution terrain');
+    setStage(mask ? 'Preparing mask branch' : 'Preparing full-resolution terrain');
     const worker = createTerrainWorker();
     workerRef.current = worker;
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
@@ -78,7 +83,7 @@ export function ExportDialog({
         workerRef.current = null;
       } else if (m.type === 'result') {
         setProgress(0.94);
-        setStage('Generating and encoding material maps');
+        setStage(mask ? 'Encoding 16-bit mask' : 'Generating and encoding material maps');
         worker.terminate();
         workerRef.current = null;
         const encoder = new Worker(new URL('../export/export.worker.ts', import.meta.url), {
@@ -123,7 +128,10 @@ export function ExportDialog({
         ])).filter((buffer): buffer is ArrayBuffer => buffer instanceof ArrayBuffer);
         try {
           encoder.postMessage(
-            { type: 'encode', id: generation, field, project, format, bundle, memoryBudgetMiB },
+            {
+              type: 'encode', id: generation, field, project, format, bundle,
+              outputNodeId: m.result.outputNodeId, memoryBudgetMiB,
+            },
             transfer,
           );
         } catch (error) {
@@ -141,7 +149,9 @@ export function ExportDialog({
       worker.terminate();
       workerRef.current = null;
     };
-    worker.postMessage({ type: 'generate', id: 1, project, resolution });
+    worker.postMessage({
+      type: 'generate', id: generation, project, resolution, previewNodeId: mask?.id,
+    });
   };
   return (
     <Modal
@@ -157,7 +167,7 @@ export function ExportDialog({
           </span>
           <div>
             <strong>{project.name}</strong>
-            <small>Connected Terrain output · seed {project.seed}</small>
+            <small>{mask ? mask.displayName : 'Connected Terrain output'} · seed {project.seed}</small>
           </div>
         </div>
         <div className="export-grid">
@@ -165,12 +175,26 @@ export function ExportDialog({
             Format
             <select
               aria-label="Export format"
-              value={format}
+              value={choice}
               disabled={busy}
-              onChange={(e) => setFormat(e.target.value as ExportFormat)}
+              onChange={(e) => {
+                setChoice(e.target.value);
+                setError('');
+                setSuccess('');
+              }}
             >
               <option value="png16">Heightmap · 16-bit PNG</option>
               <option value="raw32">Elevation · Float32 RAW</option>
+              <optgroup label="Named masks · 16-bit PNG">
+                {maskOutputs.length === 0 && (
+                  <option disabled>Add a Mask output node to the graph</option>
+                )}
+                {maskOutputs.map((output) => (
+                  <option key={output.id} value={'mask16:' + output.id} disabled={!output.input}>
+                    {output.displayName}{output.input ? '' : ' · connect an input'}
+                  </option>
+                ))}
+              </optgroup>
               <option value="normal">Terrain normal · OpenGL +Y PNG</option>
               <option value="flow">Flow visualization · 8-bit PNG</option>
               <option value="wear">Erosion wear · 8-bit PNG</option>
@@ -208,18 +232,25 @@ export function ExportDialog({
         <div className="export-detail">
           <ArrowUpRight size={16} />
           <p>
-            The complete graph is simulated at{' '}
+            {mask ? 'The selected mask branch is evaluated at ' : 'The complete graph is simulated at '}
             <strong>
               {resolution.toLocaleString()} × {resolution.toLocaleString()}
             </strong>
-            . Larger grids take longer and create new erosion detail.
+            . {mask ? 'Black is zero weight and white is full weight.' : 'Larger grids take longer and create new erosion detail.'}
           </p>
         </div>
         <label className="export-bundle">
           <Package size={19} />
           <span>
-            <strong>{format === 'pbr' ? 'Complete material bundle' : 'Include project & elevation metadata'}</strong>
-            <small>{format === 'pbr' ? 'Includes all PBR maps, height, metadata, and project.' : 'ZIP bundle with map, reproducible graph and scale information.'}</small>
+            <strong>
+              {format === 'pbr' ? 'Complete material bundle'
+                : mask ? 'Include project & mask metadata' : 'Include project & elevation metadata'}
+            </strong>
+            <small>
+              {format === 'pbr' ? 'Includes all PBR maps, height, metadata, and project.'
+                : mask ? 'ZIP with mask PNG, source connection, and editable project.'
+                : 'ZIP bundle with map, reproducible graph and scale information.'}
+            </small>
           </span>
           <input
             type="checkbox"
@@ -244,6 +275,8 @@ export function ExportDialog({
             <dd>
               {format === 'pbr'
                 ? '16-bit terrain and relief + 8-bit PBR maps'
+                : format === 'mask16'
+                  ? '65,536 weight levels · linear 0–1'
                 : format === 'png16'
                   ? '65,536 elevation levels'
                 : format === 'raw32'
@@ -296,7 +329,7 @@ export function ExportDialog({
         <button className="button secondary" onClick={busy ? cancel : onClose}>
           {busy ? 'Cancel export' : 'Close'}
         </button>
-        <button className="button primary" onClick={run} disabled={busy}>
+        <button className="button primary" onClick={run} disabled={busy || (format === 'mask16' && !mask?.input)}>
           {busy ? <LoaderCircle size={16} className="spin" /> : <Download size={16} />}{' '}
           {busy
             ? 'Building export…'

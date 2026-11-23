@@ -11,6 +11,24 @@ export function NodeIcon({ kind, size = 17 }: { kind: NodeKind; size?: number })
   if (name) return <TerrainIcon name={name} height={size} />;
   return kind === 'note' ? <StickyNote size={size} /> : <Layers3 size={size} />;
 }
+const NODE_SUBTITLES: Record<NodeKind, string> = {
+  mountain: 'Connected landforms',
+  heightImport: 'PNG & RAW elevation grids',
+  noise: '12 seeded noise families',
+  hydraulic: 'Water & sediment',
+  thermal: 'Talus & loose material',
+  warp: 'Distort coordinates',
+  spline: 'Draw rivers & ridges',
+  coast: 'Beaches & submerged shelves',
+  terrace: 'Layered strata',
+  remap: 'Elevation distribution',
+  blend: 'Mix two heightfields',
+  mask: 'Select regions',
+  maskOutput: 'Export a named 16-bit mask',
+  note: 'Document your process',
+  group: 'Organize nodes',
+  output: 'Final heightfield',
+};
 interface Props {
   seed: number;
   onSeed: (seed: number) => void;
@@ -93,31 +111,7 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
                       </span>
                       <span>
                         <strong>{d.label}</strong>
-                        <small>
-                          {d.kind === 'mountain'
-                            ? 'Connected landforms'
-                            : d.kind === 'noise'
-                              ? '12 seeded noise families'
-                              : d.kind === 'hydraulic'
-                                ? 'Water & sediment'
-                                : d.kind === 'thermal'
-                                  ? 'Talus & loose material'
-                                  : d.kind === 'warp'
-                                    ? 'Distort coordinates'
-                                    : d.kind === 'spline'
-                                      ? 'Draw rivers & ridges'
-                                    : d.kind === 'terrace'
-                                      ? 'Layered strata'
-                                      : d.kind === 'remap'
-                                        ? 'Elevation distribution'
-                                        : d.kind === 'blend'
-                                          ? 'Mix two heightfields'
-                                          : d.kind === 'mask'
-                                            ? 'Select regions'
-                                            : d.kind === 'note'
-                                              ? 'Document your process'
-                                              : 'Final heightfield'}
-                        </small>
+                        <small>{NODE_SUBTITLES[d.kind]}</small>
                       </span>
                       <Plus size={13} className="library-add" />
                     </button>

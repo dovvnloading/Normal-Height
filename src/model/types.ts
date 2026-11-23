@@ -1,3 +1,4 @@
+import type { HeightRaster } from './heightRaster';
 import type { MaterialStroke } from '../materials/materialPaint';
 import type { SplinePoint } from './splines';
 import type { SurfaceSettings } from '../materials/pbr';
@@ -5,15 +6,18 @@ import type { SedimentBudget } from '../engine/erosion';
 
 export type NodeKind =
   | 'mountain'
+  | 'heightImport'
   | 'noise'
   | 'warp'
   | 'spline'
+  | 'coast'
   | 'hydraulic'
   | 'thermal'
   | 'terrace'
   | 'remap'
   | 'blend'
   | 'mask'
+  | 'maskOutput'
   | 'output'
   | 'note'
   | 'group';
@@ -25,6 +29,7 @@ export interface TerrainNode {
   params: Record<string, ParamValue>;
   /** Geometry lives in the project, not a render-only overlay. */
   path?: SplinePoint[];
+  raster?: HeightRaster;
   position: { x: number; y: number };
   bypassed?: boolean;
   parentId?: string;

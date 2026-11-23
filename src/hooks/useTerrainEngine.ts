@@ -1,3 +1,4 @@
+import { rasterIdentity } from '../model/heightRaster';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EvaluationResult, TerrainProject, WorkerResponse } from '../model/types';
 
@@ -10,7 +11,14 @@ export function evaluationSignature(project: TerrainProject, previewNodeId?: str
     previewNodeId,
     nodes: project.graph.nodes
       .filter((n) => n.kind !== 'note' && n.kind !== 'group')
-      .map((n) => ({ id: n.id, kind: n.kind, params: n.params, bypassed: n.bypassed, path: n.path })),
+      .map((n) => ({
+        id: n.id,
+        kind: n.kind,
+        params: n.params,
+        bypassed: n.bypassed,
+        path: n.path,
+        raster: n.raster && rasterIdentity(n.raster),
+      })),
     edges: project.graph.edges,
   });
 }

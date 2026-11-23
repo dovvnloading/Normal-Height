@@ -41,6 +41,9 @@ export type TerrainIconName = (typeof ICON_NAMES)[number];
 
 export const NODE_ICON_NAMES: Partial<Record<NodeKind, TerrainIconName>> = {
   mountain: 'mountain-range',
+  heightImport: 'heightmap',
+  coast: 'deposition-map',
+  maskOutput: 'height-slope-mask',
   noise: 'procedural-noise',
   warp: 'domain-warp',
   spline: 'river-ridge-spline',
@@ -54,6 +57,7 @@ export const NODE_ICON_NAMES: Partial<Record<NodeKind, TerrainIconName>> = {
 };
 export const PRESET_ICON_NAMES: Record<string, TerrainIconName> = {
   uplands: 'folded-highlands',
+  'volcanic-island': 'volcanic-caldera',
   alpine: 'alpine-watershed',
   massif: 'granite-massif',
   badlands: 'desert-badlands',
@@ -85,6 +89,7 @@ export const MAP_ICON_NAMES: Record<MapChannel, TerrainIconName> = {
 };
 export const EXPORT_ICON_NAMES: Record<ExportFormat, TerrainIconName> = {
   png16: 'heightmap',
+  mask16: 'height-slope-mask',
   raw32: 'heightmap',
   normal: 'normal-map',
   normalDX: 'normal-map',
