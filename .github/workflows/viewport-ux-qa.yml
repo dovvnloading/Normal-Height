@@ -6,6 +6,9 @@ on:
     paths:
       - 'src/components/TerrainViewport.*'
       - 'src/render/TerrainScene.ts'
+      - 'src/render/WaterSurface.ts'
+      - 'src/render/water.ts'
+      - 'tests/e2e/water.spec.ts'
       - 'src/render/terrainMesh.ts'
       - 'src/render/terrainDisplacement.ts'
       - 'src/render/compare.worker.ts'
@@ -39,7 +42,7 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Verify viewport interactions and displaced silhouettes
-        run: npx playwright test tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts --workers=1
+        run: npx playwright test tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts tests/e2e/water.spec.ts --workers=1
       - name: Save screenshots, traces and browser report
         if: always()
         uses: actions/upload-artifact@v4

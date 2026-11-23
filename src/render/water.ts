@@ -38,18 +38,28 @@ export function linkedCoastLevel(project: TerrainProject): number | null {
   return null;
 }
 
+const cachedRelief = new WeakMap<Float32Array, { min: number; max: number }>();
+
 export function waterHeightRange(field: HeightField | null, project: TerrainProject): {
   min: number; max: number;
 } {
   if (!field || !field.height.length) return { min: -100, max: 1000 };
-  let min = Infinity, max = -Infinity;
-  for (const value of field.height) {
-    if (!Number.isFinite(value)) continue;
-    min = Math.min(min, value);
-    max = Math.max(max, value);
+  let range = cachedRelief.get(field.height);
+  if (!range) {
+    let min = Infinity, max = -Infinity;
+    for (const value of field.height) {
+      if (!Number.isFinite(value)) continue;
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+    range = Number.isFinite(min) ? { min, max } : { min: -100 / project.heightScale,
+      max: 1000 / project.heightScale };
+    cachedRelief.set(field.height, range);
   }
-  return Number.isFinite(min) ? { min: min * project.heightScale,
-    max: max * project.heightScale } : { min: -100, max: 1000 };
+  return {
+    min: range.min * project.heightScale,
+    max: range.max * project.heightScale,
+  };
 }
 
 /** Auto follows the coast when present, otherwise wets the lowest 22% of relief. */
