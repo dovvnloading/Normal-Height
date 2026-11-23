@@ -70,7 +70,7 @@ export interface MaterialBuffers {
   roughness: Uint8Array;
   ao: Uint8Array;
   curvature: Uint8Array;
-  /** Micro displacement in physical meters; does not change the terrain geometry. */
+  /** Signed vertical material relief in metres, used by the 3D mesh and relief export. */
   detail: Float32Array;
 }
 

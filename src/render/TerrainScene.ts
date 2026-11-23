@@ -944,7 +944,7 @@ export class TerrainScene {
       this.finishSurface();
       if (this.firstField) {
         this.firstField = false;
-        this.resetCamera();
+        if (!this.cameraAdjusted) this.fitCamera();
       } else if (!this.cameraAdjusted && previousBase !== this.minimumElevation) this.fitCamera();
     }
     const elapsed = performance.now() - started;
@@ -980,8 +980,8 @@ export class TerrainScene {
   }
 
   /**
-   * Upload the source slopes for per-pixel shading. Built once per field and
-   * tile scale: LOD rebuilds and camera motion never touch it.
+   * Upload slopes for the combined terrain and material height. Camera
+   * motion and palette switches reuse the installed texture.
    */
   private updateSlopeTexture() {
     this.slopeTexture?.dispose();

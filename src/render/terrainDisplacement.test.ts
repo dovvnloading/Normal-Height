@@ -21,6 +21,29 @@ function plan(segments: number[]): TerrainMeshPlan {
 }
 
 describe('material relief in the displayed triangle mesh', () => {
+  it('uses the painted substrate for fine displacement inside each brush stroke', () => {
+    const n = 33;
+    const values = new Float32Array(n * n);
+    const field = { resolution: n, height: values, wear: values, deposition: values, flow: values };
+    const project = { ...createProject(), worldSize: 512, heightScale: 100 };
+    const relief = (painted: typeof project) =>
+      createDisplacedTerrainSampler(values, generatePBR(field, painted), painted).heightForSpacing!(0.25);
+    const untouched = relief(project);
+    const profiles = (['rock', 'soil', 'vegetation', 'snow'] as const).map(layer => {
+      const sample = relief({ ...project, materialPaint: [{
+        layer, radius: 0.2, hardness: 1, strength: 1, points: [{ u: 0.5, v: 0.5 }],
+      }] });
+      expect(sample(0.125, 0.125)).toBe(untouched(0.125, 0.125));
+      return Array.from({ length: 17 }, (_, i) => sample((56 + i) / 128, 0.5));
+    });
+    for (let i = 0; i < profiles.length; i++) {
+      for (let j = 0; j < i; j++) {
+        const difference = profiles[i].map((h, k) => Math.abs(h - profiles[j][k]) * project.heightScale);
+        expect(Math.max(...difference)).toBeGreaterThan(0.001);
+      }
+    }
+  });
+
   it('adds signed metres once, preserving absolute source elevations and export buffers', () => {
     const n = 65, height = new Float32Array(n * n).fill(-0.1);
     const project = { ...createProject(), worldSize: 3200, heightScale: 160 };
