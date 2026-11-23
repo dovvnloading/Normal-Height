@@ -11,7 +11,9 @@ test('cinematic water is drawn, adjustable, coastline-linked, persistent, and op
       shaderErrors.push(message.text());
     }
   });
-  await page.addInitScript(() => localStorage.removeItem('normal-height.view.v1'));
+  // Playwright supplies a fresh isolated browser context per test.
+  // Do not clear storage via addInitScript: it also runs on reload and
+  // would silently invalidate the persisted-settings assertion.
   await page.goto('/');
   await expect(page.locator('.nh-viewport-toolbar')).toBeVisible();
 

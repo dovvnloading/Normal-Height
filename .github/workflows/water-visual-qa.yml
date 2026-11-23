@@ -1,0 +1,50 @@
+name: Cinematic water browser acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/render/WaterSurface.ts'
+      - 'src/render/water.ts'
+      - 'src/render/TerrainScene.ts'
+      - 'src/model/viewSettings.ts'
+      - 'src/components/TerrainViewport.tsx'
+      - 'src/components/TerrainViewport.css'
+      - 'src/theme-dark.css'
+      - 'tests/e2e/water.spec.ts'
+      - '.github/workflows/water-visual-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cinematic-water-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  water:
+    name: Water shader, shoreline, controls and screenshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify water rendering and physical level
+        run: npx playwright test tests/e2e/water.spec.ts --workers=1
+      - name: Save water screenshot, browser report and trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cinematic-water-preview
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
