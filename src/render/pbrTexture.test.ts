@@ -25,6 +25,20 @@ describe('PBR display texture recycling (#10)', () => {
     b.dispose();
   });
 
+  it('places every source-grid vertex on its corresponding texel centre', () => {
+    for (const size of [1, 4, 17]) {
+      const t = updatePreviewTexture(undefined, pixels(size, 0), size, false, 1);
+      t.updateMatrix();
+      for (let i = 0; i < size; i++) {
+        const st = i / Math.max(1, size - 1);
+        const uv = new THREE.Vector2(st, 1 - st).applyMatrix3(t.matrix);
+        expect(uv.x * size - 0.5).toBeCloseTo(i);
+        expect((1 - uv.y) * size - 0.5).toBeCloseTo(i);
+      }
+      t.dispose();
+    }
+  });
+
   it('allocates fresh GPU resources only when dimensions or color space change', () => {
     const a = updatePreviewTexture(undefined, pixels(4, 1), 4, false, 2);
     const disposed = vi.fn();

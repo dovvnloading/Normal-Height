@@ -163,7 +163,20 @@ export function patchedNormalFragmentBegin(): string {
   const chunk = THREE.ShaderChunk.normal_fragment_begin;
   if (!chunk.includes(VERTEX_NORMAL))
     throw new Error('Three.js normal_fragment_begin no longer contains the vertex normal.');
-  return chunk.replace(VERTEX_NORMAL, VERTEX_NORMAL + '\n' + GLSL_APPLY);
+  // The exported relief normal is expressed in an orthonormal physical
+  // terrain frame. Three's generic UV cotangent frame has unequal basis
+  // lengths on inclined surfaces. Reconstruct the authored east tangent
+  // first, then apply the display transform to the complete perturbed normal.
+  return chunk.replace(VERTEX_NORMAL, VERTEX_NORMAL + '\n' + GLSL_APPLY) + `
+#ifdef USE_NORMALMAP_TANGENTSPACE
+  vec3 nhDisplayedN = transformDirectionByInverseViewMatrix(normal, viewMatrix);
+  vec3 nhPhysicalN = normalize(nhDisplayedN * vec3(1.0, nhVerticalScale, 1.0));
+  vec3 nhEastT = normalize(cross(nhPhysicalN, vec3(0.0, 0.0, 1.0)));
+  vec3 nhNorthB = cross(nhPhysicalN, nhEastT);
+  mat3 nhExaggerate = mat3(1,0,0, 0,1.0/nhVerticalScale,0, 0,0,1);
+  tbn = mat3(viewMatrix) * nhExaggerate * mat3(nhEastT, nhNorthB, nhPhysicalN);
+#endif
+`;
 }
 
 /**

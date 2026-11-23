@@ -1,58 +1,36 @@
-import { Noise } from '../engine/noise';
+import { clamp, mix, smoothstep } from '../engine/noise';
 import type { HeightField, TerrainProject } from '../model/types';
-import type { PBRMaps, SurfaceSettings } from './pbr';
+import type { TexelRect } from './materialRegion';
+import { createMaterialPaintRaster } from './materialPaint';
+import type { MaterialBuffers, SurfaceSettings } from './pbr';
+import { SurfaceFabric, rockReflectance } from './surfaceFabric';
 import { createTerrainAnalyzer, diagnosticReference } from './terrainAnalysis';
 import type { TerrainFactors } from './terrainAnalysis';
 
-const clamp = (v: number, low = 0, high = 1) => Math.max(low, Math.min(high, v));
-const smooth = (a: number, b: number, v: number) => {
-  const t = clamp((v - a) / Math.max(1e-8, b - a));
-  return t * t * (3 - 2 * t);
-};
+// Unlit multipliers of the biome's linear-light endmembers. These describe
+// constituent pigments; lighting, skylight and horizon occlusion stay separate.
+const SOIL_FINES = [0.81, 0.7, 0.62];
+const SOIL_CLAST = [1.47, 1.56, 1.71];
+const GREEN_TIPS = [0.59, 0.85, 0.66];
+const STEPPE_TIPS = [0.71, 0.85, 0.73];
+const LICHEN_CUSHION = [1.64, 1.57, 1.22];
+const DRY_STEMS = [2.29, 1.29, 0.86];
+const SNOW_FIRN = [0.83, 0.92, 0.99];
+const SNOW_GRAINS = [1.18, 1.15, 1.12];
 
-/**
- * Evidence-based substrate classification, followed by independent procedural
- * textures for exposed bedrock, transported soil, vegetation and deposited snow.
- *
- * All wavelengths and heights are in physical meters. No temporary per-pixel
- * analysis maps are allocated: 2048² exports already have a tight memory budget.
- * The textures are evaluations of the same seeded physical-coordinate fields at
- * the preview and export resolutions, not resized/randomized pixel noise.
- */
-export function synthesizeMaterials(
-  field: HeightField,
-  project: TerrainProject,
-  params: SurfaceSettings,
-  palette: number[][],
-  encodeSrgb: (value: number) => number,
-): PBRMaps {
-  const n = field.resolution;
-  const count = n * n;
-  if (n < 2 || !Number.isFinite(project.worldSize) || project.worldSize <= 0 ||
-      !Number.isFinite(project.heightScale) || project.heightScale <= 0 ||
-      field.height.length !== count || field.flow.length !== count ||
-      field.wear.length !== count || field.deposition.length !== count) {
-    throw new Error('PBR generation requires aligned height and erosion fields.');
-  }
-  const basecolor = new Uint8ClampedArray(count * 4);
-  const splat = new Uint8ClampedArray(count * 4);
-  const roughness = new Uint8Array(count);
-  const ao = new Uint8Array(count);
-  const curvature = new Uint8Array(count);
-  const detail = new Float32Array(count);
-  const noise = new Noise((project.seed + 0x3b9aca07) >>> 0);
-  const analyze = createTerrainAnalyzer(field, project);
-  const metrics: TerrainFactors = {
-    grade: 0, gradientX: 0, gradientY: 0, slopeDegrees: 0,
-    northness: 0, landform: 0, occlusion: 1,
-  };
-  const cell = project.worldSize / (n - 1);
+export interface MaterialRanges {
+  wearReference: number;
+  depositionReference: number;
+  min: number;
+  span: number;
+}
+
+export function materialRanges(field: HeightField): MaterialRanges {
   const wearReference = diagnosticReference(field.wear);
   const depositionReference = diagnosticReference(field.deposition);
-  const grainVisibility = smooth(2, 3.5, params.detailMeters / cell);
-  const fineVisibility = smooth(2, 3.5, params.detailMeters / (2.1 * cell));
-  let min = Infinity, max = -Infinity;
-  for (let i = 0; i < count; i++) {
+  let min = Infinity,
+    max = -Infinity;
+  for (let i = 0; i < field.height.length; i++) {
     const h = field.height[i];
     if (!Number.isFinite(h) || !Number.isFinite(field.flow[i]))
       throw new Error('Invalid terrain elevation or flow for PBR synthesis.');
@@ -60,183 +38,214 @@ export function synthesizeMaterials(
     max = Math.max(max, h);
   }
   const span = Math.max(1e-8, max - min);
-  const vegetationFactor = params.biome === 'arid' ? 0.18 :
-    params.biome === 'volcanic' ? 0.48 : 1;
-  const stratumContrast = params.biome === 'arid' ? 0.12 :
-    params.biome === 'volcanic' ? 0.025 : 0.052;
+  return { wearReference, depositionReference, min, span };
+}
 
-  for (let y = 0; y < n; y++) {
-    const z = y * cell;
-    for (let x = 0; x < n; x++) {
-      const wx = x * cell;
-      const i = y * n + x, p = i * 4;
+/** Bake the material field at the requested world sampling interval. */
+export function synthesizeMaterials(
+  field: HeightField,
+  project: TerrainProject,
+  params: SurfaceSettings,
+  palette: number[][],
+  encodeSrgb: (value: number) => number,
+  rect: TexelRect,
+  ranges: MaterialRanges,
+): MaterialBuffers {
+  const n = field.resolution;
+  const count = n * n;
+  if (
+    !Number.isInteger(n) ||
+    n < 2 ||
+    !Number.isFinite(project.worldSize) ||
+    project.worldSize <= 0 ||
+    !Number.isFinite(project.heightScale) ||
+    project.heightScale <= 0 ||
+    field.height.length !== count ||
+    field.flow.length !== count ||
+    field.wear.length !== count ||
+    field.deposition.length !== count
+  ) {
+    throw new Error('PBR generation requires aligned height and erosion fields.');
+  }
+  const width = rect.right - rect.left;
+  const pixels = width * (rect.bottom - rect.top);
+  const basecolor = new Uint8ClampedArray(pixels * 4);
+  const splat = new Uint8ClampedArray(pixels * 4);
+  const roughness = new Uint8Array(pixels);
+  const ao = new Uint8Array(pixels);
+  const curvature = new Uint8Array(pixels);
+  const detail = new Float32Array(pixels);
+  const analyze = createTerrainAnalyzer(field, project);
+  const metrics: TerrainFactors = {
+    grade: 0,
+    gradientX: 0,
+    gradientY: 0,
+    slopeDegrees: 0,
+    northness: 0,
+    landform: 0,
+    occlusion: 1,
+  };
+  const fabric = new SurfaceFabric(params, project.seed, project.worldSize / (n - 1));
+  const paint = createMaterialPaintRaster(project.materialPaint, n);
+  const cell = project.worldSize / (n - 1);
+  const { wearReference, depositionReference, min, span } = ranges;
+  const arid = params.biome === 'arid';
+  const basalt = params.biome === 'volcanic';
+  const growthTint = arid ? STEPPE_TIPS : basalt ? LICHEN_CUSHION : GREEN_TIPS;
+  const plantCapacity = arid ? 0.33 : basalt ? 0.72 : 1;
+
+  for (let y = rect.top; y < rect.bottom; y++) {
+    const painted = paint?.row(y);
+    for (let x = rect.left; x < rect.right; x++) {
+      const i = y * n + x,
+        output = (y - rect.top) * width + x - rect.left,
+        p = output * 4;
       const h = field.height[i];
-      const height01 = (h - min) / span;
-      const { slopeDegrees: slope, grade, gradientX, gradientY,
-        northness, landform, occlusion } = analyze(x, y, metrics);
-      const valley = smooth(0.012, 0.14, landform);
-      const crest = smooth(0.012, 0.14, -landform);
-      const northExposure = northness * smooth(7, 38, slope);
-      const worn = smooth(0.05, 0.9, Math.max(0, field.wear[i]) / wearReference);
-      const deposited = smooth(0.05, 0.9, Math.max(0, field.deposition[i]) / depositionReference);
-      // Flow is already a normalized visitation diagnostic, not a water-depth
-      // measurement. Couple it to the actual landform and depositional evidence.
-      const drainage = clamp(field.flow[i] * 0.55 + valley * 0.37 + deposited * 0.26);
-      const wetness = clamp(params.moisture *
-        (0.12 + drainage * 0.75 + Math.max(0, northExposure) * 0.16));
-
-      // Broad variations do not define the geology; they gently break up the
-      // decisions made from slope, curvature, weathering and sediment transport.
-      const macro = noise.simplex(wx / 380 + 3.9, z / 380 - 7.2);
-      const patch = noise.simplex(wx / 135 - 21.1, z / 135 + 8.2);
-      const slopeRock = smooth(params.rockSlope - 12, params.rockSlope + 12,
-        slope + worn * 4);
-      const rockExposure = clamp(0.11 + 0.78 * slopeRock + 0.42 * crest +
-        0.30 * worn - 0.26 * valley - 0.35 * deposited);
-      const soilRetention = clamp(0.84 * (1 - slopeRock) + 0.36 * deposited +
-        0.32 * valley - 0.30 * worn - 0.34 * crest);
-      const climate = params.moisture * (0.78 + 0.15 * northExposure) +
-        drainage * params.moisture * 0.28;
-      const elevHabitat = smooth(0.015, 0.18, height01) *
-        (1 - smooth(0.62, 0.90, height01));
-      const vegetationDensity = vegetationFactor * elevHabitat *
-        smooth(0.08, 0.68, climate) *
-        (0.18 + soilRetention * 0.92) *
-        (1 - slopeRock * 0.90) * (0.84 + patch * 0.16);
-
-      // Snow can settle in shaded, concave shelves but is wind-scoured off
-      // convex crests and unstable steep faces. This is a climate heuristic,
-      // not a snowpack or solar-radiation simulation.
-      const snowLevel = height01 + macro * 0.022;
-      const snowRetention = clamp(0.78 + 0.24 * valley - 0.18 * crest +
-        0.18 * northExposure);
-      const snow = params.biome === 'arid' ? 0 : clamp(
-        smooth(params.snowLine - 0.11, params.snowLine + 0.10, snowLevel) *
-        (1 - smooth(29, 63, slope) * 0.94) * snowRetention * 1.26,
+      const elevation = (h - min) / span;
+      const {
+        gradientX,
+        gradientY,
+        slopeDegrees: slope,
+        northness,
+        landform,
+        occlusion,
+      } = analyze(x, y, metrics);
+      fabric.sample(x * cell, y * cell, h * project.heightScale, gradientX, gradientY);
+      const valley = smoothstep(0.006, 0.105, landform);
+      const ridge = smoothstep(0.006, 0.105, -landform);
+      const worn = smoothstep(0.02, 0.95, field.wear[i] / wearReference);
+      const deposited = smoothstep(0.02, 0.95, field.deposition[i] / depositionReference);
+      const aspect = northness * smoothstep(4, 42, slope);
+      const runoff = clamp(field.flow[i] * 0.65 + valley * 0.45 + deposited * 0.24);
+      const wet = clamp(
+        params.moisture * (0.33 + 0.9 * runoff + 0.16 * aspect + 0.11 * fabric.patch),
       );
 
-      // Independent substrate evidence is normalized before snow is overlaid.
-      // An exact 255-sum splat is produced by quantizing only the first 3.
-      const rockMass = 0.08 + rockExposure * 3.55;
-      const soilMass = 0.18 + soilRetention * (1.18 + deposited * 0.70) +
-        wetness * 0.22;
-      const vegMass = vegetationDensity * 2.1;
-      const sum = rockMass + soilMass + vegMass;
-      const bare = 1 - snow;
-      const rock = bare * rockMass / sum;
-      const soil = bare * soilMass / sum;
-      const vegetation = bare * vegMass / sum;
-      const weights = [rock, soil, vegetation, snow];
-      const r = Math.round(rock * 255);
-      const g = Math.min(255 - r, Math.round(soil * 255));
-      const b = Math.min(255 - r - g, Math.round(vegetation * 255));
-      splat[p] = r;
-      splat[p + 1] = g;
-      splat[p + 2] = b;
-      splat[p + 3] = 255 - r - g - b;
-
-      // Rock bedding follows real elevation, while joint fractures use a
-      // tri-planar world-space evaluation. The normal-based fourth-power
-      // weights favor XZ on gentle land and ZY/XY on cliffs, so the *baked*
-      // albedo/roughness/detail is not horizontally stretched over rock walls.
-      // Local surface-arc spacing controls Nyquist visibility on steep faces.
-      const beddingSpacing = params.strataMeters / Math.max(0.25, grade);
-      const beddingVisibility = smooth(3, 5, beddingSpacing / cell) *
-        smooth(16, 47, slope);
-      const fractureVisibility = smooth(3, 5,
-        params.fractureMeters / (cell * Math.hypot(1, grade)));
-      const needRockDetail = rock > 0.025 &&
-        (fractureVisibility > 0 || beddingVisibility > 0);
-      const rockWarp = needRockDetail
-        ? noise.simplex(wx / (params.fractureMeters * 2.8) + 17.3,
-            z / (params.fractureMeters * 2.8) - 9.5)
-        : 0;
-      let fractureSignal = 0;
-      if (needRockDetail && fractureVisibility > 0) {
-        const norm = 1 + grade * grade;
-        const top = 1 / (norm * norm);
-        const east = (gradientX * gradientX / norm) ** 2;
-        const south = (gradientY * gradientY / norm) ** 2;
-        const inv = 1 / (top + east + south);
-        const f = params.fractureMeters;
-        const elevation = h * project.heightScale;
-        if (top * inv > 0.002)
-          fractureSignal += top * inv * noise.simplex(
-            wx / f + rockWarp * 0.42 + 31.1,
-            z / f - rockWarp * 0.26 - 19.7);
-        if (east * inv > 0.002)
-          fractureSignal += east * inv * noise.simplex(
-            z / f + rockWarp * 0.42 + 31.1,
-            elevation / f - rockWarp * 0.26 - 19.7);
-        if (south * inv > 0.002)
-          fractureSignal += south * inv * noise.simplex(
-            wx / f + rockWarp * 0.42 + 31.1,
-            elevation / f - rockWarp * 0.26 - 19.7);
+      // Transport and retention compete for *area*. Sequential coverage allows
+      // a single endmember to fill a surface (a scree chute, a snowfield, or an
+      // exposed cliff). Additive score normalization leaves muddy traces of all
+      // substrates almost everywhere. The contacts move around resistant beds.
+      const exposure =
+        (slope - params.rockSlope) / 22 +
+        0.66 * ridge +
+        0.93 * worn -
+        0.91 * deposited -
+        0.6 * valley +
+        0.37 * fabric.formation +
+        0.27 * fabric.patch +
+        0.19 * (fabric.mineral - 0.4) +
+        0.18 * fabric.fleck;
+      const outcrop = smoothstep(-1.05, 0.33, exposure);
+      const growingSeason = 1 - smoothstep(0.57 + 0.06 * aspect, 0.94, elevation);
+      const rootZone = params.moisture + 0.33 * runoff + 0.13 * aspect - 0.26 * worn;
+      const growing = plantCapacity * smoothstep(0.06, 0.61, rootZone) * growingSeason;
+      const carpet =
+        growing *
+        smoothstep(
+          -0.83,
+          0.44,
+          fabric.patch * 0.69 +
+            fabric.formation * 0.34 +
+            fabric.fleck * 0.3 +
+            0.13 * fabric.hummock +
+            0.23 * deposited -
+            slope * 0.004,
+        );
+      const leeward = -fabric.windward;
+      const snowClimate =
+        elevation -
+        params.snowLine +
+        0.06 * aspect +
+        0.07 * valley -
+        0.054 * ridge +
+        0.054 * leeward +
+        0.066 * fabric.formation +
+        0.047 * fabric.patch +
+        0.021 * fabric.fleck;
+      const stability = 1 - smoothstep(31, 61, slope + 8 * ridge - 7 * valley);
+      let snow = arid ? 0 : smoothstep(-0.1, 0.12, snowClimate) * stability;
+      let rock = (1 - snow) * outcrop;
+      let soil = (1 - snow) * (1 - outcrop) * (1 - carpet);
+      let vegetation = (1 - snow) * (1 - outcrop) * carpet;
+      if (painted) {
+        const q = x * 4;
+        const auto = Math.max(0, 1 - painted[q] - painted[q + 1] - painted[q + 2] - painted[q + 3]);
+        rock = auto * rock + painted[q];
+        soil = auto * soil + painted[q + 1];
+        vegetation = auto * vegetation + painted[q + 2];
+        snow = auto * snow + painted[q + 3];
       }
-      const fractures = fractureVisibility *
-        (1 - smooth(0.025, 0.22, Math.abs(fractureSignal))) ** 2;
-      const bedding = beddingVisibility *
-        Math.sin((h * project.heightScale / params.strataMeters +
-          rockWarp * 0.22) * 2 * Math.PI);
+      // Round cumulative coverage boundaries. Zero-weight constituents stay
+      // zero and the four quantized footprints still partition exactly 255.
+      const r = Math.round(255 * rock);
+      const rg = Math.round(255 * (rock + soil));
+      const rgb = Math.min(255, Math.round(255 * (rock + soil + vegetation)));
+      splat[p] = r;
+      splat[p + 1] = rg - r;
+      splat[p + 2] = rgb - rg;
+      splat[p + 3] = 255 - rgb;
 
-      // Physically spaced, band-limited microstructure: each material uses
-      // the SAME seed fields for its color, roughness and height perturbation.
-      const grain = grainVisibility
-        ? noise.simplex(wx / params.detailMeters + 11.3,
-            z / params.detailMeters - 5.7) * grainVisibility
-        : 0;
-      const fine = fineVisibility
-        ? noise.simplex(wx / (params.detailMeters / 2.1) - 21.1,
-            z / (params.detailMeters / 2.1) + 8.2) * fineVisibility
-        : 0;
-      const drift = snow > 0.01
-        ? noise.simplex(wx / 185 + 14.2, z / 185 + 29.4) *
-          smooth(2.5, 4, 185 / cell)
-        : 0;
-
-      const layerTint = [
-        1 + macro * 0.045 + bedding * stratumContrast -
-          fractures * 0.17 + worn * 0.032 + grain * 0.025,
-        1 + macro * 0.035 + patch * 0.075 - deposited * 0.042 +
-          grain * 0.085 + fine * 0.028,
-        1 + macro * 0.042 + patch * 0.12 + grain * 0.065 -
-          (1 - soilRetention) * 0.035,
-        1 + macro * 0.022 + patch * 0.019 + drift * 0.032 +
-          grain * 0.014,
-      ];
-      const darken = 1 - wetness * (rock * 0.12 + soil * 0.29 +
-        vegetation * 0.095);
-      for (let channel = 0; channel < 3; channel++) {
-        let reflectance = 0;
-        for (let layer = 0; layer < 4; layer++) {
-          reflectance += palette[layer][channel] * weights[layer] * layerTint[layer];
-        }
-        basecolor[p + channel] = encodeSrgb(reflectance * darken);
+      const stone = clamp(
+        0.22 +
+          0.52 * fabric.clasts +
+          0.23 * fabric.fleck +
+          0.21 * fabric.grit +
+          0.19 * worn -
+          0.2 * deposited +
+          (arid ? 0.11 * fabric.sorting : 0),
+      );
+      const litter = clamp(
+        (arid ? 0.37 : 0.13) + fabric.straw * 0.73 + 0.21 * elevation - 0.54 * wet,
+      );
+      const powder = clamp(
+        0.64 + 0.21 * leeward + 0.29 * fabric.patch - 0.28 * fabric.scour + 0.13 * valley,
+      );
+      const rockValue = (1 - 0.28 * fabric.joint + 0.12 * fabric.grit) * (1 - 0.23 * wet);
+      const soilValue =
+        (1 +
+          0.18 * fabric.formation +
+          0.15 * fabric.patch +
+          0.095 * fabric.sorting +
+          0.12 * fabric.grit) *
+        (1 - (arid ? 0.43 : 0.52) * wet);
+      const plantValue =
+        (0.81 + 0.33 * fabric.hummock + 0.17 * fabric.fleck + 0.08 * fabric.grit) *
+        (1 - 0.15 * wet);
+      for (let c = 0; c < 3; c++) {
+        const rockColor = palette[0][c] * rockValue * rockReflectance(fabric, params.biome, c);
+        const cinderPigment =
+          (c === 0 ? 0.42 : c === 1 ? -0.21 : -0.39) * fabric.iron - 0.23 * fabric.cinder;
+        const soilColor =
+          palette[1][c] *
+          soilValue *
+          mix(SOIL_FINES[c], SOIL_CLAST[c], stone) *
+          (basalt ? 1 + cinderPigment : 1);
+        const plantColor = palette[2][c] * plantValue * mix(growthTint[c], DRY_STEMS[c], litter);
+        const snowColor = palette[3][c] * mix(SNOW_FIRN[c], SNOW_GRAINS[c], powder);
+        basecolor[p + c] = encodeSrgb(
+          rock * rockColor + soil * soilColor + vegetation * plantColor + snow * snowColor,
+        );
       }
       basecolor[p + 3] = 255;
 
-      // The rock fissures are simultaneously darker, rougher and recessed.
-      // Deposited/wet soils are darker and smoother; snow stays non-metallic.
-      const baseRoughness = rock * 0.88 + soil * 0.94 +
-        vegetation * 0.89 + snow * 0.77;
-      roughness[i] = Math.round(clamp(baseRoughness +
-        rock * (fractures * 0.055 - bedding * 0.018) +
-        soil * grain * 0.045 + vegetation * patch * 0.02 +
-        snow * grain * 0.035 - wetness * (soil * 0.25 + rock * 0.13),
-        0.28, 1) * 255);
-      const rockDetail = grain * 0.15 + fine * 0.045 -
-        fractures * 0.72 + bedding * 0.34;
-      const soilDetail = grain * 0.28 + fine * 0.09;
-      const vegetationDetail = grain * 0.13 + fine * 0.045;
-      const snowDetail = grain * 0.09 + fine * 0.025 + drift * 0.13;
-      detail[i] = params.detailStrength * (rock * rockDetail +
-        soil * soilDetail + vegetation * vegetationDetail + snow * snowDetail);
-
-      ao[i] = Math.round(255 * clamp(
-        1 - params.aoStrength * (1 - occlusion), 0.45, 1));
-      // High values = convex/ridge; low values = concave/channel.
-      curvature[i] = Math.round(255 * clamp(0.5 - landform * 1.55));
+      // Three.js uses alpha = perceptualRoughness². Area-average this GGX
+      // parameter as a single-lobe approximation to the four substrate lobes.
+      const rr = clamp(0.85 - 0.19 * fabric.mineral + 0.1 * fabric.joint - 0.23 * wet);
+      const rs = clamp(0.96 - 0.19 * stone - 0.4 * wet + 0.018 * fabric.sorting);
+      const rv = clamp(0.77 + 0.15 * litter + 0.052 * fabric.hummock - 0.07 * wet);
+      const rn = clamp(0.48 + 0.35 * powder + 0.018 * fabric.scour);
+      roughness[output] = Math.round(
+        255 * Math.sqrt(rock * rr * rr + soil * rs * rs + vegetation * rv * rv + snow * rn * rn),
+      );
+      detail[output] =
+        params.detailStrength *
+        (rock * fabric.rockHeight +
+          soil * fabric.soilHeight +
+          vegetation * fabric.plantHeight +
+          snow * fabric.snowHeight);
+      ao[output] = Math.round(255 * clamp(1 - params.aoStrength * (1 - occlusion)));
+      curvature[output] = clamp(128 - Math.round(landform * 395), 0, 255);
     }
   }
-  return { resolution: n, basecolor, splat, roughness, ao, curvature, detail };
+  return { basecolor, splat, roughness, ao, curvature, detail };
 }

@@ -24,7 +24,8 @@ export function applyPackedPBRMaterial(
   material.roughnessMap = packedORM;
   material.aoMap = packedORM;
   material.normalMap = microNormal;
-  material.aoMapIntensity = 0.85;
+  // AO strength has already been applied once by the terrain generator.
+  material.aoMapIntensity = 1;
   material.color.set('#ffffff');
   material.normalScale.set(1, 1);
   material.vertexColors = false;

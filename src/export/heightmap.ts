@@ -99,7 +99,7 @@ export function encodeRawHeight(field: HeightField, heightScale: number) {
 }
 export type ExportFormat = 'png16' | 'raw32' | 'normal' | 'flow' | 'wear' | 'deposition'
   | 'pbr' | 'basecolor' | 'roughness' | 'ao' | 'metallic' | 'orm'
-  | 'splat' | 'curvature' | 'normalDX';
+  | 'splat' | 'curvature' | 'normalGL' | 'normalDX' | 'detailNormal';
 export function makeExport(
   field: HeightField,
   project: TerrainProject,
@@ -110,13 +110,14 @@ export function makeExport(
   const range = heightRange(field.height);
   if (format === 'pbr') {
     const maps = generatePBR(field, project);
+    const reliefRange = heightRange(maps.detail);
     const prefix = name + '-' + field.resolution;
     const png = (channel: PBRChannel, directX = false) =>
       encodeRGBA(pbrPixels(maps, field, project, channel, directX), field.resolution);
     const metadata = {
       application: 'Normal Height',
       version: 1,
-      materialVersion: 2,
+      materialVersion: 3,
       surfaceSchemaVersion: 1,
       resolution: [field.resolution, field.resolution],
       worldSizeMeters: [project.worldSize, project.worldSize],
@@ -137,14 +138,19 @@ export function makeExport(
         unity_hdrp_mask: 'R=metallic (0), G=AO, B=detail mask (255), A=smoothness (1-roughness)',
         splat_rgba: SPLAT_LAYERS,
       },
-      materialModel: 'Geomorphology-driven substrate/snow weights with physical-meter rock stratification, fractures and band-limited microdetail; not a calibrated geological or soil model.',
+      materialModel: 'Seeded biome-specific substrates mixed in linear light using terrain evidence and authored layer coverage.',
+      materialRelief: {
+        minMeters: reliefRange.min, maxMeters: reliefRange.max,
+        decoding: 'vertical relief in meters = minMeters + sample/65535 * (maxMeters-minMeters)',
+      },
+      paintedStrokes: project.materialPaint?.length ?? 0,
       terrainAnalysis: {
         slope: 'Physical gradient in meters per meter; slope exposed in degrees',
         landform: 'Signed plane-corrected multi-radius height residual: positive valley / negative crest',
         aspect: 'Northern hemisphere proxy: positive north-facing, based on the height gradient',
         erosion: 'Wear/deposition relative to nonzero 90th-percentile diagnostics; neither is measured sediment depth',
         snow: 'Relative terrain snow line with slope stability, concavity and aspect retention; not simulated snowpack',
-        ao: 'Horizon sampling in physical meters, not a ray-traced bake',
+        ao: 'Cosine-weighted sky visibility integrated between the local tangent and sampled horizon in eight azimuths',
         resolvedDetail: 'Texture wavelengths smaller than 2-5 source cells fade instead of aliasing or resizing',
         materialHeightUnits: 'Microdetail in meters; the displaced terrain field is unchanged',
       },
@@ -164,10 +170,12 @@ export function makeExport(
         curvature: { colorSpace: 'linear', channels: ['curvature', 'curvature', 'curvature', 'alpha'] },
         unity_hdrp_mask: { colorSpace: 'linear', channels: ['metallic', 'occlusion', 'detailMask', 'smoothness'] },
         height16: { colorSpace: 'linear', channels: ['elevationUNorm16'] },
+        relief16: { colorSpace: 'linear', channels: ['materialReliefUNorm16'] },
       },
     };
     const files: Record<string, Uint8Array> = {
       [prefix + '-height16.png']: encodeHeightPNG(field, range),
+      [prefix + '-relief16.png']: encodeHeightPNG({ height: maps.detail, resolution: maps.resolution }, reliefRange),
       [prefix + '-basecolor.png']: png('basecolor'),
       [prefix + '-normal-gl.png']: png('normal'),
       [prefix + '-normal-dx.png']: png('normal', true),
@@ -198,10 +206,10 @@ export function makeExport(
     bytes = encodeRawHeight(field, project.heightScale);
     filename = `${name}-${field.resolution}-elevation-f32le.raw`;
   } else {
-    const pbrChannels = ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature'];
-    const pixels = pbrChannels.includes(format) || format === 'normalDX'
+    const pbrChannels = ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'detailNormal', 'normalGL', 'normalDX'];
+    const pixels = pbrChannels.includes(format)
       ? pbrPixels(generatePBR(field, project), field, project,
-          format === 'normalDX' ? 'normal' : format as PBRChannel, format === 'normalDX')
+          format === 'normalDX' || format === 'normalGL' ? 'normal' : format as PBRChannel, format === 'normalDX')
       : format === 'normal'
         ? normalMapPixels(field, project.worldSize, project.heightScale)
         : colorizeMap(field, format as 'flow' | 'wear' | 'deposition', project.worldSize, project.heightScale);
@@ -216,6 +224,8 @@ export function makeExport(
     orm: ['occlusion', 'roughness', 'metallic', 'alpha'],
     splat: [...SPLAT_LAYERS],
     curvature: ['curvature', 'curvature', 'curvature', 'alpha'],
+    normalGL: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'],
+    detailNormal: ['microNormalX', 'microNormalY_OpenGL', 'microNormalZ', 'alpha'],
     normalDX: ['normalX', 'normalY_DirectX', 'normalZ', 'alpha'],
     normal: ['normalX', 'normalY_OpenGL', 'normalZ', 'alpha'],
   };
@@ -242,12 +252,12 @@ export function makeExport(
           ? 'Little-endian IEEE 754 Float32 elevation in meters, no header'
           : undefined,
     normalConvention:
-      format === 'normal'
+      ['normal', 'normalGL', 'detailNormal'].includes(format)
         ? 'OpenGL +Y: G encodes north/up, RGB maps [-1,1] to [0,255].'
         : format === 'normalDX'
           ? 'DirectX -Y: green is inverted relative to OpenGL +Y, RGB maps [-1,1] to [0,255].'
           : undefined,
-    materialEncoding: ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalDX'].includes(format)
+    materialEncoding: ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalDX', 'normalGL', 'detailNormal'].includes(format)
       ? 'Procedural PBR material map; see complete PBR bundle for channel packing and color-space conventions.'
       : undefined,
     diagnosticEncoding: ['flow', 'wear', 'deposition'].includes(format)

@@ -1,5 +1,6 @@
+import { parseMaterialPaint } from '../materials/materialPaint';
 import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
-import { resolveSurface, SURFACE_LIMITS } from '../materials/pbr';
+import { resolveSurface, SPLAT_LAYERS, SURFACE_LIMITS } from '../materials/pbr';
 import { NODE_DEFINITIONS, createNode } from './registry';
 import type { NodeKind, TerrainProject, TerrainNode, TerrainEdge, ParamValue } from './types';
 
@@ -125,7 +126,7 @@ export function parseProject(raw: unknown): TerrainProject {
       throw new Error('Invalid PBR surface settings.');
     const rawSurface = p.surface as Record<string, unknown>;
     const biome = rawSurface.biome;
-    if (biome !== undefined && !['alpine', 'arid', 'volcanic'].includes(String(biome)))
+    if (biome !== undefined && (typeof biome !== 'string' || !['alpine', 'arid', 'volcanic'].includes(biome)))
       throw new Error('Unknown PBR biome.');
     const clean = resolveSurface();
     if (biome !== undefined) clean.biome = biome as typeof clean.biome;
@@ -136,6 +137,20 @@ export function parseProject(raw: unknown): TerrainProject {
         if (!finite(value, min, max)) throw new Error('Invalid PBR ' + key + '.');
         clean[key] = value;
       }
+    }
+    if (rawSurface.layerColors !== undefined) {
+      const colors = rawSurface.layerColors;
+      if (!colors || typeof colors !== 'object' || Array.isArray(colors))
+        throw new Error('Invalid material layer colors.');
+      const validated: NonNullable<typeof clean.layerColors> = {};
+      for (const layer of SPLAT_LAYERS) {
+        const color = (colors as Record<string, unknown>)[layer];
+        if (color === undefined) continue;
+        if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color))
+          throw new Error('Invalid material layer color.');
+        validated[layer] = color.toLowerCase();
+      }
+      clean.layerColors = validated;
     }
     surface = clean;
   }
@@ -148,6 +163,7 @@ export function parseProject(raw: unknown): TerrainProject {
     heightScale: p.heightScale,
     presetId: typeof p.presetId === 'string' ? p.presetId : 'custom',
     ...(surface ? { surface } : {}),
+    ...(p.materialPaint !== undefined ? { materialPaint: parseMaterialPaint(p.materialPaint) } : {}),
     graph: { nodes, edges },
   };
 }

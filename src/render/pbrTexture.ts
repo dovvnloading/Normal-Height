@@ -34,6 +34,11 @@ export function updatePreviewTexture(
 
   existing?.dispose();
   const result = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  // UV=0 and UV=1 are DEM sample positions, while texture coordinates
+  // put texel centres at (index + 0.5)/size. Without this transform every
+  // channel drifts by up to half a texel against the mesh and paint cursor.
+  result.offset.setScalar(0.5 / size);
+  result.repeat.setScalar((size - 1) / size);
   result.flipY = true; // row zero is north; PlaneGeometry's top row has v=1
   result.colorSpace = colorSpace;
   result.generateMipmaps = true;

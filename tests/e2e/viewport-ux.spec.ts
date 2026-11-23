@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import type { TerrainProject } from '../../src/model/types';
+import { resolveSurface } from '../../src/materials/pbr';
 
 test.describe('terrain viewport UX', () => {
   test.beforeEach(async ({ page }) => {
@@ -386,4 +388,195 @@ test('2D comparison remains available when the browser cannot create WebGL', asy
   await expect(page.locator('.nh-render-error')).toHaveCount(0);
   await page.getByRole('button', { name: 'Elevation change' }).click();
   await expect(page.locator('.nh-difference-legend')).toBeVisible({ timeout: 30_000 });
+});
+
+test('paints the displayed terrain, commits one undo step, and erases back to the procedural map', async ({ page }, testInfo) => {
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error' && /shader|webgl/i.test(message.text())) errors.push(message.text());
+  });
+  const project: TerrainProject = {
+    name: 'Brush test', version: 1, presetId: 'custom', resolution: 128,
+    seed: 284, surface: resolveSurface({ biome: 'arid' }), worldSize: 5000, heightScale: 750, graph: {
+      nodes: [
+        { id: 'rock', kind: 'mountain', label: 'Massif', position: { x: 0, y: 0 },
+          params: { profile: 'massif' } },
+        { id: 'out', kind: 'output', label: 'Output', position: { x: 240, y: 0 }, params: {} },
+      ],
+      edges: [{ id: 'terrain', source: 'rock', target: 'out', sourceHandle: 'height', targetHandle: 'in' }],
+    },
+  };
+  await page.goto('/');
+  await page.getByLabel('Import terrain project file').setInputFiles({
+    name: 'brush.nhterrain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)),
+  });
+  const scene = page.locator('.nh-three-host canvas');
+  const strokes = () => page.evaluate(() =>
+    (JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject).materialPaint ?? []);
+  await expect(page.locator('.nh-viewport')).toHaveAttribute('data-displayed-world-size', '5000');
+  await page.getByRole('button', { name: 'Paint terrain' }).click();
+  await page.getByRole('button', { name: 'Snow', exact: true }).click();
+  await page.getByRole('slider', { name: 'Brush strength' }).focus();
+  await page.keyboard.press('End');
+  await expect(scene).toHaveAttribute('data-material-status', 'ready');
+  const beforeUpload = Number(await scene.getAttribute('data-pbr-upload-count'));
+  const rect = (await scene.boundingBox())!;
+  const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 36, y + 6, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(async () => (await strokes()).length).toBe(1);
+  const [stroke] = await strokes();
+  expect(stroke.layer).toBe('snow');
+  expect(stroke.points.length).toBeGreaterThan(1);
+  expect(stroke.strength).toBe(1);
+  await expect(scene).toHaveAttribute('data-material-status', 'ready');
+  await expect.poll(async () => Number(await scene.getAttribute('data-pbr-upload-count'))).toBeGreaterThan(beforeUpload);
+  await testInfo.attach('Painted terrain', {
+    body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png',
+  });
+
+  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await page.getByLabel('Map channel').selectOption('snowWeight');
+  const map = page.locator('.nh-map > canvas');
+  const maskRect = (await page.locator('.nh-map-brush-preview').boundingBox())!;
+  const point = stroke.points[0];
+  const mx = maskRect.x + point.u * maskRect.width, my = maskRect.y + point.v * maskRect.height;
+  const pixel = () => map.evaluate((element: HTMLCanvasElement, p) => {
+    const b = element.getBoundingClientRect();
+    return element.getContext('2d')!.getImageData(
+      (p.x - b.x) * element.width / b.width, (p.y - b.y) * element.height / b.height, 1, 1,
+    ).data[0];
+  }, { x: mx, y: my });
+  await expect.poll(pixel).toBe(255);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(async () => (await strokes()).length).toBe(0);
+  await expect.poll(pixel).toBeLessThan(255);
+  const base = await pixel();
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect.poll(pixel).toBe(255);
+  await page.getByRole('button', { name: 'Erase', exact: true }).click();
+  await page.mouse.click(mx, my);
+  await expect.poll(async () => (await strokes()).length).toBe(2);
+  await expect.poll(pixel).toBe(base);
+  // Escape and undo both abandon an uncommitted gesture before history moves.
+  await page.getByRole('button', { name: 'Soil', exact: true }).click();
+  for (const interrupt of ['Escape', 'Control+z']) {
+    await page.mouse.move(mx, my);
+    await page.mouse.down();
+    await page.mouse.move(mx + 28, my + 6, { steps: 4 });
+    await page.keyboard.press(interrupt);
+    await page.mouse.up();
+  }
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(pixel).toBe(255);
+  await expect.poll(async () => (await strokes()).length).toBe(1);
+
+  // Change the material definition under the existing stroke.
+  await page.getByRole('button', { name: 'Snow', exact: true }).click();
+  await page.getByLabel('Map channel').selectOption('basecolor');
+  await page.getByLabel('Edit snow layer color').evaluate((input: HTMLInputElement) => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    setValue.call(input, '#205f9a');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject;
+    return saved.surface?.layerColors?.snow;
+  })).toBe('#205f9a');
+  await expect.poll(async () => {
+    const red = await pixel();
+    return red > 0 && red < 100;
+  }).toBe(true);
+  await expect.poll(async () => (await strokes()).length).toBe(1);
+
+  // The complete brush and channel selector remain reachable on a small phone.
+  await page.setViewportSize({ width: 360, height: 740 });
+  await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Paint terrain' })).toBeInViewport();
+  await expect(page.getByRole('slider', { name: 'Brush hardness' })).toBeInViewport();
+  await expect(page.getByLabel('Map channel')).toBeInViewport();
+  expect(errors).toEqual([]);
+});
+
+test('paints an alpine outcrop with the close-range material shader active', async ({ page }, info) => {
+  test.setTimeout(150_000);
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => {
+    if (m.type() === 'error' && /WebGLProgram|shader|GLSL/i.test(m.text())) errors.push(m.text());
+  });
+  // Keep SwiftShader's close-range fragment workload bounded on shared runners.
+  await page.setViewportSize({ width: 960, height: 660 });
+  await page.goto('/');
+  const terrain = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(terrain).toHaveAttribute('data-material-status', 'ready', { timeout: 90_000 });
+  await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
+
+  // The renderer preserves its color buffer for snapshot export. Read the
+  // actual frame directly, after the scene has had time to present the upload.
+  // This avoids compositor screenshot actionability waits on software WebGL.
+  const capture = () => terrain.evaluate(async (source: HTMLCanvasElement) => {
+    await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    const sample = document.createElement('canvas');
+    sample.width = 96;
+    sample.height = 64;
+    const ctx = sample.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(source, 0, 0, sample.width, sample.height);
+    const pixels = ctx.getImageData(0, 0, sample.width, sample.height).data;
+    const colors = new Set<number>();
+    const center: number[] = [];
+    for (let y = 0; y < sample.height; y++) {
+      for (let x = 0; x < sample.width; x++) {
+        const p = 4 * (y * sample.width + x);
+        colors.add((pixels[p] << 16) | (pixels[p + 1] << 8) | pixels[p + 2]);
+        // A terrain-centered patch inside the brush, clear of its cursor and falloff.
+        if (x >= 45 && x < 51 && y >= 30 && y < 34)
+          center.push(0.2126 * pixels[p] + 0.7152 * pixels[p + 1] + 0.0722 * pixels[p + 2]);
+      }
+    }
+    return { colors: colors.size, center, png: source.toDataURL('image/png').split(',')[1] };
+  });
+
+  const wide = await capture();
+  expect(wide.colors).toBeGreaterThan(32);
+  await info.attach('Alpine watershed with rebuilt materials', {
+    body: Buffer.from(wide.png, 'base64'), contentType: 'image/png',
+  });
+  await terrain.dblclick();
+  await terrain.hover();
+  await page.mouse.wheel(0, -4000);
+  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 30_000 });
+  await page.getByRole('button', { name: 'Paint terrain' }).click();
+  await page.getByRole('slider', { name: 'Brush strength' }).focus();
+  await page.keyboard.press('End');
+  const paintCenter = async (layer: 'Snow' | 'Rock') => {
+    await page.getByRole('button', { name: layer, exact: true }).click();
+    const rect = (await terrain.boundingBox())!;
+    const uploads = Number(await terrain.getAttribute('data-pbr-upload-count'));
+    await page.mouse.click(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.mouse.move(1, 1);
+    await expect.poll(async () => Number(await terrain.getAttribute('data-pbr-upload-count')), {
+      timeout: 30_000,
+    }).toBeGreaterThan(uploads);
+    await expect(terrain).toHaveAttribute('data-material-status', 'ready');
+  };
+  await paintCenter('Snow');
+  const snow = await capture();
+  await info.attach('Painted alpine snow at close range', {
+    body: Buffer.from(snow.png, 'base64'), contentType: 'image/png',
+  });
+  await paintCenter('Rock');
+  const rock = await capture();
+  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active');
+  await info.attach('Painted alpine rock at close range', {
+    body: Buffer.from(rock.png, 'base64'), contentType: 'image/png',
+  });
+  expect(rock.colors).toBeGreaterThan(32);
+  const darker = rock.center.filter((luma, i) => snow.center[i] - luma > 8).length;
+  expect(darker / rock.center.length, 'fraction of brush center darkened by replacing snow with rock')
+    .toBeGreaterThan(0.65);
+  expect(errors).toEqual([]);
 });

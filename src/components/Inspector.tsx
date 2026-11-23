@@ -13,7 +13,7 @@ import {
   ArrowDownUp,
 } from 'lucide-react';
 import { NODE_DEFINITIONS } from '../model/registry';
-import { resolveSurface } from '../materials/pbr';
+import { layerColorHex, resolveSurface, SPLAT_LAYERS } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { NumberField, ParamControl } from './Controls';
@@ -445,6 +445,25 @@ export function Inspector({
                 value={surface.biome}
                 onChange={v => onProjectChange({ surface: { ...surface, biome: v as typeof surface.biome } })}
               />
+              <fieldset className="layer-palette">
+                <legend>Layer albedo</legend>
+                <div className="layer-swatches">
+                  {SPLAT_LAYERS.map(layer => (
+                    <label key={layer}>
+                      <input type="color" aria-label={layer + ' albedo'}
+                        value={layerColorHex(surface, layer)}
+                        onChange={event => onProjectChange({ surface: { ...surface,
+                          layerColors: { ...surface.layerColors, [layer]: event.target.value },
+                        } })} />
+                      {layer}
+                    </label>
+                  ))}
+                </div>
+                {surface.layerColors && <button type="button" className="text-button"
+                  onClick={() => onProjectChange({ surface: { ...surface, layerColors: undefined } })}>
+                  Restore biome colors
+                </button>}
+              </fieldset>
               <ParamControl
                 definition={{
                   key: 'nearFieldDetail',

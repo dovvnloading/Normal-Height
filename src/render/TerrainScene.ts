@@ -9,16 +9,20 @@ import {
 } from './terrainMesh';
 import type { BudgetedStep, TerrainMeshPlan, TerrainSampler } from './terrainMesh';
 import { resolveSurface } from '../materials/pbr';
+import { fabricFrame } from '../materials/surfaceFabric';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
 import { createSlopeTexture, createSourceNormalUniforms, installSourceNormals } from './sourceNormals';
-import { packedPreview, requestPBR } from '../materials/pbrClient';
+import { packedPreview, requestPBR, pbrVariantKey } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { Atmosphere, skyLighting } from './Atmosphere';
 import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
 import { updatePreviewTexture } from './pbrTexture';
 import { applyPackedPBRMaterial } from './pbrMaterial';
+import { createTerrainPicker } from './terrainPicking';
+import { MaterialBrushOverlay } from './materialBrushOverlay';
+import type { BrushFeedback } from './brushFeedback';
 import { geometryBufferBytes } from './meshDiagnostics';
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
@@ -161,6 +165,11 @@ export class TerrainScene {
   private splineMode: 'river' | 'ridge' = 'river';
   private splineGuide: THREE.Group | null = null;
   private readonly onContextLost: (event: Event) => void;
+  private brush: BrushFeedback | null = null;
+  private brushOverlay: MaterialBrushOverlay | null = null;
+  private pickSurface: ReturnType<typeof createTerrainPicker> | null = null;
+  private readonly inverseTerrain = new THREE.Matrix4();
+  private readonly localRay = new THREE.Ray();
   private readonly raycaster = new THREE.Raycaster();
   private readonly rayPointer = new THREE.Vector2();
   private readonly hoverMarker = new THREE.Mesh(
@@ -188,12 +197,23 @@ export class TerrainScene {
       1 - ((clientY - bounds.top) / bounds.height) * 2,
     );
     this.raycaster.setFromCamera(this.rayPointer, this.renderCamera());
-    const hit = this.raycaster.intersectObject(this.terrain, false)[0];
-    if (!hit) return null;
-    return {
-      u: THREE.MathUtils.clamp(hit.point.x / TERRAIN_SIZE + 0.5, 0, 1),
-      v: THREE.MathUtils.clamp(hit.point.z / TERRAIN_SIZE + 0.5, 0, 1),
-    };
+    this.terrain.updateWorldMatrix(true, false);
+    this.inverseTerrain.copy(this.terrain.matrixWorld).invert();
+    this.localRay.copy(this.raycaster.ray).applyMatrix4(this.inverseTerrain);
+    return this.pickSurface?.(this.localRay) ?? null;
+  }
+
+  setMaterialBrush(feedback: BrushFeedback | null) {
+    this.brush = feedback;
+    this.brushOverlay?.dispose();
+    this.brushOverlay = null;
+    if (feedback && this.terrain) {
+      this.brushOverlay = new MaterialBrushOverlay(this.terrain.geometry, feedback, () => {
+        this.needsRender = true;
+      });
+      this.terrain.add(this.brushOverlay.mesh);
+    }
+    this.needsRender = true;
   }
 
   /** Keep linked inspection markers independent of adaptive geometry and exports. */
@@ -671,7 +691,8 @@ export class TerrainScene {
       this.settings.meshQuality !== settings.meshQuality;
     const paletteChanged = this.settings.material !== settings.material;
     const surfaceChanged = JSON.stringify(this.project?.surface ?? null) !==
-      JSON.stringify(project.surface ?? null) || this.project?.seed !== project.seed;
+      JSON.stringify(project.surface ?? null) || this.project?.seed !== project.seed ||
+      this.project?.materialPaint !== project.materialPaint;
     this.field = field;
     this.project = project;
     if (settings !== this.settings) this.applySettings(settings);
@@ -1042,6 +1063,11 @@ export class TerrainScene {
     this.terrain.castShadow = true;
     this.terrain.scale.y = this.settings.exaggeration;
     this.scene.add(this.terrain);
+    this.pickSurface = createTerrainPicker(geometry, plan);
+    if (this.brushOverlay) {
+      this.brushOverlay.mesh.geometry = geometry;
+      this.terrain.add(this.brushOverlay.mesh);
+    } else if (this.brush) this.setMaterialBrush(this.brush);
     this.lodKey = plan.key;
     this.currentMeshPlan = plan;
     this.meshBuilds++;
@@ -1190,14 +1216,7 @@ export class TerrainScene {
       return;
     }
     const field = this.field, project = this.project;
-    const surface = resolveSurface(project.surface);
-    this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
-    this.nearField.nhDetailMeters.value = surface.detailMeters;
-    this.nearField.nhDetailStrength.value = surface.detailStrength;
-    this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
-    const surfaceKey = JSON.stringify([
-      project.seed, project.surface ?? null, project.worldSize, project.heightScale,
-    ]);
+    const surfaceKey = pbrVariantKey(project);
     if (this.lastPBRField === field && this.lastPBRSurface === surfaceKey) return;
     this.pbrRelease?.();
     const generation = ++this.pbrGeneration;
@@ -1215,6 +1234,15 @@ export class TerrainScene {
       this.pbrRelease?.();
       this.pbrRelease = null;
       const preparedAt = performance.now();
+      // Switch the close-up model and the worker-baked maps together after
+      // the generation check. Rapid biome/brush edits may supersede this job.
+      const surface = resolveSurface(project.surface);
+      this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
+      this.nearField.nhDetailMeters.value = surface.detailMeters;
+      this.nearField.nhFabricAzimuth.value = fabricFrame(project.seed).azimuth;
+      this.nearField.nhBiome.value = surface.biome === 'alpine' ? 0 : surface.biome === 'arid' ? 1 : 2;
+      this.nearField.nhDetailStrength.value = surface.detailStrength;
+      this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
       const n = maps.resolution;
       const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
       const existing = this.pbrTextures;
@@ -1242,6 +1270,7 @@ export class TerrainScene {
       monitor.pbrTextureCount = String(this.pbrTextures.length);
       this.measurePBRFirstRender = true;
       monitor.materialStatus = 'ready';
+      this.brush?.baked(project.materialPaint);
       this.needsRender = true;
     }).catch((error: Error) => {
       if (this.disposed || generation !== this.pbrGeneration) return;
@@ -1423,6 +1452,7 @@ export class TerrainScene {
     }
     this.gpuPending = [];
     this.gpuDurationsMs = [];
+    this.brushOverlay?.dispose();
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.atmosphere?.dispose();

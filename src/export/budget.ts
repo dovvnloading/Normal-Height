@@ -10,7 +10,7 @@ const MiB = 1024 * 1024;
 export function estimatePBRPeakMiB(resolution: number): number {
   if (!Number.isInteger(resolution) || resolution < 2 || resolution > 8192)
     throw new Error('Invalid PBR export resolution.');
-  return Math.ceil((64 * MiB + resolution * resolution * 150) / MiB);
+  return Math.ceil((64 * MiB + resolution * resolution * 156) / MiB);
 }
 
 /** Unknown-memory browsers get a conservative budget; 2K needs a strong device hint. */

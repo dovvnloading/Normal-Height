@@ -67,6 +67,16 @@ export function diagnosticReference(values: Float32Array): number {
 }
 
 /**
+ * Twice the cosine-weighted blocked irradiance along a vertical azimuth slice,
+ * before normal normalization. Integrate (sin(e) - t cos(e)) cos(e) from
+ * the local tangent atan(t) to the maximum sampled horizon atan(h).
+ */
+function blockedSlice(t: number, h: number): number {
+  if (h <= t) return 0;
+  return h * (h - t) / (1 + h * h) - t * Math.atan2(h - t, 1 + h * t);
+}
+
+/**
  * Local physical slope, north/south aspect, signed multi-scale landform and
  * plane-corrected horizon occlusion. On an affine tilted plane every symmetric
  * height residual is zero; a valley has positive residual and a ridge negative.
@@ -80,6 +90,14 @@ export function createTerrainAnalyzer(field: HeightField, project: TerrainProjec
   const heights = field.height;
   const cell = project.worldSize / (n - 1);
   const scale = project.heightScale;
+  const diag = Math.SQRT1_2;
+  const axes = [[1, 0], [diag, diag], [0, 1], [-diag, diag]].map(([ux, uy]) => ({
+    ux, uy,
+    probes: AO_RADII_METERS.filter(m => m / cell >= 2).map(m => ({
+      dx: ux * m / cell, dy: uy * m / cell, invMeters: 1 / m,
+      weight: Math.sqrt(AO_RADII_METERS[0] / m),
+    })),
+  }));
   return (x: number, y: number, out: TerrainFactors = {
     grade: 0, gradientX: 0, gradientY: 0, slopeDegrees: 0,
     northness: 0, landform: 0, occlusion: 1,
@@ -91,27 +109,24 @@ export function createTerrainAnalyzer(field: HeightField, project: TerrainProjec
     const gy = (heights[b * n + x] - heights[t * n + x]) * scale / ((b - t || 1) * cell);
     const grade = Math.hypot(gx, gy);
     const h = heights[i] * scale;
-    let horizon = 0, landform = 0, landformWeight = 0;
-
-    for (const meters of AO_RADII_METERS) {
-      const radius = meters / cell;
-      if (radius < 2) continue; // no inventing sub-Nyquist topographic features
-      // Both directions must be present for curvature to cancel a plane.
-      const weight = Math.sqrt(AO_RADII_METERS[0] / meters);
-      if (x >= radius && x + radius <= n - 1) {
-        const plus = elevationAt(heights, n, x + radius, y) * scale - h - gx * meters;
-        const minus = elevationAt(heights, n, x - radius, y) * scale - h + gx * meters;
-        horizon += clamp(plus / meters * 1.8) + clamp(minus / meters * 1.8);
-        landform += (plus + minus) / (2 * meters) * weight;
-        landformWeight += weight;
+    let blocked = 0, landform = 0, landformWeight = 0;
+    for (const { ux, uy, probes } of axes) {
+      const tangent = gx * ux + gy * uy;
+      let forward = tangent, backward = -tangent;
+      for (const { dx, dy, invMeters, weight } of probes) {
+        const px = x + dx, py = y + dy, mx = x - dx, my = y - dy;
+        const hasFront = px >= 0 && py >= 0 && px <= n - 1 && py <= n - 1;
+        const hasBack = mx >= 0 && mx <= n - 1 && my >= 0 && my <= n - 1;
+        const front = hasFront ? (elevationAt(heights, n, px, py) * scale - h) * invMeters : tangent;
+        const back = hasBack ? (elevationAt(heights, n, mx, my) * scale - h) * invMeters : -tangent;
+        forward = Math.max(forward, front);
+        backward = Math.max(backward, back);
+        if (hasFront && hasBack) {
+          landform += 0.5 * (front + back) * weight;
+          landformWeight += weight;
+        }
       }
-      if (y >= radius && y + radius <= n - 1) {
-        const plus = elevationAt(heights, n, x, y + radius) * scale - h - gy * meters;
-        const minus = elevationAt(heights, n, x, y - radius) * scale - h + gy * meters;
-        horizon += clamp(plus / meters * 1.8) + clamp(minus / meters * 1.8);
-        landform += (plus + minus) / (2 * meters) * weight;
-        landformWeight += weight;
-      }
+      blocked += blockedSlice(tangent, forward) + blockedSlice(-tangent, backward);
     }
     out.grade = grade;
     out.gradientX = gx;
@@ -120,7 +135,7 @@ export function createTerrainAnalyzer(field: HeightField, project: TerrainProjec
     // Rows increase southward. A downhill-facing-north surface climbs south.
     out.northness = grade > 1e-7 ? gy / grade : 0;
     out.landform = landformWeight ? landform / landformWeight : 0;
-    out.occlusion = clamp(1 - 2.2 * horizon / (AO_RADII_METERS.length * 4), 0.45, 1);
+    out.occlusion = clamp(1 - blocked / (8 * Math.sqrt(1 + grade * grade)));
     return out;
   };
 }

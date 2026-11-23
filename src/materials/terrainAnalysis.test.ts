@@ -31,6 +31,17 @@ describe('physical terrain analysis and material layering', () => {
     expect(maps.curvature[64 * n + 64]).toBe(128);
   });
 
+  it('matches the cosine-weighted sky fraction at the bottom of a conical basin', () => {
+    const scene = { ...createProject(), worldSize: 1024, heightScale: 1024 };
+    // At the basin origin slopes cancel; a circular rim at elevation atan(m)
+    // leaves cos²(atan(m)) = 1 / (1 + m²) of sky irradiance.
+    for (const m of [0.25, 1, 2]) {
+      const basin = fieldFrom(257, (u, v) => m * Math.hypot(u - 0.5, v - 0.5));
+      expect(createTerrainAnalyzer(basin, scene)(128, 128).occlusion)
+        .toBeCloseTo(1 / (1 + m * m), 3);
+    }
+  });
+
   it('distinguishes valleys from convex crests at identical world coordinates', () => {
     const n = 129;
     const project = { ...createProject(), worldSize: 1000, heightScale: 1200 };

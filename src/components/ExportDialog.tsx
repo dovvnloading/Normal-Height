@@ -171,7 +171,7 @@ export function ExportDialog({
             >
               <option value="png16">Heightmap · 16-bit PNG</option>
               <option value="raw32">Elevation · Float32 RAW</option>
-              <option value="normal">Normal map · 8-bit PNG</option>
+              <option value="normal">Terrain normal · OpenGL +Y PNG</option>
               <option value="flow">Flow visualization · 8-bit PNG</option>
               <option value="wear">Erosion wear · 8-bit PNG</option>
               <option value="deposition">Deposition · 8-bit PNG</option>
@@ -183,7 +183,9 @@ export function ExportDialog({
               <option value="orm">PBR packed ORM · PNG</option>
               <option value="splat">Terrain layer weights · RGBA PNG</option>
               <option value="curvature">Terrain curvature · PNG</option>
-              <option value="normalDX">Normal map · DirectX -Y PNG</option>
+              <option value="normalGL">Material normal · OpenGL +Y PNG</option>
+              <option value="detailNormal">Material detail normal · OpenGL +Y PNG</option>
+              <option value="normalDX">Material normal · DirectX -Y PNG</option>
             </select>
           </label>
           <label>
@@ -241,7 +243,7 @@ export function ExportDialog({
             <dt>Precision</dt>
             <dd>
               {format === 'pbr'
-                ? '16-bit height + 8-bit PBR maps'
+                ? '16-bit terrain and relief + 8-bit PBR maps'
                 : format === 'png16'
                   ? '65,536 elevation levels'
                 : format === 'raw32'
@@ -261,7 +263,7 @@ export function ExportDialog({
           </p>
         )}
         {format === 'pbr' && (
-          <p className="parameter-hint">PBR ZIP includes base color, both normal conventions, micro-normal, roughness, AO, metallic, ORM, Unity HDRP mask, layer weights, curvature, and 16-bit displacement. Albedo is sRGB; other maps are linear data.</p>
+          <p className="parameter-hint">PBR ZIP includes base color, both normal conventions, micro-normal, roughness, AO, metallic, ORM, Unity HDRP mask, layer weights, curvature, 16-bit terrain height and 16-bit material relief. Albedo uses sRGB. Data maps use linear encoding.</p>
         )}
         {format === 'normal' && (
           <p className="parameter-hint">
