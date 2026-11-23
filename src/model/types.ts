@@ -130,6 +130,8 @@ export interface ViewSettings {
   groundReach: number;
   /** Optional preview-only water; never changes the graph, PBR maps or exported data. */
   waterEnabled: boolean;
+  /** Extend a connected coast into a panoramic ocean beyond the square tile. */
+  waterHorizon: boolean;
   waterLevelMode: 'coast' | 'manual';
   /** Manual waterline in physical meters, independent of vertical exaggeration. */
   waterLevel: number;

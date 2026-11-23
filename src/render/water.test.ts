@@ -50,12 +50,15 @@ describe('physical waterline and optional rendering', () => {
       skyEnabled: true, waterPalette: 'ocean' as const };
     water.update(source, project, settings);
     expect(water.mesh.position.y).toBeCloseTo(waterSceneHeight(504, project, 1) + 0.00012);
+    expect(water.mesh.scale.x).toBe(3.4);
     expect(water.mesh.material.uniforms.uHeightScale.value).toBe(project.heightScale);
     const texture = water.mesh.material.uniforms.uHeightMap.value as THREE.DataTexture;
     expect(texture.image.data).toBe(source.height);
     expect(texture.minFilter).toBe(THREE.NearestFilter);
     expect(texture.format).toBe(THREE.RedFormat);
-    water.update(source, project, { ...settings, waterWaveHeight: 0, waterSpeed: 0 });
+    water.update(source, project, { ...settings, waterWaveHeight: 0, waterSpeed: 0,
+      waterHorizon: false });
+    expect(water.mesh.scale.x).toBe(1);
     expect(water.mesh.material.uniforms.uHeightMap.value).toBe(texture);
     expect(water.mesh.material.uniforms.uWaveScene.value).toBe(0);
     expect(Object.keys(WATER_PALETTES)).toHaveLength(4);

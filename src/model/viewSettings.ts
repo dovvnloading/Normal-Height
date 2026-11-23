@@ -27,6 +27,7 @@ export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   expandGround: false,
   groundReach: 5,
   waterEnabled: false,
+  waterHorizon: true,
   waterLevelMode: 'coast',
   waterLevel: 0,
   waterPalette: 'lagoon',
@@ -56,7 +57,7 @@ const ranges: Partial<Record<keyof ViewSettings, [number, number]>> = {
 
 const switches: (keyof ViewSettings)[] = [
   'contours', 'wireframe', 'autoRotate', 'skyEnabled', 'expandGround',
-  'nearFieldDetail', 'waterEnabled',
+  'nearFieldDetail', 'waterEnabled', 'waterHorizon',
 ];
 
 export function parseViewSettings(value: unknown): ViewSettings {

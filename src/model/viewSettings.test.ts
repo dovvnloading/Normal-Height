@@ -21,6 +21,7 @@ describe('versioned preview settings', () => {
     expect(settings.exaggeration).toBe(1.8);
     expect(settings.sunAzimuth).toBe(DEFAULT_VIEW_SETTINGS.sunAzimuth);
     expect(settings.waterEnabled).toBe(false);
+    expect(settings.waterHorizon).toBe(true);
     expect(settings.waterLevelMode).toBe('coast');
   });
 
@@ -35,6 +36,7 @@ describe('versioned preview settings', () => {
       nearFieldDetail: 'false',
       material: 'unrecognized',
       waterEnabled: 'true',
+      waterHorizon: 'true',
       waterLevelMode: 'invalid',
       waterPalette: 'rainbow',
       waterWaveHeight: 120,

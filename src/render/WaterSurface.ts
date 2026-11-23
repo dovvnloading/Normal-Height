@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { TERRAIN_SIZE } from './GroundExtension';
-import { resolveWaterLevelMeters, WATER_PALETTES, waterSceneHeight } from './water';
+import { linkedCoastLevel, resolveWaterLevelMeters, WATER_PALETTES, waterSceneHeight } from './water';
 
 /**
  * Physically scaled, depth-aware, translucent water in its own render pass.
@@ -236,7 +236,13 @@ export class WaterSurface {
     }
     const u = this.mesh.material.uniforms;
     const level = resolveWaterLevelMeters(project, settings, field);
-    const extent = settings.expandGround ? 2.5 : 1;
+    // For authored Coast graphs, dissolve the square floating-tile boundary
+    // into a broad open sea; artists may turn this off for tile-only previews.
+    // Inland water keeps its natural confined basins by default.
+    const hasCoast = linkedCoastLevel(project) !== null;
+    const extent = settings.waterHorizon
+      ? hasCoast ? 3.4 : settings.expandGround ? 2.5 : 1
+      : 1;
     this.mesh.scale.set(extent, 1, extent);
     this.mesh.position.y = waterSceneHeight(level, project, settings.exaggeration) + 0.00012;
     u.uExtent.value = extent;

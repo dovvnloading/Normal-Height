@@ -47,6 +47,13 @@ test('cinematic water is drawn, adjustable, coastline-linked, persistent, and op
   });
 
   await page.getByRole('button', { name: 'Display settings' }).click();
+  await page.getByRole('button', { name: 'Apply Tropical noon scene' }).click();
+  await expect(canvas).toHaveAttribute('data-water-level-meters', '504.00');
+  await expect(page.getByRole('checkbox', { name: 'Extend ocean horizon' })).toBeChecked();
+  await page.waitForTimeout(450);
+  const cinematic = await page.screenshot({ clip: clip!, timeout: 30_000 });
+  expect(cinematic.equals(wet), 'cinematic lighting and ocean must change rendered pixels').toBe(false);
+  await testInfo.attach('cinematic-tropical-island.png', { body: cinematic, contentType: 'image/png' });
   await expect(page.getByRole('region', { name: 'Display settings' })).toContainText(
     'Water & coastline',
   );
@@ -68,9 +75,13 @@ test('cinematic water is drawn, adjustable, coastline-linked, persistent, and op
   await page.getByRole('button', { name: 'Follow coastline' }).click();
   await expect(canvas).toHaveAttribute('data-water-level-meters', '504.00');
 
-  // Presentation settings survive a reload, without modifying the terrain.
+  // Appearance persists independently from the graph. Imported projects are
+  // kept as autosaved sessions and require an explicit restore after reload.
+  await expect(page.locator('.save-state')).toContainText('Saved locally');
   await page.reload();
+  await page.getByRole('button', { name: 'Restore last session' }).click();
   const restored = page.getByRole('img', { name: /^Interactive 3D terrain/ });
+  await expect(page.locator('.nh-viewport')).toHaveAttribute('data-displayed-world-size', '4800', { timeout: 90_000 });
   await expect(restored).toHaveAttribute('data-water-status', 'ready', { timeout: 90_000 });
   await expect(restored).toHaveAttribute('data-water-level-meters', '504.00');
   await expect(page.locator('.nh-water-readout')).toContainText('Open ocean');

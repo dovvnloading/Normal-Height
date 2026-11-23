@@ -140,3 +140,10 @@ water-level slider sets a manual elevation in meters. Shallow water reveals the 
 foam follows the source coastline, and sky/sun controls light reflected swells.
 Water geometry and depth textures are only allocated while enabled; motion can be paused
 with Wave motion = 0. Screenshots include water, while numeric exports do not.
+
+
+Cinematic scene shortcuts set coordinated sun, sky, cloud and water settings:
+**Tropical noon** for clear lagoon water; **Golden coast** for warm low-angle reflections;
+and **Storm surf** for choppy blue-gray seas. For graphs with an upstream Coast node,
+**Open ocean beyond the tile** is on by default, hiding the square water boundary.
+Uncheck it to inspect just the authored terrain tile. These are rendering choices only.

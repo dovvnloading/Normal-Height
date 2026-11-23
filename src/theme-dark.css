@@ -1564,3 +1564,14 @@
   color: #d7f5f6;
   background: #36535a;
 }
+
+:root[data-theme="dark"] .nh-water-moods button {
+  color: #c9dbdc;
+  background: #303b3d;
+  border-color: #526c6d;
+}
+:root[data-theme="dark"] .nh-water-moods button:hover {
+  color: #f3ffff;
+  background: #385258;
+  border-color: #85abb3;
+}

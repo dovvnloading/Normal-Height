@@ -143,6 +143,39 @@ const CHANNEL_GROUPS = [
     'vegetationWeight', 'snowWeight'] },
 ] as const;
 
+const WATER_MOODS = [
+  {
+    id: 'tropical',
+    label: 'Tropical noon',
+    settings: {
+      waterPalette: 'lagoon', waterHorizon: true, skyEnabled: true,
+      sunAzimuth: 250, sunElevation: 63, skyTurbidity: 2.3,
+      skyRayleigh: 2.3, skyExposure: 1.03, cloudCoverage: 0.12,
+      waterWaveHeight: 1.1, waterSpeed: 0.7, waterClarity: 0.84, waterFoam: 0.72,
+    },
+  },
+  {
+    id: 'golden',
+    label: 'Golden coast',
+    settings: {
+      waterPalette: 'dusk', waterHorizon: true, skyEnabled: true,
+      sunAzimuth: 252, sunElevation: 11, skyTurbidity: 5.5,
+      skyRayleigh: 2.9, skyExposure: 1.04, cloudCoverage: 0.28,
+      waterWaveHeight: 1.0, waterSpeed: 0.55, waterClarity: 0.7, waterFoam: 0.78,
+    },
+  },
+  {
+    id: 'storm',
+    label: 'Storm surf',
+    settings: {
+      waterPalette: 'ocean', waterHorizon: true, skyEnabled: true,
+      sunAzimuth: 315, sunElevation: 24, skyTurbidity: 9,
+      skyRayleigh: 1.8, skyExposure: 0.90, cloudCoverage: 0.90,
+      waterWaveHeight: 3.4, waterSpeed: 1.4, waterClarity: 0.40, waterFoam: 0.96,
+    },
+  },
+] as const;
+
 const VIEWPORT_TOOLS = [
   { value: 'navigate', label: 'Navigate', Icon: MousePointer2 },
   { value: 'paint', label: 'Paint', Icon: Paintbrush },
@@ -1889,6 +1922,18 @@ export function TerrainViewport({
             </label>
             {settings.waterEnabled && (
               <div className="nh-water-settings">
+                <div className="nh-water-moods" role="group" aria-label="Cinematic water scenes">
+                  {WATER_MOODS.map(mood => (
+                    <button key={mood.id} type="button"
+                      aria-label={`Apply ${mood.label} scene`}
+                      title={`Set water, sun, sky and clouds for ${mood.label.toLowerCase()}`}
+                      onClick={() => change({ ...mood.settings, waterEnabled: true })}>
+                      <span className={`nh-water-mood-swatch nh-water-mood-${mood.id}`}
+                        aria-hidden="true" />
+                      <span>{mood.label}</span>
+                    </button>
+                  ))}
+                </div>
                 <div className="nh-water-palettes" role="group" aria-label="Water appearance">
                   {(Object.keys(WATER_PALETTES) as ViewSettings['waterPalette'][]).map(id => (
                     <button key={id} type="button" title={WATER_PALETTES[id].label}
@@ -1903,6 +1948,12 @@ export function TerrainViewport({
                     </button>
                   ))}
                 </div>
+                <label className="nh-display-check">
+                  <input type="checkbox" aria-label="Extend ocean horizon"
+                    checked={settings.waterHorizon}
+                    onChange={e => change({ waterHorizon: e.target.checked })} />
+                  <span>Open ocean beyond the tile</span>
+                </label>
                 <div className="nh-water-level-mode" role="group" aria-label="Water level source">
                   <button type="button" aria-pressed={settings.waterLevelMode === 'coast'}
                     className={settings.waterLevelMode === 'coast' ? 'active' : ''}
@@ -1946,7 +1997,8 @@ export function TerrainViewport({
                 </label>
                 <p className="nh-display-help">
                   Moving swells, Fresnel reflections, shallow color and terrain-following foam.
-                  Follow coastline uses the connected Coastal shelf node. Slide the waterline
+                  A connected Coastal shelf opens the surrounding sea. Follow coastline uses
+                  the Coast waterline in meters. Slide the waterline
                   to override it. These effects never change terrain or exported maps.
                 </p>
               </div>
