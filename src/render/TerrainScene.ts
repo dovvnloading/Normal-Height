@@ -4,11 +4,12 @@ import type { TerrainPoint } from '../model/viewportUX';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
 import { alpineMaterialVariation, terrainColor } from './maps';
 import {
-  adaptiveTerrainGeometrySteps, advanceWithinBudget, createTerrainSampler, planTerrainMesh,
+  adaptiveTerrainGeometrySteps, advanceWithinBudget, planTerrainMesh,
   planUniform512Reference, runToCompletion,
 } from './terrainMesh';
 import type { BudgetedStep, TerrainMeshPlan, TerrainSampler } from './terrainMesh';
-import { resolveSurface } from '../materials/pbr';
+import { createDisplacedTerrainSampler } from './terrainDisplacement';
+import { resolveSurface, type PBRMaps } from '../materials/pbr';
 import { fabricFrame } from '../materials/surfaceFabric';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
@@ -49,30 +50,27 @@ export interface MeshBenchmarkHooks {
 }
 type BenchmarkWindow = Window & { __nhMeshBenchmark?: MeshBenchmarkHooks };
 
+interface DisplacedSurface {
+  field: HeightField;
+  project: TerrainProject;
+  maps: PBRMaps;
+  sampler: TerrainSampler;
+}
+
+function displacementSettings(project: TerrainProject) {
+  // Pigment and ambient occlusion affect only the textures.
+  const { layerColors, aoStrength, ...shape } = resolveSurface(project.surface);
+  return JSON.stringify([project.seed, project.worldSize, project.heightScale, shape]);
+}
+
 interface PendingTerrainMesh {
+  surface?: DisplacedSurface;
   plan: TerrainMeshPlan;
   sampler: TerrainSampler;
   steps: Generator<void, BuiltTerrainMesh, undefined>;
   cpuMs: number;
   maxSliceMs: number;
   frames: number;
-}
-
-function bilinear(values: Float32Array, n: number, u: number, v: number) {
-  const x = clamp(u) * (n - 1),
-    y = clamp(v) * (n - 1);
-  const ix = Math.floor(x),
-    iy = Math.floor(y),
-    nx = Math.min(n - 1, ix + 1),
-    ny = Math.min(n - 1, iy + 1);
-  const fx = x - ix,
-    fy = y - iy;
-  return (
-    values[iy * n + ix] * (1 - fx) * (1 - fy) +
-    values[iy * n + nx] * fx * (1 - fy) +
-    values[ny * n + ix] * (1 - fx) * fy +
-    values[ny * n + nx] * fx * fy
-  );
 }
 
 export class TerrainScene {
@@ -100,8 +98,7 @@ export class TerrainScene {
   private pbrRelease: (() => void) | null = null;
   private pbrGeneration = 0;
   private heightSampler: TerrainSampler | null = null;
-  private samplerSource: Float32Array | null = null;
-  private samplerScaleKey = '';
+  private surfaceMaps: PBRMaps | null = null;
   private lodKey = '';
   private currentMeshPlan: TerrainMeshPlan | null = null;
   // Camera-driven LOD refreshes are built a slice per frame, never in one stall.
@@ -184,7 +181,9 @@ export class TerrainScene {
     new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ color: '#fff3da', linewidth: 2, depthTest: false }),
   );
-  private inspectLineField: HeightField | null = null;
+  private hoverPoint: TerrainPoint | null = null;
+  private pinnedPoints: readonly TerrainPoint[] = [];
+  private inspectLineSurface: ReturnType<typeof createTerrainPicker> | null = null;
   private inspectLineKey = '';
 
   /** Hit-test the displayed terrain, returning coordinates in the source heightfield. */
@@ -216,67 +215,53 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
-  /** Keep linked inspection markers independent of adaptive geometry and exports. */
+  /** Height on the displayed triangles in scene units, including exaggeration. */
+  private displayedHeight(u: number, v: number): number {
+    return this.pickSurface!.heightAt(u, v) * this.settings.exaggeration;
+  }
+
   setInspection(hover: TerrainPoint | null, pinned: readonly TerrainPoint[]) {
-    const field = this.field, project = this.project;
+    this.hoverPoint = hover;
+    this.pinnedPoints = pinned;
     const locate = (point: TerrainPoint, out: THREE.Object3D) => {
-      if (!field || !project) return;
-      const surface = this.heightSampler?.height(point.u, point.v) ??
-        bilinear(field.height, field.resolution, point.u, point.v);
-      const y = surface *
-        TERRAIN_SIZE * project.heightScale / project.worldSize * this.settings.exaggeration;
-      // Keep a real terrain-relative base height, then apply only a few
-      // screen pixels of clearance when the camera frame changes.
+      const y = this.displayedHeight(point.u, point.v);
       out.userData.nhBaseElevation = y;
-      out.position.set(
-        (point.u - 0.5) * TERRAIN_SIZE, y, (point.v - 0.5) * TERRAIN_SIZE,
-      );
+      out.position.set((point.u - 0.5) * TERRAIN_SIZE, y, (point.v - 0.5) * TERRAIN_SIZE);
     };
-    this.hoverMarker.visible = !!field && !!hover;
-    if (hover) locate(hover, this.hoverMarker);
-    for (let i = 0; i < 2; i++) {
+    this.hoverMarker.visible = !!this.pickSurface && !!hover;
+    if (this.pickSurface && hover) locate(hover, this.hoverMarker);
+    for (let i = 0; i < this.pinnedMarkers.length; i++) {
       const marker = this.pinnedMarkers[i];
-      marker.visible = !!field && !!pinned[i];
-      if (pinned[i]) locate(pinned[i], marker);
+      marker.visible = !!this.pickSurface && !!pinned[i];
+      if (this.pickSurface && pinned[i]) locate(pinned[i], marker);
     }
-    this.inspectLine.visible = !!field && pinned.length === 2;
-    const key = field && project && pinned.length === 2 ?
-      JSON.stringify([pinned, project.worldSize, project.heightScale, this.settings.exaggeration]) : '';
-    if (field && project && key && (field !== this.inspectLineField || key !== this.inspectLineKey)) {
+    this.inspectLine.visible = !!this.pickSurface && pinned.length === 2;
+    const key = this.inspectLine.visible ? JSON.stringify([pinned, this.settings.exaggeration]) : '';
+    if (key && (this.pickSurface !== this.inspectLineSurface || key !== this.inspectLineKey)) {
       const positions: THREE.Vector3[] = [];
-      const scale = TERRAIN_SIZE * project.heightScale / project.worldSize *
-        this.settings.exaggeration;
       for (let i = 0; i <= 64; i++) {
         const t = i / 64;
         const u = pinned[0].u * (1 - t) + pinned[1].u * t;
         const v = pinned[0].v * (1 - t) + pinned[1].v * t;
         positions.push(new THREE.Vector3(
-          (u - 0.5) * TERRAIN_SIZE,
-          (this.heightSampler?.height(u, v) ??
-            bilinear(field.height, field.resolution, u, v)) * scale + 0.0005,
+          (u - 0.5) * TERRAIN_SIZE, this.displayedHeight(u, v) + 0.0005,
           (v - 0.5) * TERRAIN_SIZE,
         ));
       }
       this.inspectLine.geometry.dispose();
       this.inspectLine.geometry = new THREE.BufferGeometry().setFromPoints(positions);
-      this.inspectLineField = field;
-      this.inspectLineKey = key;
-    } else if (!key) {
-      this.inspectLineField = null;
-      this.inspectLineKey = '';
     }
+    this.inspectLineSurface = this.pickSurface;
+    this.inspectLineKey = key;
     this.needsRender = true;
   }
 
   /** Focus a normalized source location from either 2D or 3D, preserving
    * the user's camera orientation and zoom distance. */
   focusPoint(point: TerrainPoint) {
-    if (!this.field || !this.project || !this.terrain) return;
+    if (!this.pickSurface) return;
     const position = new THREE.Vector3(
-      (point.u - 0.5) * TERRAIN_SIZE,
-      (this.heightSampler?.height(point.u, point.v) ??
-        bilinear(this.field.height, this.field.resolution, point.u, point.v)) *
-        TERRAIN_SIZE * this.project.heightScale / this.project.worldSize * this.settings.exaggeration,
+      (point.u - 0.5) * TERRAIN_SIZE, this.displayedHeight(point.u, point.v),
       (point.v - 0.5) * TERRAIN_SIZE,
     );
     const delta = position.sub(this.controls.target);
@@ -341,10 +326,8 @@ export class TerrainScene {
           this.needsRender = true;
         },
         heightAt: (x, z) => {
-          if (!this.heightSampler || !this.project) return null;
-          const scale = TERRAIN_SIZE * this.project.heightScale / this.project.worldSize;
-          return this.heightSampler.height(x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5) *
-            scale * this.settings.exaggeration;
+          return this.pickSurface
+            ? this.displayedHeight(x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5) : null;
         },
       };
     }
@@ -683,34 +666,13 @@ export class TerrainScene {
   }
 
   update(field: HeightField, project: TerrainProject, settings: ViewSettings) {
-    const previousBase = this.minimumElevation * this.settings.exaggeration;
-    const geometryChanged =
-      this.field !== field ||
-      this.project?.worldSize !== project.worldSize ||
-      this.project?.heightScale !== project.heightScale ||
-      this.settings.meshQuality !== settings.meshQuality;
-    const paletteChanged = this.settings.material !== settings.material;
-    const surfaceChanged = JSON.stringify(this.project?.surface ?? null) !==
-      JSON.stringify(project.surface ?? null) || this.project?.seed !== project.seed ||
-      this.project?.materialPaint !== project.materialPaint;
-    this.field = field;
-    this.project = project;
+    const qualityChanged = this.settings.meshQuality !== settings.meshQuality;
     if (settings !== this.settings) this.applySettings(settings);
-    if (geometryChanged) {
-      this.buildGeometry();
-      this.rebuildSplineGuide();
-      this.renderer.shadowMap.needsUpdate = true;
-      this.needsRender = true;
-      if (!this.cameraAdjusted && previousBase !== this.minimumElevation * settings.exaggeration)
-        this.fitCamera();
-    } else if (paletteChanged || surfaceChanged) {
-      if (paletteChanged) this.updateColors();
-      this.updatePBRTextures();
+    if (qualityChanged) {
+      const plan = this.planCurrentMesh();
+      if (plan) this.scheduleMesh(plan);
     }
-    if (this.firstField) {
-      this.firstField = false;
-      this.resetCamera();
-    }
+    this.requestSurface(field, project);
   }
 
   /** Guide the authored path along the current rendered terrain in 3D. */
@@ -731,14 +693,12 @@ export class TerrainScene {
       });
       this.splineGuide = null;
     }
-    if (!this.field || !this.project || !this.splinePath || this.splinePath.length < 2) return;
+    if (!this.pickSurface || !this.splinePath || this.splinePath.length < 2) return;
     const group = new THREE.Group();
     group.name = 'Editable spline guide';
-    const n = this.field.resolution;
-    const scale = (TERRAIN_SIZE * this.project.heightScale) / this.project.worldSize;
     const pointAt = (p: SplinePoint) => new THREE.Vector3(
       (p.x - 0.5) * TERRAIN_SIZE,
-      bilinear(this.field!.height, n, p.x, p.y) * scale * this.settings.exaggeration + 0.024,
+      this.displayedHeight(p.x, p.y) + 0.024,
       (p.y - 0.5) * TERRAIN_SIZE,
     );
     const color = this.splineMode === 'ridge' ? '#e9bc7f' : '#76c8d7';
@@ -854,11 +814,16 @@ export class TerrainScene {
         this.groundExtension = null;
       }
     }
-    if (paletteChanged && this.terrain) {
+    if (paletteChanged) {
+      this.applySurfaceMaterial();
       this.updateColors();
-      this.updatePBRTextures();
+      const status = this.renderer.domElement.dataset;
+      status.materialStatus = settings.material === 'pbr' ? status.displacementStatus ?? 'loading' : 'inactive';
     }
-    if (scaleChanged && this.terrain) this.rebuildSplineGuide();
+    if (scaleChanged && this.terrain) {
+      this.setInspection(this.hoverPoint, this.pinnedPoints);
+      this.rebuildSplineGuide();
+    }
     if (scaleChanged && this.terrain && !this.cameraAdjusted) this.fitCamera();
     // Changing haze, exposure, cloud shadows or materials must
     // not trigger a costly 2048² sun-shadow regeneration. Only the actual
@@ -895,20 +860,23 @@ export class TerrainScene {
     }
   }
 
-  /** The original heightfield remains authoritative for every LOD. */
-  private planCurrentMesh(): TerrainMeshPlan | null {
-    if (!this.heightSampler || !this.project) return null;
+  /** Plan against the newest surface, including a revision building off screen. */
+  private planCurrentMesh(surface = this.pendingMesh?.surface): TerrainMeshPlan | null {
+    const sampler = surface?.sampler ?? this.heightSampler;
+    const project = surface?.project ?? this.project;
+    if (!sampler || !project) return null;
     const started = performance.now();
     const plan = this.meshBenchmark === 'uniform512'
       ? planUniform512Reference()
       : planTerrainMesh(
-          this.heightSampler, this.renderCamera(),
+          sampler, this.renderCamera(),
           this.host.clientHeight, this.renderer.getPixelRatio(),
-          this.project.heightScale, this.project.worldSize,
+          project.heightScale, project.worldSize,
           this.settings.exaggeration, this.settings.meshQuality,
           // Hysteresis is anchored to the mesh being converged to, so small
           // camera moves don't restart an in-progress sliced build.
-          this.pendingMesh?.plan ?? this.currentMeshPlan,
+          surface && surface !== this.pendingMesh?.surface ? null :
+            this.pendingMesh?.plan ?? this.currentMeshPlan,
         );
     this.lastMeshPlanMs = performance.now() - started;
     this.meshPlanChecks++;
@@ -919,19 +887,20 @@ export class TerrainScene {
   }
 
   /** Start (or keep) the sliced build that brings the displayed mesh to `plan`. */
-  private scheduleMesh(plan: TerrainMeshPlan) {
-    if (plan.key === this.lodKey) {
+  private scheduleMesh(plan: TerrainMeshPlan, surface = this.pendingMesh?.surface) {
+    if (!surface && plan.key === this.lodKey) {
       // The camera came back to the displayed LOD; drop any obsolete build.
       this.pendingMesh = null;
       return;
     }
-    if (this.pendingMesh?.plan.key === plan.key || !this.heightSampler || !this.project) return;
+    if (this.pendingMesh?.plan.key === plan.key && this.pendingMesh.surface === surface) return;
+    const sampler = surface?.sampler ?? this.heightSampler;
+    const project = surface?.project ?? this.project;
+    const field = surface?.field ?? this.field;
+    if (!sampler || !project || !field) return;
     this.pendingMesh = {
-      plan,
-      sampler: this.heightSampler,
-      steps: this.terrainMeshSteps(
-        this.heightSampler, plan, this.project.heightScale, this.project.worldSize,
-      ),
+      plan, sampler, surface,
+      steps: this.terrainMeshSteps(sampler, plan, field, project),
       cpuMs: 0,
       maxSliceMs: 0,
       frames: 0,
@@ -941,9 +910,7 @@ export class TerrainScene {
   /** Spend at most one budgeted slice of this frame on the pending LOD mesh. */
   private advancePendingMesh() {
     const job = this.pendingMesh!;
-    // A new field or tile scale replaces the sampler; that path rebuilds
-    // synchronously, so a build for the old sampler is obsolete.
-    if (job.sampler !== this.heightSampler || !this.field || !this.project) {
+    if (!job.surface && (job.sampler !== this.heightSampler || !this.field || !this.project)) {
       this.pendingMesh = null;
       return;
     }
@@ -953,7 +920,8 @@ export class TerrainScene {
       step = advanceWithinBudget(job.steps, MESH_SLICE_BUDGET_MS);
     } catch (error) {
       this.pendingMesh = null;
-      throw error;
+      this.surfaceFailed(error);
+      return;
     }
     job.frames++;
     if (!step.done) {
@@ -963,7 +931,22 @@ export class TerrainScene {
       return;
     }
     this.pendingMesh = null;
+    const previousBase = this.minimumElevation;
+    if (job.surface) {
+      this.field = job.surface.field;
+      this.project = job.surface.project;
+      this.heightSampler = job.surface.sampler;
+      this.surfaceMaps = job.surface.maps;
+      this.updateSlopeTexture();
+    }
     this.installTerrain(job.plan, step.value);
+    if (job.surface) {
+      this.finishSurface();
+      if (this.firstField) {
+        this.firstField = false;
+        this.resetCamera();
+      } else if (!this.cameraAdjusted && previousBase !== this.minimumElevation) this.fitCamera();
+    }
     const elapsed = performance.now() - started;
     this.publishBuildStats(job.cpuMs + elapsed, Math.max(job.maxSliceMs, elapsed), job.frames);
     this.renderer.shadowMap.needsUpdate = true;
@@ -972,17 +955,16 @@ export class TerrainScene {
 
   /** Geometry, then vertex colours: resumable so LOD refreshes can be sliced. */
   private *terrainMeshSteps(
-    sampler: TerrainSampler, plan: TerrainMeshPlan, heightScale: number, worldSize: number,
+    sampler: TerrainSampler, plan: TerrainMeshPlan, field: HeightField, project: TerrainProject,
   ): Generator<void, BuiltTerrainMesh, undefined> {
-    const geometry = yield* adaptiveTerrainGeometrySteps(sampler, plan, heightScale, worldSize);
+    const geometry = yield* adaptiveTerrainGeometrySteps(sampler, plan, project.heightScale, project.worldSize);
     const colorMaterial = this.settings.material;
-    yield* this.colorSteps(geometry);
+    yield* this.colorSteps(geometry, field, project);
     return { geometry, colorMaterial };
   }
 
   /** Source min/max, computed once per height array rather than per LOD rebuild. */
-  private fieldRange(): { min: number; max: number } {
-    const height = this.field!.height;
+  private fieldRange(height: Float32Array): { min: number; max: number } {
     if (this.rangeSource !== height) {
       let min = Infinity,
         max = -Infinity;
@@ -1015,44 +997,15 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
-  /** Synchronous rebuild for a new field, tile scale or mesh quality. */
-  private buildGeometry() {
-    if (!this.field || !this.project) return;
-    const started = performance.now();
-    // This supersedes any camera-driven LOD build still in progress.
-    this.pendingMesh = null;
-    const { resolution: n, height } = this.field;
-    const scaleKey = `${this.project.worldSize}/${this.project.heightScale}`;
-    if (this.samplerSource !== height || this.samplerScaleKey !== scaleKey) {
-      this.heightSampler = createTerrainSampler(
-        height, n, this.project.heightScale, this.project.worldSize,
-      );
-      this.samplerSource = height;
-      this.samplerScaleKey = scaleKey;
-      // Never carry hysteresis state across a new erosion field or tile scale.
-      this.currentMeshPlan = null;
-      this.updateSlopeTexture();
-    }
-    const plan = this.planCurrentMesh();
-    if (!plan || !this.heightSampler) return;
-    const built = runToCompletion(this.terrainMeshSteps(
-      this.heightSampler, plan, this.project.heightScale, this.project.worldSize,
-    ));
-    this.lodDirty = false;
-    this.installTerrain(plan, built);
-    const elapsed = performance.now() - started;
-    this.publishBuildStats(elapsed, elapsed, 1);
-  }
-
   /** Swap a finished mesh in, with its skirt, support and meadow boundary. */
   private installTerrain(plan: TerrainMeshPlan, built: BuiltTerrainMesh) {
     if (!this.field || !this.project) return;
     const { geometry } = built;
     const n = this.field.resolution;
     const positions = geometry.getAttribute('position');
-    const scale = TERRAIN_SIZE * this.project.heightScale / this.project.worldSize;
-    // min(value * scale) === min(value) * scale for the positive tile scale.
-    this.minimumElevation = Math.min(0, this.fieldRange().min * scale);
+    // Negative material relief and stitched vertices can extend below the DEM.
+    geometry.computeBoundingBox();
+    this.minimumElevation = Math.min(0, geometry.boundingBox!.min.y);
     if (this.terrain) {
       this.scene.remove(this.terrain);
       this.terrain.geometry.dispose();
@@ -1081,8 +1034,6 @@ export class TerrainScene {
     // Colours were written while building; only a material switch since then
     // (possible during a sliced build) needs them rewritten.
     if (built.colorMaterial !== this.settings.material) this.updateColors();
-    // A tessellation-only update must not rerun or reupload unchanged PBR maps.
-    this.updatePBRTextures();
 
     const boundary = geometry.userData.nhPerimeterIndices as number[];
     const skirtVertices = new Float32Array(boundary.length * 18);
@@ -1114,6 +1065,8 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
+    this.setInspection(this.hoverPoint, this.pinnedPoints);
+    this.rebuildSplineGuide();
     this.groundExtension?.update(
       this.field, this.project, this.settings, this.minimumElevation, this.terrain,
     );
@@ -1144,23 +1097,26 @@ export class TerrainScene {
   }
 
   /** Vertex colours for the current material, resumable every 1024 vertices. */
-  private *colorSteps(geometry: THREE.BufferGeometry): Generator<void, void, undefined> {
-    if (!this.field || !this.project || this.settings.material === 'pbr') return;
+  private *colorSteps(
+    geometry: THREE.BufferGeometry, field = this.field, project = this.project,
+  ): Generator<void, void, undefined> {
+    if (!field || !project || this.settings.material === 'pbr') return;
     const material = this.settings.material;
     const colors = geometry.getAttribute('color') as THREE.BufferAttribute;
     const positions = geometry.getAttribute('position');
     const normals = geometry.getAttribute('normal');
-    const { min, max } = this.fieldRange();
-    const heightUnits = (TERRAIN_SIZE * this.project.heightScale) / this.project.worldSize;
+    const { min, max } = this.fieldRange(field.height);
+    const heightUnits = (TERRAIN_SIZE * project.heightScale) / project.worldSize;
     const color = new THREE.Color();
     if (material === 'clay') {
       // One constant colour: convert it from sRGB once, not once per vertex.
       color.setRGB(0.61, 0.64, 0.56, THREE.SRGBColorSpace);
       const array = colors.array;
-      for (let i = 0; i < array.length; i += 3) {
-        array[i] = color.r;
-        array[i + 1] = color.g;
-        array[i + 2] = color.b;
+      for (let i = 0; i < positions.count; i++) {
+        array[i * 3] = color.r;
+        array[i * 3 + 1] = color.g;
+        array[i * 3 + 2] = color.b;
+        if ((i & 1023) === 1023) yield;
       }
       colors.needsUpdate = true;
       return;
@@ -1189,21 +1145,77 @@ export class TerrainScene {
     colors.needsUpdate = true;
   }
 
-  /** Off-thread material synthesis is shared with 2D and never reruns erosion. */
-  private updatePBRTextures() {
-    if (!this.field || !this.project) return;
-    if (this.settings.material !== 'pbr') {
-      this.measurePBRFirstRender = false;
-      this.renderer.domElement.dataset.materialStatus = 'inactive';
-      ++this.pbrGeneration;
+  /** Geometry and all four palettes use the same immutable, revision-checked bake. */
+  private requestSurface(field: HeightField, project: TerrainProject) {
+    const surfaceKey = pbrVariantKey(project);
+    if (this.lastPBRField === field && this.lastPBRSurface === surfaceKey) return;
+    const generation = ++this.pbrGeneration;
+    if (this.pendingMesh?.surface) this.pendingMesh = null;
+    this.pbrRelease?.();
+    this.lastPBRField = field;
+    this.lastPBRSurface = surfaceKey;
+    const monitor = this.renderer.domElement.dataset;
+    monitor.displacementStatus = 'loading';
+    monitor.materialStatus = this.settings.material === 'pbr' ? 'loading' : 'inactive';
+    const started = performance.now();
+    const request = requestPBR(field, project);
+    this.pbrRelease = request.release;
+    monitor.pbrRequestCount = String(++this.pbrRequests);
+    request.promise.then((maps) => {
+      if (this.disposed || generation !== this.pbrGeneration) return;
       this.pbrRelease?.();
       this.pbrRelease = null;
-      const hadTextures = this.pbrTextures.length > 0;
-      this.pbrTextures.forEach((texture) => texture.dispose());
-      this.pbrTextures = [];
-      this.lastPBRField = null;
-      this.lastPBRSurface = '';
-      if (hadTextures) {
+      monitor.pbrWorkerMs = (performance.now() - started).toFixed(2);
+      // Keep the previous completed revision on screen until the worker has
+      // both the signed relief and the weights for the new surface.
+      if (this.field === field && this.project &&
+          this.project.materialPaint === project.materialPaint &&
+          displacementSettings(this.project) === displacementSettings(project)) {
+        this.project = project;
+        this.surfaceMaps = maps;
+        this.finishSurface();
+        return;
+      }
+      const sampler = createDisplacedTerrainSampler(field.height, maps, project);
+      const surface = { field, project, maps, sampler };
+      const plan = this.planCurrentMesh(surface);
+      if (plan) this.scheduleMesh(plan, surface);
+    }).catch((error: Error) => {
+      if (this.disposed || generation !== this.pbrGeneration) return;
+      this.surfaceFailed(error);
+    });
+  }
+
+  private finishSurface() {
+    this.applySurfaceMaterial();
+    const monitor = this.renderer.domElement.dataset;
+    monitor.displacementStatus = 'ready';
+    monitor.materialStatus = this.settings.material === 'pbr' ? 'ready' : 'inactive';
+    this.brush?.baked(this.project!.materialPaint);
+    this.needsRender = true;
+  }
+
+  private surfaceFailed(error: unknown) {
+    this.pbrRelease?.();
+    this.pbrRelease = null;
+    this.lastPBRField = null;
+    this.lastPBRSurface = '';
+    const monitor = this.renderer.domElement.dataset;
+    monitor.displacementStatus = 'error';
+    monitor.materialStatus = this.settings.material === 'pbr' ? 'error' : 'inactive';
+    this.onError(error instanceof Error ? error.message : 'Could not prepare the displaced terrain surface.');
+  }
+
+  /** Upload textures only for PBR. Other palettes share the displaced geometry. */
+  private applySurfaceMaterial() {
+    const field = this.field, project = this.project, maps = this.surfaceMaps;
+    if (!field || !project || !maps) return;
+    const monitor = this.renderer.domElement.dataset;
+    if (this.settings.material !== 'pbr') {
+      this.measurePBRFirstRender = false;
+      if (this.pbrTextures.length) {
+        this.pbrTextures.forEach(texture => texture.dispose());
+        this.pbrTextures = [];
         this.material.map = null;
         this.material.normalMap = null;
         this.material.roughnessMap = null;
@@ -1211,76 +1223,41 @@ export class TerrainScene {
         this.material.vertexColors = true;
         this.material.roughness = 0.94;
         this.material.needsUpdate = true;
+        monitor.pbrTextureCount = '0';
       }
-      this.needsRender = true;
       return;
     }
-    const field = this.field, project = this.project;
-    const surfaceKey = pbrVariantKey(project);
-    if (this.lastPBRField === field && this.lastPBRSurface === surfaceKey) return;
-    this.pbrRelease?.();
-    const generation = ++this.pbrGeneration;
-    this.lastPBRField = field;
-    this.lastPBRSurface = surfaceKey;
-    this.renderer.domElement.dataset.materialStatus = 'loading';
-    const workerStarted = performance.now();
-    const request = requestPBR(field, project);
-    this.pbrRequests++;
-    this.renderer.domElement.dataset.pbrRequestCount = String(this.pbrRequests);
-    this.pbrRelease = request.release;
-    request.promise.then((maps) => {
-      if (this.disposed || generation !== this.pbrGeneration ||
-          this.field !== field || this.settings.material !== 'pbr') return;
-      this.pbrRelease?.();
-      this.pbrRelease = null;
-      const preparedAt = performance.now();
-      // Switch the close-up model and the worker-baked maps together after
-      // the generation check. Rapid biome/brush edits may supersede this job.
-      const surface = resolveSurface(project.surface);
-      this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
-      this.nearField.nhDetailMeters.value = surface.detailMeters;
-      this.nearField.nhFabricAzimuth.value = fabricFrame(project.seed).azimuth;
-      this.nearField.nhBiome.value = surface.biome === 'alpine' ? 0 : surface.biome === 'arid' ? 1 : 2;
-      this.nearField.nhDetailStrength.value = surface.detailStrength;
-      this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
-      const n = maps.resolution;
-      const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
-      const existing = this.pbrTextures;
-      const tex = (index: number, rgba: Uint8ClampedArray, srgb = false) =>
-        updatePreviewTexture(existing[index], rgba, n, srgb, anisotropy);
-      const albedo = tex(0, maps.basecolor, true);
-      // MeshStandardMaterial reads AO from the RED channel and roughness from
-      // GREEN. Share one linear/non-color ORM map for both rather than uploading
-      // two separately expanded 4-channel grayscale images.
-      // Packed off-thread by the PBR worker; pack here only as a fallback.
-      const preview = packedPreview(maps) ?? packPreviewPBR(maps, field, project);
-      const packedORM = tex(1, preview.orm);
-      // Macro geometry remains displaced; the RGB detail normal is unchanged.
-      // Alpha stores the vegetation layer weight for close-up shading only.
-      const microNormal = tex(2, preview.microNormal);
-      for (const surplus of existing.slice(3)) surplus.dispose();
-      this.pbrTextures = [albedo, packedORM, microNormal];
-      this.pbrUploads++;
-      this.renderer.domElement.dataset.pbrUploadCount = String(this.pbrUploads);
-      applyPackedPBRMaterial(this.material, albedo, packedORM, microNormal);
-      this.groundExtension?.syncBoundary(this.terrain!, this.settings.exaggeration);
-      const monitor = this.renderer.domElement.dataset;
-      monitor.pbrWorkerMs = (preparedAt - workerStarted).toFixed(2);
-      monitor.pbrPackMs = (performance.now() - preparedAt).toFixed(2);
-      monitor.pbrTextureCount = String(this.pbrTextures.length);
-      this.measurePBRFirstRender = true;
-      monitor.materialStatus = 'ready';
-      this.brush?.baked(project.materialPaint);
-      this.needsRender = true;
-    }).catch((error: Error) => {
-      if (this.disposed || generation !== this.pbrGeneration) return;
-      this.pbrRelease?.();
-      this.pbrRelease = null;
-      this.lastPBRField = null;
-      this.lastPBRSurface = '';
-      this.renderer.domElement.dataset.materialStatus = 'error';
-      this.onError(error.message || 'Could not generate PBR materials.');
-    });
+    const preparedAt = performance.now();
+    const surface = resolveSurface(project.surface);
+    this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
+    this.nearField.nhDetailMeters.value = surface.detailMeters;
+    this.nearField.nhFabricAzimuth.value = fabricFrame(project.seed).azimuth;
+    this.nearField.nhBiome.value = surface.biome === 'alpine' ? 0 : surface.biome === 'arid' ? 1 : 2;
+    this.nearField.nhDetailStrength.value = surface.detailStrength;
+    this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
+    const n = maps.resolution;
+    const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+    const existing = this.pbrTextures;
+    const tex = (index: number, rgba: Uint8ClampedArray, srgb = false) =>
+      updatePreviewTexture(existing[index], rgba, n, srgb, anisotropy);
+    const albedo = tex(0, maps.basecolor, true);
+    // MeshStandardMaterial reads AO from the RED channel and roughness from
+    // GREEN. Share one linear/non-color ORM map for both rather than uploading
+    // two separately expanded 4-channel grayscale images.
+    // Packed off-thread by the PBR worker; pack here only as a fallback.
+    const preview = packedPreview(maps) ?? packPreviewPBR(maps, field, project);
+    const packedORM = tex(1, preview.orm);
+    // The alpha channel carries the near-field shader's vegetation weight.
+    const microNormal = tex(2, preview.microNormal);
+    for (const surplus of existing.slice(3)) surplus.dispose();
+    this.pbrTextures = [albedo, packedORM, microNormal];
+    this.pbrUploads++;
+    this.renderer.domElement.dataset.pbrUploadCount = String(this.pbrUploads);
+    applyPackedPBRMaterial(this.material, albedo, packedORM, microNormal);
+    this.groundExtension?.syncBoundary(this.terrain!, this.settings.exaggeration);
+    monitor.pbrPackMs = (performance.now() - preparedAt).toFixed(2);
+    monitor.pbrTextureCount = String(this.pbrTextures.length);
+    this.measurePBRFirstRender = true;
   }
 
   private fitCamera() {

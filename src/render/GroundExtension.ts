@@ -21,8 +21,8 @@ function bilinear(field: HeightField, u: number, v: number): number {
 }
 
 /**
- * Four sided, conforming terrain apron. The inner vertices match the generated
- * heightmap exactly; the outer vertices flatten into the surrounding meadow.
+ * Four sided, conforming terrain apron. The inner vertices follow the displayed
+ * terrain, including material displacement. The outer edge meets the flat meadow.
  * This is visual-only geometry and never touches the generated height field.
  */
 export function buildGroundApron(
@@ -60,8 +60,7 @@ export function buildGroundApron(
       return {
         x: sourcePositions.getX(source),
         z: sourcePositions.getZ(source),
-        height: sourcePositions.getY(source) /
-          (TERRAIN_SIZE * project.heightScale / project.worldSize),
+        height: sourcePositions.getY(source) * exaggeration,
       };
     }
     const side = Math.floor(i / segments);
@@ -71,7 +70,7 @@ export function buildGroundApron(
     if (side === 1) { x = HALF; z = -HALF + fraction * TERRAIN_SIZE; }
     if (side === 2) { x = HALF - fraction * TERRAIN_SIZE; z = HALF; }
     if (side === 3) { x = -HALF; z = HALF - fraction * TERRAIN_SIZE; }
-    return { x, z, height: bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5) };
+    return { x, z, height: bilinear(field, x / TERRAIN_SIZE + 0.5, z / TERRAIN_SIZE + 0.5) * heightScale };
   });
   const offsets: Array<[number, number]> = [
     [-0.055, 0.7], [-0.025, 1.2], [-0.009, 1.5], [0, 3.2],
@@ -94,9 +93,9 @@ export function buildGroundApron(
     const flatten = THREE.MathUtils.smoothstep(t, 0.02, 0.72);
     for (let i = 0; i < count; i++) {
       const { x, z, height } = edge[i];
-      const seamlessHeight = smoothed[i] + (height - smoothed[i]) * fineDetail;
+      const seamlessHeight = t === 0 ? height : THREE.MathUtils.lerp(smoothed[i], height, fineDetail);
       const px = x * scale, pz = z * scale;
-      vertices.push(px, THREE.MathUtils.lerp(seamlessHeight * heightScale, flatY, flatten), pz);
+      vertices.push(px, THREE.MathUtils.lerp(seamlessHeight, flatY, flatten), pz);
       uvs.push(0.5 + px / extent, 0.5 - pz / extent);
       blends.push(1);
       boundaryColors.push(0.38, 0.45, 0.32);

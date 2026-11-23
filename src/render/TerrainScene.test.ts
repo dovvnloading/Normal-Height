@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createProject } from '../model/presets';
+import type { HeightField, TerrainProject } from '../model/types';
+import { generatePBR, type PBRMaps } from '../materials/pbr';
+import * as pbrClient from '../materials/pbrClient';
 import { MESH_SLICE_BUDGET_MS, TerrainScene } from './TerrainScene';
 import { createTerrainSampler, planUniform512Reference } from './terrainMesh';
 import type { TerrainMeshPlan, TerrainSampler } from './terrainMesh';
@@ -138,6 +142,7 @@ interface SliceHarness {
   renderer: { domElement: { dataset: Record<string, string> }; shadowMap: { needsUpdate: boolean } };
   installTerrain: (plan: TerrainMeshPlan, built: { geometry: THREE.BufferGeometry }) => void;
   scheduleMesh: (plan: TerrainMeshPlan) => void;
+  requestSurface(field: HeightField, project: TerrainProject): void;
   advancePendingMesh: () => void;
 }
 
@@ -215,4 +220,54 @@ describe('frame-sliced LOD mesh refresh', () => {
     expect(scene.pendingMesh).toBeNull();
     expect(installed).toHaveLength(0);
   });
+});
+
+it('discards stale bakes and sliced geometry when terrain edits overtake one another', async () => {
+  const { scene, installed } = sliceHarness();
+  const n = 9;
+  const field: HeightField = {
+    resolution: n, height: new Float32Array(n*n), wear: new Float32Array(n*n),
+    deposition: new Float32Array(n*n), flow: new Float32Array(n*n),
+  };
+  const initial = createProject();
+  const maps = generatePBR(field, initial);
+  const firstSampler = scene.heightSampler;
+  const finishSurface = vi.fn();
+  const segments = new Array<number>(64).fill(2);
+  const plan = { segments, key: 'same-topology', vertexCount: 64*9, triangleCount: 64*8, maxSegments: 2 };
+  const revision = Object.assign(scene, {
+    field, project: initial, surfaceMaps: maps, pbrRequests: 0, pbrGeneration: 0,
+    planCurrentMesh: () => plan, updateSlopeTexture: () => {}, finishSurface,
+  });
+  const deliver: Array<(maps: PBRMaps) => void> = [];
+  const worker = vi.spyOn(pbrClient, 'requestPBR').mockImplementation(() => ({
+    promise: new Promise(resolve => deliver.push(resolve)), release: vi.fn(),
+  }));
+  try {
+    const a = { ...initial, seed: 1 }, b = { ...initial, seed: 2 }, c = { ...initial, seed: 3 };
+    revision.requestSurface(field, a);
+    revision.requestSurface(field, b);
+    deliver[0](maps);
+    await Promise.resolve();
+    expect(scene.pendingMesh).toBeNull();
+
+    deliver[1](maps);
+    await Promise.resolve();
+    expect(scene.pendingMesh?.plan).toBe(plan);
+    expect(scene.heightSampler).toBe(firstSampler);
+    expect(revision.project).toBe(initial);
+    revision.requestSurface(field, c);
+    expect(scene.pendingMesh).toBeNull();
+
+    deliver[2](maps);
+    await Promise.resolve();
+    while (scene.pendingMesh) scene.advancePendingMesh();
+    expect(installed).toHaveLength(1);
+    expect(revision.project).toBe(c);
+    expect(scene.heightSampler).not.toBe(firstSampler);
+    expect(finishSurface).toHaveBeenCalledTimes(1);
+    installed[0].geometry.dispose();
+  } finally {
+    worker.mockRestore();
+  }
 });

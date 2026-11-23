@@ -1,23 +1,8 @@
 import * as THREE from 'three';
 import { TERRAIN_SIZE } from './GroundExtension';
 
-/**
- * Per-pixel source normals: the real-time counterpart of sub-polygon
- * displacement shading.
- *
- * The preview mesh is adaptive, so its vertices are often several source
- * samples apart. Shading from interpolated *vertex* normals then loses every
- * ridge and gully smaller than a triangle, and with fine fluvial dissection
- * neighbouring vertex normals point in very different directions, so each
- * triangle is lit as its own hard facet.
- *
- * Instead, the exact Sobel slopes of the source heightfield are stored in a
- * half-float texture at full source resolution and read per pixel: smooth
- * Catmull-Rom interpolation where a texel covers more than a pixel, and a
- * mip chain filtered on the CPU where it covers less (no shimmering at
- * distance). Lighting therefore shows the full source detail at any mesh
- * density, and micro-detail normal maps perturb this true surface normal.
- * Geometry, shadows, exports and the heightfield itself are unchanged.
+/** Full-resolution shading slopes for the combined terrain and material height.
+ * The mesh supplies any additional slope resolved by sub-source tessellation.
  */
 
 export interface SourceNormalUniforms {
@@ -89,6 +74,7 @@ export function createSlopeTexture(
 }
 
 const GLSL_PARS = `
+varying vec2 vNHDetailSlope;
 uniform sampler2D nhSlopeMap;
 uniform vec2 nhSlopeSize;
 uniform float nhVerticalScale;
@@ -134,7 +120,7 @@ vec3 nhSourceNormal(vec3 objectPosition) {
   vec2 slope = footprint < 1.0
     ? nhSlopeCatmullRom(uv)
     : textureGrad(nhSlopeMap, uv, duvx, duvy).rg;
-  slope *= nhVerticalScale;
+  slope = (slope + vNHDetailSlope) * nhVerticalScale;
   vec3 world = normalize(vec3(-slope.x, 1.0, -slope.y));
   return normalize((viewMatrix * vec4(world, 0.0)).xyz);
 }
@@ -154,6 +140,7 @@ const GLSL_APPLY = `
 `;
 
 interface ShaderTarget {
+  vertexShader: string;
   fragmentShader: string;
   uniforms: Record<string, { value: unknown }>;
 }
@@ -163,20 +150,7 @@ export function patchedNormalFragmentBegin(): string {
   const chunk = THREE.ShaderChunk.normal_fragment_begin;
   if (!chunk.includes(VERTEX_NORMAL))
     throw new Error('Three.js normal_fragment_begin no longer contains the vertex normal.');
-  // The exported relief normal is expressed in an orthonormal physical
-  // terrain frame. Three's generic UV cotangent frame has unequal basis
-  // lengths on inclined surfaces. Reconstruct the authored east tangent
-  // first, then apply the display transform to the complete perturbed normal.
-  return chunk.replace(VERTEX_NORMAL, VERTEX_NORMAL + '\n' + GLSL_APPLY) + `
-#ifdef USE_NORMALMAP_TANGENTSPACE
-  vec3 nhDisplayedN = transformDirectionByInverseViewMatrix(normal, viewMatrix);
-  vec3 nhPhysicalN = normalize(nhDisplayedN * vec3(1.0, nhVerticalScale, 1.0));
-  vec3 nhEastT = normalize(cross(nhPhysicalN, vec3(0.0, 0.0, 1.0)));
-  vec3 nhNorthB = cross(nhPhysicalN, nhEastT);
-  mat3 nhExaggerate = mat3(1,0,0, 0,1.0/nhVerticalScale,0, 0,0,1);
-  tbn = mat3(viewMatrix) * nhExaggerate * mat3(nhEastT, nhNorthB, nhPhysicalN);
-#endif
-`;
+  return chunk.replace(VERTEX_NORMAL, VERTEX_NORMAL + '\n' + GLSL_APPLY);
 }
 
 /**
@@ -190,7 +164,16 @@ export function installSourceNormals(shader: ShaderTarget, uniforms: SourceNorma
     throw new Error('Terrain shader does not contain normal_fragment_begin.');
   if (!shader.fragmentShader.includes('vNHPosition') || !shader.fragmentShader.includes('nhMeadowBlend'))
     throw new Error('Source normals need the terrain position varying and meadow uniform.');
+  const vertexMarker = '#include <begin_vertex>';
+  if (!shader.vertexShader.includes(vertexMarker))
+    throw new Error('Terrain shader does not contain begin_vertex.');
+  shader.vertexShader = 'attribute vec2 nhDetailSlope;\nvarying vec2 vNHDetailSlope;\n' +
+    shader.vertexShader.replace(vertexMarker, vertexMarker + '\nvNHDetailSlope = nhDetailSlope;');
   for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
-  shader.fragmentShader = GLSL_PARS + '\n' +
-    shader.fragmentShader.replace(marker, patchedNormalFragmentBegin());
+  // Both the source slopes and the adaptive residual already include signed
+  // material relief. Applying its baked tangent-space RGB normal would light
+  // the same relief twice. The near-field pass still reads the packed alpha.
+  shader.fragmentShader = GLSL_PARS + '\n' + shader.fragmentShader
+    .replace(marker, patchedNormalFragmentBegin())
+    .replace('#include <normal_fragment_maps>', '');
 }

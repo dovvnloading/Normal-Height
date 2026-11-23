@@ -1302,13 +1302,19 @@ export function TerrainViewport({
   const change = (patch: Partial<ViewSettings>) => onSettingsChange({ ...settings, ...patch });
   const progressPercent = Math.max(0, Math.min(100, progress <= 1 ? progress * 100 : progress));
   const [meshTriangles, setMeshTriangles] = useState(0);
+  const [displacementLoading, setDisplacementLoading] = useState(false);
   useEffect(() => {
     const canvas = hostRef.current?.querySelector('canvas');
     if (!canvas) return;
-    const refresh = () => setMeshTriangles(Number(canvas.dataset.meshTriangles) || 0);
+    const refresh = () => {
+      setMeshTriangles(Number(canvas.dataset.meshTriangles) || 0);
+      setDisplacementLoading(canvas.dataset.displacementStatus === 'loading');
+    };
     refresh();
     const observer = new MutationObserver(refresh);
-    observer.observe(canvas, { attributes: true, attributeFilter: ['data-mesh-triangles'] });
+    observer.observe(canvas, {
+      attributes: true, attributeFilter: ['data-mesh-triangles', 'data-displacement-status'],
+    });
     return () => observer.disconnect();
   }, [field, attempt]);
 
@@ -1567,7 +1573,7 @@ export function TerrainViewport({
                 className="nh-scene-resolution"
                 title="Adaptive triangle count from the current camera view. Original heightfields and exports remain at their full source resolution."
               >
-                {meshTriangles > 0
+                {displacementLoading ? 'Building displaced surface…' : meshTriangles > 0
                   ? `${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(meshTriangles)} tris · ${settings.meshQuality}`
                   : 'Adaptive mesh'}
               </div>

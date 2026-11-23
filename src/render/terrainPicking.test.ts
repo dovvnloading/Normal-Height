@@ -29,6 +29,7 @@ describe('adaptive terrain picking', () => {
       if (p && reference) {
         expect(p.u).toBeCloseTo(reference.point.x / TERRAIN_SIZE + .5, 5);
         expect(p.v).toBeCloseTo(reference.point.z / TERRAIN_SIZE + .5, 5);
+        expect(picker.heightAt(p.u, p.v)).toBeCloseTo(reference.point.y, 5);
       }
     }
     expect(picker(new Ray(new Vector3(0, 3, 0), new Vector3(0, -1, 0)))).toEqual({u: .5, v: .5});
