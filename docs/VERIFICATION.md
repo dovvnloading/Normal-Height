@@ -48,5 +48,8 @@ The nonzero low bytes and more than 256 distinct values confirm that the file co
 
 - [3D studio](images/studio-3d.png): connected broad summits, eroded shoulders, physical default scale, complete tile framing, graph, and parameter inspector.
 - [Water flow](images/studio-flow.png): the actual simulation diagnostic displayed in the 2D viewer.
+- [Landscape tour](images/landscape-tour.gif): four built-in landscapes orbited in viewport focus mode.
+
+The README media were regenerated on 2026-11-23 with `scripts/readme-media.mjs`, rendered in desktop Chrome on a hardware GPU (RTX 3060 Ti, ANGLE D3D11) rather than the SwiftShader software renderer used by CI.
 
 The review prompted refinements to the mountain source to reduce needle-like ridge intersections, separate the broad range from secondary detail, fit the full tile, and preserve visibility of valid negative elevations. The screenshots show those refinements. This verification covers Chromium on the CI runner, not a completed compatibility matrix across every browser or GPU.

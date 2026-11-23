@@ -6,7 +6,11 @@ Normal Height is a React and TypeScript web application. Its visual node graph d
 
 ![Normal Height studio showing the Alpine watershed, node graph, and hydraulic erosion controls](docs/images/studio-3d.png)
 
-_The running production app, captured in Chromium with the editable Alpine watershed graph at 512 × 512._
+_The running production app with the editable Alpine watershed graph at 512 × 512, PBR material and golden-hour lighting._
+
+![Orbiting four built-in landscapes: Alpine watershed, Granite massif, Volcanic caldera and Folded highlands](docs/images/landscape-tour.gif)
+
+_Built-in landscapes rendered live in the 3D preview. Regenerate these images with `node scripts/readme-media.mjs` (see the script header)._
 
 ## Run the application
 
