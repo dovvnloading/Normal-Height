@@ -442,6 +442,8 @@ export function evaluateGraph(
             strength: number(node, 'strength', 0.09, 0, 0.55),
             falloff: number(node, 'falloff', 3, 1.5, 6),
             downhill: node.params.downhill !== false,
+            worldSize: project.worldSize,
+            heightScale: project.heightScale,
           });
           break;
         case 'warp': {
