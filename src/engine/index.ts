@@ -339,6 +339,12 @@ function createNoise(node: TerrainNode, n: number, noise: Noise): Float32Array {
     cos = Math.cos(rotation),
     sin = Math.sin(rotation);
   const stretch = number(node, 'stretch', 1, 0.1, 8);
+  // Rotation preserves lengths; anisotropic stretch changes the largest
+  // singular value of the grid-to-noise transform. Use that conservative
+  // scalar footprint for octave visibility in corrected sampling.
+  const footprint = node.params.noiseModel === 'v2'
+    ? scale * Math.max(stretch, 1 / stretch) / (n - 1)
+    : 0;
   for (let y = 0; y < n; y++)
     for (let x = 0; x < n; x++) {
       const px = (x / (n - 1) - 0.5) * scale,
@@ -346,7 +352,7 @@ function createNoise(node: TerrainNode, n: number, noise: Noise): Float32Array {
       const u = (px * cos - py * sin) / stretch + 17.319,
         v = (px * sin + py * cos) * stretch + 8.173;
       map[y * n + x] =
-        offset + amplitude * noise.sample(mode, u, v, octaves, persistence, lacunarity, warp);
+        offset + amplitude * noise.sample(mode, u, v, octaves, persistence, lacunarity, warp, footprint);
     }
   return map;
 }
@@ -437,7 +443,8 @@ export function evaluateGraph(
       ((Number(project.seed) || 0) +
         Math.round(number(node, 'seed', 0, -2147483647, 2147483647))) >>>
       0;
-    const noise = new Noise(seed);
+    const noise = new Noise(seed,
+      node.kind === 'noise' && node.params.noiseModel === 'v2' ? 'v2' : 'legacy');
     let field: WorkingField;
     if (node.bypassed && input) field = input;
     else if (node.kind === 'mountain')

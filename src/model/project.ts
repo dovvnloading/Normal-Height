@@ -58,6 +58,9 @@ export function parseProject(raw: unknown): TerrainProject {
         clean.params[def.key] = value as ParamValue;
       } else if (typeof value === 'string') clean.params[def.key] = value.slice(0, 4000);
     }
+    // Missing version means an older procedural noise node. Preserve its
+    // exact seeded appearance instead of silently opting it into new math.
+    if (kind === 'noise' && params.noiseModel === undefined) clean.params.noiseModel = 'legacy';
     if (kind === 'spline') {
       if (
         !Array.isArray(n.path) ||
