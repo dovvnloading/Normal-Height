@@ -26,6 +26,7 @@ import {
 } from '../model/world';
 import type { WorldDefinition, WorldDomain, WorldTransportSettings } from '../model/world';
 import type { TerrainProject } from '../model/types';
+import { BUILD_INFO } from '../model/buildInfo';
 import type { WorldRegionResult } from '../engine/world';
 import type { WorldGridRequest, WorldWorkerResponse } from '../hooks/worldProtocol';
 import type { WorldRegionStoreStats } from '../engine/worldStore';
@@ -883,6 +884,11 @@ export function WorldStudio({
                           JSON.stringify(
                             {
                               application: 'Normal Height World Engine',
+                              build: BUILD_INFO,
+                              cacheHit,
+                              timingScope: cacheHit
+                                ? 'Original region sampling duration; this result was restored from cache.'
+                                : 'Region sampling duration; excludes whole-domain preparation and display rendering.',
                               world: builtWorld,
                               region: builtGrid,
                               stages: result?.stages,
@@ -1193,8 +1199,14 @@ export function WorldStudio({
                 {!result && (
                   <div className="world-empty">
                     <Globe2 size={42} />
-                    <strong>Your world is taking shape</strong>
-                    <span>The graph is being evaluated at global coordinates.</span>
+                    <strong>
+                      {busy ? 'Your world is taking shape' : 'Ready to build your world'}
+                    </strong>
+                    <span>
+                      {busy
+                        ? 'The graph is being evaluated at global coordinates.'
+                        : 'Choose Build world to generate an overview.'}
+                    </span>
                   </div>
                 )}
               </div>
@@ -1207,22 +1219,29 @@ export function WorldStudio({
                   </span>
                   <strong>{builtGrid ? 'REGIONAL DETAIL' : 'CONTINUOUS WORLD'}</strong>
                 </div>
-                <div className="world-elevation-key">
+                <div
+                  className="world-elevation-key"
+                  data-channel={channel}
+                  title={
+                    channel === 'relief' || channel === 'height'
+                      ? 'Physical elevation in meters'
+                      : 'Diagnostic display range for this view; not a physical flow rate'
+                  }
+                >
                   <span>
-                    {number(
-                      result.max * builtWorld.domain.heightScale + builtWorld.domain.datum,
-                      0,
-                    )}{' '}
-                    m
+                    {channel === 'relief' || channel === 'height'
+                      ? `${number(result.max * builtWorld.domain.heightScale + builtWorld.domain.datum, 0)} m`
+                      : 'VIEW MAX'}
                   </span>
                   <i />
                   <span>
-                    {number(
-                      result.min * builtWorld.domain.heightScale + builtWorld.domain.datum,
-                      0,
-                    )}{' '}
-                    m
+                    {channel === 'relief' || channel === 'height'
+                      ? `${number(result.min * builtWorld.domain.heightScale + builtWorld.domain.datum, 0)} m`
+                      : '0'}
                   </span>
+                  {channel !== 'relief' && channel !== 'height' && (
+                    <small>{channel === 'flow' ? 'LOG SCALE' : 'RELATIVE'}</small>
+                  )}
                 </div>
               </>
             )}

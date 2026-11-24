@@ -1,0 +1,52 @@
+name: World 4K and 8K browser profiling (opt in)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'src/engine/**'
+      - 'src/export/world*'
+      - 'src/model/**'
+      - 'src/components/World*'
+      - 'tests/e2e/world-highres*'
+      - 'tests/e2e/helpers/world-profile-archive.ts'
+      - '.github/workflows/world-browser-profile.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: world-browser-profile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  profile:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'world-browser-profile') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Measure real CPU world downloads and independently decode every tile
+        run: npx playwright test tests/e2e/world-highres.spec.ts --workers=1 --retries=0
+        env:
+          WORLD_BROWSER_PROFILE: '1'
+      - name: Preserve actual browser timings, heap samples and archive verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-browser-profile
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 30

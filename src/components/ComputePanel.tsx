@@ -1,6 +1,7 @@
 import { Cpu, Download, Trash2 } from 'lucide-react';
 import { Modal } from './Modal';
 import { downloadBlob } from '../model/project';
+import { BUILD_INFO } from '../model/buildInfo';
 import type { EvaluationResult, TerrainProject } from '../model/types';
 import './WorldStudio.css';
 
@@ -113,6 +114,7 @@ export function ComputePanel({
                     JSON.stringify(
                       {
                         application: 'Normal Height',
+                        build: BUILD_INFO,
                         resolution: result?.field.resolution,
                         duration: result?.duration,
                         stale,

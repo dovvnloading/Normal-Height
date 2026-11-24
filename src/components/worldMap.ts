@@ -66,10 +66,10 @@ export function paintWorldMap(
         const f = (value - a[0]) / (b[0] - a[0]);
         const dx =
           ((sample(x + 1, z) - sample(x - 1, z)) * heightScale) /
-          Math.max(0.001, field.spacingX * 2);
+          Math.max(0.001, field.spacingX * (x === 0 || x === field.width - 1 ? 1 : 2));
         const dz =
           ((sample(x, z + 1) - sample(x, z - 1)) * heightScale) /
-          Math.max(0.001, field.spacingZ * 2);
+          Math.max(0.001, field.spacingZ * (z === 0 || z === field.height - 1 ? 1 : 2));
         const light = Math.max(0, (-dx * -0.58 + 0.69 - dz * -0.43) / Math.hypot(dx, 1, dz));
         const shade = 0.53 + 0.57 * light;
         rgb = [1, 2, 3].map((k) => (a[k] + (b[k] - a[k]) * f) * shade);

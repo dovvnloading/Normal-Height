@@ -88,6 +88,7 @@ async function zoom(deltaY) {
 await page.goto(BASE);
 await ready();
 
+console.log('Capturing the running studio and diagnostic views');
 // Golden-hour sky lighting on the studio tile.
 await page.getByRole('button', { name: 'Display settings' }).click();
 await page.getByRole('button', { name: 'Golden hour sky preset' }).click();
@@ -113,6 +114,7 @@ await page.getByRole('button', { name: 'Compute diagnostics', exact: true }).cli
 await page.screenshot({ path: join(OUT, 'compute-cache.png') });
 await page.getByRole('button', { name: 'Close Compute diagnostics', exact: true }).click();
 
+console.log('Capturing the actual World Studio workflow');
 // World coordinates, region selection, native detail and stage disclosure.
 rmSync(WORLD_FRAMES, { recursive: true, force: true });
 mkdirSync(WORLD_FRAMES, { recursive: true });
@@ -158,7 +160,10 @@ await page.screenshot({ path: join(OUT, 'world-export.png') });
 await world.getByRole('button', { name: 'Close World Studio', exact: true }).click();
 
 // Landscape tour: orbit each preset in viewport focus mode, without the
-// viewport chrome, captioned with the landscape name.
+// viewport chrome, captioned with the landscape name. The GIF output is 640px;
+// a smaller real browser viewport avoids rendering excess software GPU pixels.
+await page.setViewportSize({ width: 960, height: 640 });
+await page.waitForTimeout(800);
 await page.addStyleTag({
   content: `.nh-three-pane > :not(.nh-three-host):not(#nh-tour-label), .nh-preview-source { visibility: hidden !important; }
     #nh-tour-label { position: absolute; left: 24px; bottom: 22px; z-index: 50; padding: 7px 13px;
@@ -169,6 +174,7 @@ rmSync(FRAMES, { recursive: true, force: true });
 mkdirSync(FRAMES, { recursive: true });
 let frame = 0;
 for (const name of TOUR) {
+  console.log(`Capturing ${FRAMES_PER_LANDSCAPE} real orbit frames: ${name}`);
   if (frame > 0) await loadLandscape(name);
   await page.getByRole('button', { name: 'Focus viewport' }).click();
   await page.waitForTimeout(1500);
@@ -209,6 +215,10 @@ writeFileSync(
       viewport: { width: 1600, height: 1000 },
       application: 'Actual production build',
       landscapes: TOUR,
+      landscapeViewport: { width: 960, height: 640 },
+      landscapeFrameCount: frame,
+      worldFrameCount: worldFrame,
+      staticLighting: 'Golden hour preset; wind speed set to zero through the display controls',
       world:
         'Alpine graph, 2048 interval domain, 256 sample global reference; reconstructed global stages disclosed in UI',
       script: 'scripts/readme-media.mjs',

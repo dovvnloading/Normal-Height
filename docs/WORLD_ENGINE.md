@@ -238,6 +238,18 @@ node scripts/world-export-profile.mjs 4096,8192 ../world-engine-exports
 WORLD_ENGINE_PROFILE=1 npx vitest run tests/compute-cache-profile.test.ts
 ```
 
+The opt-in **World 4K and 8K browser profiling** workflow exercises real World
+Studio downloads, independently decodes the ZIP and every PNG, checks shared
+borders and records browser timings, main-thread heartbeat gaps and available
+heap observations. It uses the 2D editor view and CPU reference; these samples
+are not total-process memory or hardware GPU measurements. Run it manually or
+add the `world-browser-profile` label to an implementation PR. It is excluded
+from ordinary browser acceptance unless explicitly enabled:
+
+```bash
+WORLD_BROWSER_PROFILE=1 npx playwright test tests/e2e/world-highres.spec.ts --workers=1 --retries=0
+```
+
 See each benchmark script for output-path/environment options. Visual captures
 and their source revision/browser are documented in [MEDIA.md](MEDIA.md).
 
