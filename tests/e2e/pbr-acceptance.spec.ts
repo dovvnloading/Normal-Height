@@ -422,6 +422,49 @@ test('2K PBR preflight fails gracefully on constrained devices before starting a
   expect(after).toBe(before);
 });
 
+test('standalone 2K material maps reject constrained or unknown device memory before a Worker (#45)', async ({ page }) => {
+  await loadFastProject(page, 512);
+  await page.evaluate(() => {
+    const scope = window as Window & typeof globalThis & { __workersCreated: number };
+    scope.__workersCreated = 0;
+    const Original = window.Worker;
+    window.Worker = class extends Original {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        super(url, options);
+        scope.__workersCreated++;
+      }
+    };
+  });
+  const count = () => page.evaluate(() =>
+    (window as Window & typeof globalThis & { __workersCreated: number }).__workersCreated);
+  const before = await count();
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  const format = dialog.getByRole('combobox', { name: 'Export format' });
+  const bundle = dialog.getByRole('checkbox');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('2048');
+  for (const memory of [2, null]) {
+    await page.evaluate((value) => {
+      Object.defineProperty(navigator, 'deviceMemory', {
+        value: value ?? undefined, configurable: true,
+      });
+    }, memory);
+    for (const channel of ['basecolor', 'normalGL', 'orm']) {
+      await format.selectOption(channel);
+      for (const bundled of [false, true]) {
+        await bundle.setChecked(bundled);
+        const button = dialog.getByRole('button', {
+          name: bundled ? 'Export bundle' : 'Export map', exact: true,
+        });
+        await button.click();
+        await expect(dialog.getByRole('alert')).toContainText('Choose a smaller resolution');
+        await expect(button).toBeEnabled();
+        expect(await count()).toBe(before);
+      }
+    }
+  }
+});
+
 // Fixed-camera, fixed-sun PBR visual reference. The first CI run records the
 // 8x6 block-mean image to establish a real, reproducible SwiftShader baseline.
 // Subsequent runs compare this against a committed threshold/golden fixture.
