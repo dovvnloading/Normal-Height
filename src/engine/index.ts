@@ -473,12 +473,16 @@ export function evaluateGraph(
             wear: input.wear === empty ? empty : new Float32Array(length),
             deposition: input.deposition === empty ? empty : new Float32Array(length),
           };
+          // Terrain samples include both tile endpoints. Normalize noise
+          // coordinates and displacement against the n - 1 sample intervals.
+          const intervals = n - 1;
+          const displacement = strength * intervals * 0.16;
           for (let y = 0; y < n; y++)
             for (let x = 0; x < n; x++) {
-              const u = (x / n) * scale,
-                v = (y / n) * scale;
-              const dx = noise.fractal(u + 12.7, v + 1.9, octaves) * strength * n * 0.16;
-              const dy = noise.fractal(u + 2.3, v + 41.9, octaves) * strength * n * 0.16;
+              const u = (x / intervals) * scale,
+                v = (y / intervals) * scale;
+              const dx = noise.fractal(u + 12.7, v + 1.9, octaves) * displacement;
+              const dy = noise.fractal(u + 2.3, v + 41.9, octaves) * displacement;
               for (const channel of channels)
                 if (warped[channel] !== empty)
                   warped[channel][y * n + x] = sampleHeight(input[channel], n, x + dx, y + dy);
