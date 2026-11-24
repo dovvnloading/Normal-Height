@@ -1,0 +1,59 @@
+name: Procedural noise compatibility and acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/engine/noise*.ts'
+      - 'src/engine/index.ts'
+      - 'src/model/project.ts'
+      - 'src/model/registry.ts'
+      - 'src/components/Inspector.tsx'
+      - 'tests/noise-legacy-reference.test.ts'
+      - 'tests/e2e/studio.spec.ts'
+      - '.github/workflows/procedural-noise-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  noise-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Capture original field hashes in an independent pinned checkout
+        shell: bash
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/noise-baseline" d3364db4a3e1ce81a1c9f08c8523e178219f0250
+          cp tests/noise-legacy-reference.test.ts "$RUNNER_TEMP/noise-baseline/tests/"
+          cd "$RUNNER_TEMP/noise-baseline"
+          npm ci
+          NOISE_REFERENCE_CAPTURE=1 NOISE_REFERENCE_FILE="$RUNNER_TEMP/noise-reference.json" npx vitest run tests/noise-legacy-reference.test.ts
+      - name: Compare saved noise graphs with original engine and record CPU timings
+        shell: bash
+        run: |
+          NOISE_REFERENCE_FILE="$RUNNER_TEMP/noise-reference.json" NOISE_PROFILE=1 NOISE_PROFILE_FILE="$RUNNER_TEMP/noise-profile.json" npx vitest run tests/noise-legacy-reference.test.ts
+      - name: Build production application
+        run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Verify version selector and noise controls
+        run: npx playwright test tests/e2e/studio.spec.ts --grep "shows only noise controls" --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: procedural-noise-evidence
+          path: |
+            ${{ runner.temp }}/noise-reference.json
+            ${{ runner.temp }}/noise-profile.json
+            test-results/
+            playwright-report/
+          retention-days: 7

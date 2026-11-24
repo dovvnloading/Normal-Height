@@ -1,0 +1,40 @@
+name: PBR export memory acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/components/ExportDialog.tsx'
+      - 'src/export/**'
+      - 'tests/e2e/pbr-acceptance.spec.ts'
+      - '.github/workflows/pbr-export-memory-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pbr-export-memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Verify permitted export and constrained-memory preflight
+        env:
+          PBR_BROWSER_BENCH: '1'
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep "1K browser export decodes|2K PBR preflight|standalone 2K material maps" --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pbr-export-memory-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7

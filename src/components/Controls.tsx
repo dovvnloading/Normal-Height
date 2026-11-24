@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Dices, Info } from 'lucide-react';
 import type { ParamDefinition, ParamValue } from '../model/types';
 
@@ -22,6 +22,7 @@ export function NumberField({
   unit?: string;
 }) {
   const [draft, setDraft] = useState(String(value));
+  const cancelOnBlur = useRef(false);
   useEffect(() => setDraft(String(Math.round(value * 100000) / 100000)), [value]);
   const commit = () => {
     const n = Number(draft);
@@ -42,13 +43,22 @@ export function NumberField({
         step={step}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
+        onBlur={() => {
+          if (cancelOnBlur.current) {
+            cancelOnBlur.current = false;
+            return;
+          }
+          commit();
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
-            commit();
+            e.preventDefault();
+            // Blur is the single commit path for both keyboard and pointer edits.
             e.currentTarget.blur();
-          }
-          if (e.key === 'Escape') {
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            // React state updates may not be visible to the synchronous blur handler.
+            cancelOnBlur.current = true;
             setDraft(String(value));
             e.currentTarget.blur();
           }

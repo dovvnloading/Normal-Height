@@ -55,6 +55,9 @@ const text = (node: TerrainNode, key: string, fallback: string): string =>
   String(node.params[key] ?? fallback);
 const inputHandle = (edge: TerrainEdge, node: TerrainNode) =>
   edge.targetHandle || (node.kind === 'blend' ? 'a' : 'in');
+// Bypassed processors forward their primary input; secondary branches are not dependencies.
+const usesInput = (edge: TerrainEdge, node: TerrainNode) =>
+  !node.bypassed || inputHandle(edge, node) === (node.kind === 'blend' ? 'a' : 'in');
 
 /** Structural errors are rejected; unfinished, disconnected nodes may remain on the canvas. */
 export function validateGraph(graph: TerrainGraph): string | null {
@@ -157,8 +160,18 @@ export function estimatedWorkingBytes(
     if (node.bypassed && node.kind !== 'mountain' && node.kind !== 'noise') continue;
     buffers += ['hydraulic', 'warp', 'blend', 'spline'].includes(node.kind) ? 4 : 1;
   }
-  for (const edge of graph.edges)
-    if (needed.has(edge.target) && edge.sourceHandle && edge.sourceHandle !== 'height') buffers++;
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  for (const edge of graph.edges) {
+    const target = byId.get(edge.target);
+    if (
+      target &&
+      needed.has(target.id) &&
+      usesInput(edge, target) &&
+      edge.sourceHandle &&
+      edge.sourceHandle !== 'height'
+    )
+      buffers++;
+  }
   const reserve = 64 * 1024 * 1024;
   const cell = resolution * resolution * Float32Array.BYTES_PER_ELEMENT;
   const settled = reserve + buffers * cell;
@@ -372,7 +385,9 @@ export function evaluateGraph(
   const markNeeded = (id: string) => {
     if (needed.has(id)) return;
     needed.add(id);
-    for (const edge of incoming.get(id) || []) markNeeded(edge.source);
+    const node = byId.get(id)!;
+    for (const edge of incoming.get(id) || [])
+      if (usesInput(edge, node)) markNeeded(edge.source);
   };
   markNeeded(target.id);
   const estimatedBytes = estimatedWorkingBytes(project.graph, needed, n);
@@ -406,6 +421,7 @@ export function evaluateGraph(
     if (cached) return cached;
     const inputs = new Map<string, WorkingField>();
     for (const edge of incoming.get(node.id) || []) {
+      if (!usesInput(edge, node)) continue;
       let field = calculate(byId.get(edge.source)!);
       const handle = edge.sourceHandle || 'height';
       if (handle !== 'height')
@@ -449,6 +465,8 @@ export function evaluateGraph(
             strength: number(node, 'strength', 0.09, 0, 0.55),
             falloff: number(node, 'falloff', 3, 1.5, 6),
             downhill: node.params.downhill !== false,
+            worldSize: project.worldSize,
+            heightScale: project.heightScale,
           });
           break;
         case 'warp': {
@@ -462,12 +480,16 @@ export function evaluateGraph(
             wear: input.wear === empty ? empty : new Float32Array(length),
             deposition: input.deposition === empty ? empty : new Float32Array(length),
           };
+          // Terrain samples include both tile endpoints. Normalize noise
+          // coordinates and displacement against the n - 1 sample intervals.
+          const intervals = n - 1;
+          const displacement = strength * intervals * 0.16;
           for (let y = 0; y < n; y++)
             for (let x = 0; x < n; x++) {
-              const u = (x / n) * scale,
-                v = (y / n) * scale;
-              const dx = noise.fractal(u + 12.7, v + 1.9, octaves) * strength * n * 0.16;
-              const dy = noise.fractal(u + 2.3, v + 41.9, octaves) * strength * n * 0.16;
+              const u = (x / intervals) * scale,
+                v = (y / intervals) * scale;
+              const dx = noise.fractal(u + 12.7, v + 1.9, octaves) * displacement;
+              const dy = noise.fractal(u + 2.3, v + 41.9, octaves) * displacement;
               for (const channel of channels)
                 if (warped[channel] !== empty)
                   warped[channel][y * n + x] = sampleHeight(input[channel], n, x + dx, y + dy);
