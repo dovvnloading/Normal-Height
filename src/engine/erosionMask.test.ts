@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { hydraulicErosion } from './erosion';
 import type { ErosionSettings } from './erosion';
 import { reconstructionWeight } from './erosionMask';
+import { landscapeErosion } from './landscape';
 
 const settings: ErosionSettings = {
   droplets: 250000, lifetime: 85, inertia: 0.18, capacity: 10,
@@ -78,4 +79,32 @@ describe('erosion mask reconstruction', () => {
         .toBeLessThan(result.waterBudget.rainfallVolumeM3 * 0.002);
     }, 30000);
   }
+
+  it('preserves protected soil cover in the multiscale hybrid handoff', () => {
+    const n = 257, source = terrain(n);
+    const mask = new Float32Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      // Narrow protected strip between coarse-grid samples, bordered by
+      // fractional permission. A surface-only assertion cannot detect a
+      // change in the hidden soil/bedrock partition.
+      mask[y * n + x] = Math.min(0.5, Math.abs(x - 127) * 0.125);
+    }
+    const options = {
+      ...settings, cycles: 4, multiscale: true, worldSize: 12000,
+      bedrockPreserve: true, soilDepthMeters: 1.5,
+    };
+    const result = landscapeErosion(source, n, options, mask, undefined, true);
+    const cover = result.mobileSediment!;
+    const initialCover = options.soilDepthMeters / options.heightScale!;
+    expect(cover).toBeDefined();
+    expect(result.eroded + result.deposited).toBeGreaterThan(0.01);
+    for (let y = 0; y < n; y++) {
+      const i = y * n + 127;
+      expect(result.height[i]).toBe(source[i]);
+      expect(Math.abs(cover[i] - initialCover)).toBeLessThan(1e-8);
+    }
+    const hybrid = hydraulicErosion(source, n, { ...options, method: 'hybrid' }, mask);
+    expect(hybrid.height.every(Number.isFinite)).toBe(true);
+    for (let y = 0; y < n; y++) expect(hybrid.height[y * n + 127]).toBe(source[y * n + 127]);
+  }, 30000);
 });

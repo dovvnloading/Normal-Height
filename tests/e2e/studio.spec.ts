@@ -437,6 +437,39 @@ test('seed and erosion parameter changes regenerate the actual height data', asy
   ).toHaveValue('0.46');
 });
 
+test('cancels numeric drafts on Escape and commits on Enter or ordinary blur', async ({ page }) => {
+  const field = page.getByRole('spinbutton', { name: 'Erosion rate value', exact: true });
+  const undo = page.getByRole('button', { name: 'Undo', exact: true });
+  const original = await field.inputValue();
+  const changed = original === '0.46' ? '0.35' : '0.46';
+  await expect(undo).toBeDisabled();
+
+  await field.fill(changed);
+  await field.press('Escape');
+  await expect(field).not.toBeFocused();
+  await expect(field).toHaveValue(original);
+  await expect(undo).toBeDisabled();
+
+  await field.fill(changed);
+  await field.press('Enter');
+  await expect(field).not.toBeFocused();
+  await expect(field).toHaveValue(changed);
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(field).toHaveValue(original);
+  await expect(undo).toBeDisabled();
+
+  await field.fill(changed);
+  await field.press('Tab');
+  await expect(field).not.toBeFocused();
+  await expect(field).toHaveValue(changed);
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(field).toHaveValue(original);
+  await expect(undo).toBeDisabled();
+  await ready(page);
+});
+
 test('authors noise nodes, uses undo and redo, groups nodes, and edits a note', async ({
   page,
 }) => {
