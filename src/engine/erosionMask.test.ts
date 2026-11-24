@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { hydraulicErosion } from './erosion';
 import type { ErosionSettings } from './erosion';
-import { reconstructionWeight } from './erosionMask';
+import { reconstructionWeight, reconstructMobileCover } from './erosionMask';
+import { fluidGridErosion } from './fluid';
 import { landscapeErosion } from './landscape';
 
 const settings: ErosionSettings = {
@@ -29,6 +30,13 @@ describe('erosion mask reconstruction', () => {
     expect(reconstructionWeight(0.25, 0.5)).toBe(0.5);
     expect(reconstructionWeight(0.5, 0.25)).toBe(1);
     expect(reconstructionWeight(1, 0.25)).toBe(1);
+  });
+
+  it('reconstructs only mobile cover changes, retaining the initial layer at zero permission', () => {
+    expect(reconstructMobileCover(2, -1.5, 0)).toBe(2);
+    expect(reconstructMobileCover(2, -1.5, 0.5)).toBe(1.25);
+    expect(reconstructMobileCover(2, 3, 0.5)).toBe(3.5);
+    expect(reconstructMobileCover(2, -3, 1)).toBe(0);
   });
 
   for (const method of ['landscape', 'fluid'] as const) {
@@ -106,5 +114,45 @@ describe('erosion mask reconstruction', () => {
     const hybrid = hydraulicErosion(source, n, { ...options, method: 'hybrid' }, mask);
     expect(hybrid.height.every(Number.isFinite)).toBe(true);
     for (let y = 0; y < n; y++) expect(hybrid.height[y * n + 127]).toBe(source[y * n + 127]);
+    const budget = hybrid.sedimentBudget!;
+    expect(Math.abs(budget.balanceErrorM3)).toBeLessThan(Math.max(1, budget.erodedVolumeM3) * 0.02);
+    const water = hybrid.waterBudget!;
+    expect(Math.abs(water.balanceErrorM3)).toBeLessThan(water.rainfallVolumeM3 * 0.002);
+  }, 30000);
+
+  it('keeps resistant bedrock aligned with reconstructed mobile cover', () => {
+    const n = 257, source = terrain(n), mask = new Float32Array(n * n);
+    const initialMobile = new Float32Array(n * n);
+    const options = {
+      ...settings, cycles: 4, multiscale: true, worldSize: 12000,
+      bedrockPreserve: true, bedrockResistance: 1, soilDepthMeters: 1.5,
+    };
+    const initial = options.soilDepthMeters / options.heightScale!;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = y * n + x;
+      mask[i] = Math.min(0.5, Math.abs(x - 127) * 0.125);
+      // A nonuniform initial layer exercises the actual hybrid-fluid path.
+      initialMobile[i] = initial * (0.15 + 0.85 * (x % 7) / 6);
+    }
+    const landscape = landscapeErosion(source, n, options, mask, undefined, true);
+    expect(landscape.eroded + landscape.deposited).toBeGreaterThan(0.001);
+    const cover = landscape.mobileSediment!;
+    let maxBedrockError = 0;
+    for (let i = 0; i < source.length; i++) {
+      expect(cover[i]).toBeGreaterThanOrEqual(0);
+      maxBedrockError = Math.max(maxBedrockError,
+        Math.abs((landscape.height[i] - source[i]) - (cover[i] - initial)));
+    }
+    // Allow Float32 rounding of height/cover over repeated simulation steps.
+    expect(maxBedrockError).toBeLessThan(2e-6);
+
+    const fluid = fluidGridErosion(source, n, options, mask, undefined, initialMobile);
+    expect(fluid.eroded + fluid.deposited).toBeGreaterThan(0.001);
+    let maxOvercut = 0;
+    for (let i = 0; i < source.length; i++) {
+      maxOvercut = Math.max(maxOvercut, source[i] - initialMobile[i] - fluid.height[i]);
+      if (mask[i] === 0) expect(fluid.height[i]).toBe(source[i]);
+    }
+    expect(maxOvercut).toBeLessThan(2e-6);
   }, 30000);
 });

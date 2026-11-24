@@ -3,7 +3,7 @@ import type { ErosionResult, ErosionSettings } from './erosion';
 import { createDrainageWorkspace, routeDrainage } from './hydrology';
 import { accumulateMultiFlow } from './landscapeFlow';
 import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
-import { reconstructionWeight } from './erosionMask';
+import { reconstructionWeight, reconstructMobileCover } from './erosionMask';
 
 // Matches the D8 ordering used in landscapeFlow's partition fractions.
 const FLOW_DX = [-1, 0, 1, -1, 1, -1, 0, 1] as const;
@@ -155,32 +155,24 @@ export function landscapeErosion(
     const height = original.slice();
     const stageMask = mask ? resample(mask, n, m) : null;
     if (stageMask) for (let i = 0; i < size; i++) stageMask[i] = clamp(stageMask[i]);
-    if (previous) {
-      // Transfer only physical height changes. Recover the fine structure of
-      // the *source* DEM instead of interpolating coarse erosional pixels into
-      // fake surface detail.
-      const old = previous;
-      for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
+    // Reconstruct the surface and mobile-cover changes from the same
+    // original terrain/soil baseline, using identical local permission.
+    // Otherwise a protected height can hide a changed bedrock partition.
+    const alluvium = new Float32Array(size), bedrock = new Float32Array(size);
+    for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
+      const i = y * m + x;
+      if (previous) {
+        const old = previous;
         const sx = x * (old.resolution - 1) / (m - 1);
         const sy = y * (old.resolution - 1) / (m - 1);
-        const i = y * m + x;
         const weight = stageMask && old.mask
           ? reconstructionWeight(stageMask[i], sample(old.mask, old.resolution, sx, sy))
           : 1;
         height[i] += weight * (sample(old.height, old.resolution, sx, sy) -
           sample(old.original, old.resolution, sx, sy));
-      }
-    }
-    // Height is split into immobile rock and mobile alluvium. The original
-    // surface stays unchanged: an initial cover is taken from its own height.
-    const alluvium = new Float32Array(size), bedrock = new Float32Array(size);
-    for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
-      const i = y * m + x;
-      alluvium[i] = previous
-        ? Math.max(0, sample(previous.alluvium, previous.resolution,
-            x * (previous.resolution - 1) / (m - 1),
-            y * (previous.resolution - 1) / (m - 1)))
-        : initialSoil;
+        alluvium[i] = reconstructMobileCover(initialSoil,
+          sample(old.alluvium, old.resolution, sx, sy) - initialSoil, weight);
+      } else alluvium[i] = initialSoil;
       bedrock[i] = height[i] - alluvium[i];
     }
     const rain = new Float32Array(size);
@@ -430,8 +422,10 @@ export function landscapeErosion(
   const wear = new Float32Array(count);
   const deposition = new Float32Array(count);
   const flow = new Float32Array(count);
+  const mobileSediment = includeMobileLayer && previous ? new Float32Array(count) : undefined;
   if (previous) {
     let protectedChanges: Float32Array | null = null;
+    let reconstructedCover = previous.alluvium;
     let reconstructedMask = previous.mask;
     if (settings.bedrockPreserve) {
       const resolution = previous.resolution;
@@ -442,6 +436,9 @@ export function landscapeErosion(
       // the input's fine-scale pre-incised bedrock is retained bit-for-bit
       // in the final re-composition rather than being flattened by creep.
       protectedChanges = smoothDisplacement(changes, resolution);
+      // Filtering the absolute cover is equivalent to filtering its delta
+      // from the constant initial soil baseline. Match the surface filter.
+      if (mobileSediment) reconstructedCover = smoothDisplacement(reconstructedCover, resolution);
       if (reconstructedMask) reconstructedMask = smoothDisplacement(reconstructedMask, resolution);
     }
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
@@ -456,6 +453,8 @@ export function landscapeErosion(
         ? reconstructionWeight(mask[i], sample(reconstructedMask, previous.resolution, sx, sy))
         : 1;
       result[i] += net * weight;
+      if (mobileSediment) mobileSediment[i] = reconstructMobileCover(initialSoil,
+        sample(reconstructedCover, previous.resolution, sx, sy) - initialSoil, weight);
       flow[i] = latestFlow
         ? sample(latestFlow, latestResolution,
             x * (latestResolution - 1) / (n - 1),
@@ -474,26 +473,10 @@ export function landscapeErosion(
       deposited -= difference;
     }
   }
-  let mobileSediment: Float32Array | undefined;
-  if (includeMobileLayer && previous) {
-    const { resolution: m, alluvium } = previous;
-    mobileSediment = new Float32Array(count);
-    let coarseMass = 0, fineMass = 0;
-    for (const value of alluvium) coarseMass += value;
-    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
-      const i = y * n + x;
-      const cover = Math.max(0, sample(alluvium, m,
-        x * (m - 1) / (n - 1), y * (m - 1) / (n - 1)));
-      mobileSediment[i] = cover;
-      fineMass += cover;
-    }
-    // Preserve the physical amount of mobile material when the hybrid
-    // stage resamples a lower-resolution river simulation.
-    if (fineMass > 0) {
-      const factor = (coarseMass / (m * m)) / (fineMass / count);
-      for (let i = 0; i < count; i++) mobileSediment[i] *= factor;
-    }
-  }
+  // The hybrid handoff is a spatial solid-layer reconstruction, not a new
+  // physical transport step. Global cover renormalization would alter even
+  // protected cells and change the bedrock partition. The transport ledger
+  // below remains measured at simulation resolution.
   progress?.(1);
   return {
     height: result, flow, wear, deposition, eroded, deposited,

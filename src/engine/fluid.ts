@@ -1,7 +1,7 @@
 import type { ErosionResult, ErosionSettings } from './erosion';
 import { clamp, Noise } from './noise';
 import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
-import { reconstructionWeight } from './erosionMask';
+import { reconstructionWeight, reconstructMobileCover } from './erosionMask';
 
 const DIAGONAL = 1 / Math.SQRT2;
 const DX = [1, 0, 1, -1] as const;
@@ -123,7 +123,8 @@ export function fluidGridErosion(
   const rockFactor = 1 - clamp(settings.bedrockResistance ?? 0.6);
   let previous: {
     size: number; original: Float32Array; height: Float32Array;
-    mobile: Float32Array; water: Float32Array; sediment: Float32Array;
+    mobile: Float32Array; initialCover: Float32Array;
+    water: Float32Array; sediment: Float32Array;
     mask: Float32Array | undefined;
   } | undefined;
   let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
@@ -138,29 +139,40 @@ export function fluidGridErosion(
     const height = original.slice();
     const materialMask = mask ? resize(mask, n, m) : undefined;
     if (materialMask) for (let i = 0; i < length; i++) materialMask[i] = clamp(materialMask[i]);
-    if (previous) {
-      for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
+    // Solid cover and elevation share a spatial baseline. Reconstruct
+    // changes to both with the same mask weight; scaling the entire mobile
+    // layer as a conserved transport density would also move bedrock.
+    const initialCover = initialMobile
+      ? resize(initialMobile, n, m)
+      : new Float32Array(length).fill(soilDepth);
+    const mobile = initialCover.slice();
+    const bedrock = new Float32Array(length);
+    for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
+      const i = y * m + x;
+      if (previous) {
         const sx = x * (previous.size - 1) / (m - 1);
         const sy = y * (previous.size - 1) / (m - 1);
-        const i = y * m + x;
         const weight = materialMask && previous.mask
           ? reconstructionWeight(materialMask[i], bilinear(previous.mask, previous.size, sx, sy))
           : 1;
+        const mobileChange = weight * (
+          bilinear(previous.mobile, previous.size, sx, sy) -
+          bilinear(previous.initialCover, previous.size, sx, sy)
+        );
+        // A finer sample can have less initial cover than its coarse
+        // neighbours. Limit the reconstructed soil loss to available cover
+        // and apply the same correction to height, not to bedrock.
+        const coverCorrection = Math.max(0, -initialCover[i] - mobileChange);
         height[i] += weight * (
           bilinear(previous.height, previous.size, sx, sy) -
           bilinear(previous.original, previous.size, sx, sy)
-        );
+        ) + coverCorrection;
+        mobile[i] = reconstructMobileCover(initialCover[i], mobileChange, 1);
       }
+      bedrock[i] = height[i] - mobile[i];
     }
-    // Transported water and suspended sediment persist across coarse-to-fine
-    // stages; deposits are tracked in a separate mobile layer.
-    const mobile = previous
-      ? resizeConservativeDensity(previous.mobile, previous.size, m)
-      : initialMobile
-        ? resizeConservativeDensity(initialMobile, n, m)
-        : new Float32Array(length).fill(soilDepth);
-    const bedrock = new Float32Array(length);
-    for (let i = 0; i < length; i++) bedrock[i] = height[i] - mobile[i];
+    // Transported water and suspended sediment remain conserved densities
+    // across the coarse-to-fine stages; neither is a solid terrain layer.
     const water = previous
       ? resizeConservativeDensity(previous.water, previous.size, m)
       : new Float32Array(length);
@@ -351,7 +363,7 @@ export function fluidGridErosion(
       completed++;
       progress?.(Math.min(0.999, completed / numberOfSteps));
     }
-    previous = { size: m, original, height, mobile, water, sediment, mask: materialMask };
+    previous = { size: m, original, height, mobile, initialCover, water, sediment, mask: materialMask };
     finalFlow = cumulativeFlow;
   }
 
@@ -373,7 +385,15 @@ export function fluidGridErosion(
       const weight = mask && previous.mask
         ? reconstructionWeight(mask[i], bilinear(previous.mask, previous.size, sx, sy))
         : 1;
-      height[i] += delta * weight;
+      const mobileChange = weight * (
+        bilinear(previous.mobile, previous.size, sx, sy) -
+        bilinear(previous.initialCover, previous.size, sx, sy)
+      );
+      const cover = initialMobile ? initialMobile[i] : soilDepth;
+      // Match the stage-transition soil-loss limit at the output grid.
+      // It preserves the reconstructed bedrock delta without overcutting
+      // fine-scale cells that have a thinner initial mobile layer.
+      height[i] += delta * weight + Math.max(0, -cover - mobileChange);
       flow[i] = bilinear(finalFlow, previous.size, sx, sy);
       const actual = height[i] - input[i];
       if (actual < 0) {
