@@ -12,7 +12,7 @@ import {
   Plus,
   ArrowDownUp,
 } from 'lucide-react';
-import { NODE_DEFINITIONS } from '../model/registry';
+import { NODE_DEFINITIONS, noiseParamVisible } from '../model/registry';
 import { layerColorHex, resolveSurface, SPLAT_LAYERS } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
@@ -58,9 +58,10 @@ export function Inspector({
   const [tab, setTab] = useState<'node' | 'scene'>('node');
   const definition = node ? NODE_DEFINITIONS[node.kind] : null;
   const surface = resolveSurface(project.surface);
-  const sections = definition
-    ? [...new Set(definition.params.map((p) => p.section ?? 'Parameters'))]
+  const visibleParams = node && definition
+    ? definition.params.filter((p) => noiseParamVisible(node, p.key))
     : [];
+  const sections = [...new Set(visibleParams.map((p) => p.section ?? 'Parameters'))];
   return (
     <aside className="inspector panel" aria-label="Parameter inspector">
       <div className="panel-tabs">
@@ -105,6 +106,12 @@ export function Inspector({
                     <span className="switch" aria-hidden="true" />
                   </label>
                 )}
+              {node.kind === 'noise' && node.params.mode === 'wave' && node.params.noiseModel !== 'v2' && (
+                <p className="parameter-hint">Legacy Wave uses a fixed three-layer phase fractal. Switch to corrected sampling to edit its layers.</p>
+              )}
+              {node.kind === 'noise' && node.params.mode === 'naki' && node.params.noiseModel !== 'v2' && (
+                <p className="parameter-hint">Legacy Naki includes inherent coordinate distortion even at zero Warp amount.</p>
+              )}
               {sections.map((section) => (
                 <details
                   className="parameter-section"
@@ -118,7 +125,7 @@ export function Inspector({
                     <ChevronDown size={13} />
                   </summary>
                   <div>
-                    {definition.params
+                    {visibleParams
                       .filter((p) => (p.section ?? 'Parameters') === section)
                       .map((d) => (
                         <ParamControl

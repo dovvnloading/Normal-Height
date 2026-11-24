@@ -421,7 +421,8 @@ export function evaluateGraph(
       ((Number(project.seed) || 0) +
         Math.round(number(node, 'seed', 0, -2147483647, 2147483647))) >>>
       0;
-    const noise = new Noise(seed);
+    const noise = new Noise(seed,
+      node.kind === 'noise' && node.params.noiseModel === 'v2' ? 'v2' : 'legacy');
     let field: WorkingField;
     if (node.bypassed && input) field = input;
     else if (node.kind === 'mountain')

@@ -27,11 +27,15 @@ const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
 const gradientX = [1, -1, 1, -1, 1, -1, 0, 0];
 const gradientY = [1, 1, -1, -1, 0, 0, 1, -1];
 
+export type NoiseModel = 'legacy' | 'v2';
+
 export class Noise {
   private readonly permutation = new Uint16Array(512);
   private readonly seed: number;
 
-  constructor(seed: number) {
+  // Internal terrain/material generators retain their calibrated legacy noise.
+  // Procedural noise nodes explicitly select their saved algorithm.
+  constructor(seed: number, private readonly model: NoiseModel = 'legacy') {
     this.seed = seed >>> 0;
     const random = randomGenerator(seed);
     const values = Array.from({ length: 256 }, (_, i) => i);
@@ -64,6 +68,10 @@ export class Noise {
       b = p[p[px + 1] + py] & 7;
     const c = p[p[px] + py + 1] & 7,
       d = p[p[px + 1] + py + 1] & 7;
+    // Each gradient component has magnitude at most one. For t in [0,1],
+    // t*(1-fade(t)) + (1-t)*fade(t) <= 1/2, since fade is monotonic
+    // and crosses 1/2 at t=1/2. The weighted corner-dot sum is therefore
+    // bounded by 1 across both axes before the legacy gain.
     return (
       mix(
         mix(
@@ -77,7 +85,7 @@ export class Noise {
           fade(fx),
         ),
         fade(fy),
-      ) * 1.42
+      ) * (this.model === 'legacy' ? 1.42 : 1)
     );
   }
 
@@ -209,16 +217,26 @@ export class Noise {
         return clamp(this.fractal(x, y, octaves, persistence, lacunarity, 'ridged'));
       case 'billow':
         return clamp(this.fractal(x, y, octaves, persistence, lacunarity, 'billow'));
-      case 'turbulence':
-        return clamp(this.fractal(x, y, octaves, persistence, lacunarity, 'turbulence') * 1.5);
+      case 'turbulence': {
+        const value = this.fractal(x, y, octaves, persistence, lacunarity, 'turbulence');
+        // Smooth monotonic compression keeps strong crests distinct instead
+        // of converting the upper part of the distribution into a plateau.
+        return this.model === 'legacy' ? clamp(value * 1.5) : -Math.expm1(-value * 1.5);
+      }
       case 'voronoi':
         return clamp(this.cellular(x, y).f1 / 1.15);
-      case 'voronoi-edge':
-        return clamp(this.cellular(x, y).edge * 1.65);
+      case 'voronoi-edge': {
+        const edge = this.cellular(x, y).edge;
+        return this.model === 'legacy' ? clamp(edge * 1.65) : -Math.expm1(-edge * 1.65);
+      }
       case 'cellular':
         return this.cellular(x, y).cell;
-      case 'wave':
-        return (Math.sin(x * Math.PI * 2 + warp * this.fractal(x, y, 3) * 5) + 1) * 0.5;
+      case 'wave': {
+        const phase = this.model === 'legacy'
+          ? this.fractal(x, y, 3)
+          : this.fractal(x, y, octaves, persistence, lacunarity);
+        return (Math.sin(x * Math.PI * 2 + warp * phase * 5) + 1) * 0.5;
+      }
       case 'warped': {
         const u = x + this.fractal(x * 0.7 + 31, y * 0.7, 3) * warp * 3;
         const v = y + this.fractal(x * 0.7, y * 0.7 + 47, 3) * warp * 3;
@@ -226,8 +244,9 @@ export class Noise {
       }
       case 'naki': {
         // Independent Naki-inspired artistic variant, not Maxon's proprietary noise.
-        const u = x + this.simplex(x * 0.55 + 11.4, y * 0.55) * (0.4 + warp);
-        const v = y + this.value(x * 0.8, y * 0.8 + 5.7) * (0.4 + warp);
+        const distortion = warp + (this.model === 'legacy' ? 0.4 : 0);
+        const u = x + this.simplex(x * 0.55 + 11.4, y * 0.55) * distortion;
+        const v = y + this.value(x * 0.8, y * 0.8 + 5.7) * distortion;
         const lobes = Math.sin(
           this.simplex(u, v) * 3.5 +
             this.fractal(u * 1.7, v * 1.7, octaves, persistence, lacunarity) * 2,

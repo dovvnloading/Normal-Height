@@ -475,6 +475,25 @@ test('authors noise nodes, uses undo and redo, groups nodes, and edits a note', 
   await expect(graph(page).locator('.react-flow__node-annotation')).toHaveCount(1);
 });
 
+test('shows only noise controls used by the chosen algorithm and family', async ({ page }) => {
+  await page.getByRole('complementary', { name: 'Node library', exact: true })
+    .getByRole('button', { name: /Procedural noise/ }).click();
+  const family = page.getByRole('combobox', { name: 'Noise family', exact: true });
+  const algorithm = page.getByRole('combobox', { name: 'Noise algorithm', exact: true });
+  const octaves = page.getByRole('spinbutton', { name: 'Octaves value', exact: true });
+  await expect(algorithm).toHaveValue('v2');
+  await family.selectOption('perlin');
+  await expect(octaves).toHaveCount(0);
+  await family.selectOption('wave');
+  await expect(octaves).toBeVisible();
+  await algorithm.selectOption('legacy');
+  await expect(octaves).toHaveCount(0);
+  await expect(page.getByText('Legacy Wave uses a fixed three-layer phase fractal.', { exact: false }))
+    .toBeVisible();
+  await algorithm.selectOption('v2');
+  await expect(octaves).toBeVisible();
+});
+
 test('draws a real editable river and ridge, connects it before erosion, and saves the path', async ({
   page,
 }, testInfo) => {

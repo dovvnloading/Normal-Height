@@ -67,6 +67,20 @@ relief against the reference, not its Flow mask or material textures.
 - **Reproducible seeds:** a project seed plus per-node offsets. Changing node positions or selection does not change the generated terrain.
 - **Six editable landscape graphs:** Alpine watershed, Granite massif, Desert badlands, Volcanic caldera, Folded highlands, and the spline-enabled River-cut highlands.
 
+### Procedural noise compatibility
+
+New Procedural noise nodes use **Noise algorithm → Corrected sampling (v2)**.
+This bounds Perlin without hard-clipping its extrema, smoothly compresses strong
+turbulence and Voronoi ridge values, makes Wave's fractal controls effective,
+and makes Naki's zero Warp amount a true unwarped lobe field. Single-layer
+families hide the unused fractal controls. The engine's calibrated mountain,
+material and erosion noise remains unchanged.
+
+Projects saved without a noise algorithm are loaded in **Original sampling
+(legacy)** for each existing noise node. Switch that node to corrected sampling
+explicitly to adopt the new appearance; its seed and other authored parameters
+are retained. The selection is serialized with the project.
+
 ### River and ridge designer (Normal Height 1.1)
 
 - Add **River / ridge spline** from **Shape & transform**. The app inserts it before the first hydraulic-erosion stage (or terrain output) when a height connection is available, then opens the 2D editor.
