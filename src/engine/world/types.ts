@@ -1,4 +1,5 @@
 import type { WorldBackend } from '../../model/world';
+import type { WorldMassBudget } from './hydrology';
 
 export interface WorldSampleGrid {
   startX: number;
@@ -58,6 +59,7 @@ export interface WorldRegionResult {
   duration: number;
   backend: 'cpu-reference' | 'webgpu';
   estimatedPeakBytes: number;
+  transportBudget?: WorldMassBudget;
 }
 
 export interface WorldRunOptions {

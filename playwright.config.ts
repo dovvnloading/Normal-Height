@@ -33,11 +33,11 @@ export default defineConfig({
       args: process.env.PBR_REAL_GPU
         ? ['--use-gl=angle', '--use-angle=metal', '--ignore-gpu-blocklist']
         : [
-          '--use-gl=angle',
-          '--use-angle=swiftshader',
-          '--enable-unsafe-swiftshader',
-          '--disable-dev-shm-usage',
-        ],
+            '--use-gl=angle',
+            '--use-angle=swiftshader',
+            '--enable-unsafe-swiftshader',
+            '--disable-dev-shm-usage',
+          ],
     },
   },
   projects: [

@@ -24,5 +24,13 @@ export type WorldWorkerRequest = {
 
 export type WorldWorkerResponse =
   | { type: 'progress'; id: number; progress: number; stage: string }
-  | { type: 'result'; id: number; result: WorldRegionResult; cacheHit: boolean; store?: WorldRegionStoreStats; compute?: ComputeCapability; warnings?: string[] }
+  | {
+      type: 'result';
+      id: number;
+      result: WorldRegionResult;
+      cacheHit: boolean;
+      store?: WorldRegionStoreStats;
+      compute?: ComputeCapability;
+      warnings?: string[];
+    }
   | { type: 'error'; id: number; message: string };

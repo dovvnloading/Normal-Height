@@ -14,7 +14,16 @@ describe('explicit World project versioning', () => {
   it('roundtrips rectangular World coordinates and original versioned algorithms', () => {
     const project = createProject('studio-dunes');
     const world = createWorldDefinition(project);
-    world.domain = { ...world.domain, width: 12000, depth: 7000, originX: -2500, originZ: 842, cellsX: 1234, cellsZ: 737, datum: -125 };
+    world.domain = {
+      ...world.domain,
+      width: 12000,
+      depth: 7000,
+      originX: -2500,
+      originZ: 842,
+      cellsX: 1234,
+      cellsZ: 737,
+      datum: -125,
+    };
     const restored = parseProject(JSON.parse(JSON.stringify({ ...project, version: 2, world })));
     expect(restored.version).toBe(2);
     expect(restored.world).toEqual(world);
@@ -27,7 +36,15 @@ describe('explicit World project versioning', () => {
     const world = createWorldDefinition(project);
     expect(() => parseProject({ ...project, world })).toThrow(/World v2/);
     expect(() => parseProject({ ...project, version: 2 })).toThrow(/World settings/);
-    expect(() => parseProject({ ...project, version: 2, world: { ...world, domain: { ...world.domain, cellsX: 2.5 } } })).toThrow(/integer/);
-    expect(() => parseProject({ ...project, version: 2, world: { ...world, backend: 'pretend-gpu' } })).toThrow(/CPU reference/);
+    expect(() =>
+      parseProject({
+        ...project,
+        version: 2,
+        world: { ...world, domain: { ...world.domain, cellsX: 2.5 } },
+      }),
+    ).toThrow(/integer/);
+    expect(() =>
+      parseProject({ ...project, version: 2, world: { ...world, backend: 'pretend-gpu' } }),
+    ).toThrow(/CPU reference/);
   });
 });

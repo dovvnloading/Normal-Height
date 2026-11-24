@@ -1,5 +1,7 @@
 # Normal Height — World Engine 1.0
 
+> Historical planning reference from PR #62. The implementation and verified boundaries are documented in [World Engine](WORLD_ENGINE.md), [World transport](WORLD_HYDROLOGY.md), and [PR #63](https://github.com/dovvnloading/Normal-Height/pull/63). The original release gates below remain useful; this RFC is not a claim that every gate has passed.
+
 **Status:** Proposed technical roadmap / RFC for review. No implementation or release approval implied.  
 **Baseline:** `0906f95f064eda8b27ed4098364eb6d3e214476d` (Noise Studio v3, PR #61).  
 **Scope:** Browser-native, GPU-accelerated, multiresolution, tile-aware terrain authoring with a deterministic CPU reference backend.  
@@ -13,17 +15,17 @@ The goal is to move from a single terrain tile to a continuous, editable world w
 
 ### Verified starting point
 
-| Area | Current main behavior | Consequence |
-| --- | --- | --- |
-| Working grid | UI up to 1024 × 1024 | Practical preview limit, separate from mesh resolution |
-| Full graph | Evaluator capped at 2048 × 2048; 512 MiB conservative working allocation budget | Cannot assume 4K/8K by changing a slider |
-| Source-only export | Noise Studio up to 8192 × 8192, strip encoding | Useful precedent; not a full graph export |
-| Scheduling | New terrain worker per build, terminated at completion/cancel | Cache cannot survive ordinary edits |
-| Dependency evaluation | Per-evaluation node memoization, immutable height arrays across stages | Reuse exists within a build, not across builds |
-| World domain | Version 1 project, square worldSize, square HeightField | No independent spatial tile identity, rectangle, or regional build |
-| Simulation | Several CPU solvers; some operate on a bounded coarse grid and reconstruct detail | Native simulation and resampled output must be distinguished |
-| Materials | Physical scales, rich channels, separate conservative PBR export preflight | Full-resolution intermediate arrays and archive retention limit output size |
-| Viewport | Adaptive render mesh and source normals independent of simulation grid | Preserve the truthful distinction between render LOD and terrain data |
+| Area                  | Current main behavior                                                             | Consequence                                                                 |
+| --------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Working grid          | UI up to 1024 × 1024                                                              | Practical preview limit, separate from mesh resolution                      |
+| Full graph            | Evaluator capped at 2048 × 2048; 512 MiB conservative working allocation budget   | Cannot assume 4K/8K by changing a slider                                    |
+| Source-only export    | Noise Studio up to 8192 × 8192, strip encoding                                    | Useful precedent; not a full graph export                                   |
+| Scheduling            | New terrain worker per build, terminated at completion/cancel                     | Cache cannot survive ordinary edits                                         |
+| Dependency evaluation | Per-evaluation node memoization, immutable height arrays across stages            | Reuse exists within a build, not across builds                              |
+| World domain          | Version 1 project, square worldSize, square HeightField                           | No independent spatial tile identity, rectangle, or regional build          |
+| Simulation            | Several CPU solvers; some operate on a bounded coarse grid and reconstruct detail | Native simulation and resampled output must be distinguished                |
+| Materials             | Physical scales, rich channels, separate conservative PBR export preflight        | Full-resolution intermediate arrays and archive retention limit output size |
+| Viewport              | Adaptive render mesh and source normals independent of simulation grid            | Preserve the truthful distinction between render LOD and terrain data       |
 
 Repository anchors: [README](../README.md), [graph evaluator](../src/engine/index.ts), [worker lifecycle](../src/hooks/useTerrainEngine.ts), [project types](../src/model/types.ts), [PBR budget](../src/export/budget.ts), [Noise Studio](NOISE_STUDIO.md), [mesh performance](MESH_PERFORMANCE.md).
 
@@ -77,17 +79,25 @@ Proposed types (names are design placeholders):
 type Backend = 'cpu-reference' | 'webgpu';
 type Scope = 'pointwise' | 'local' | 'global-reduction' | 'global' | 'iterative';
 type WorldDomain = {
-  originX: number; originZ: number; // meters, local Cartesian
-  width: number; depth: number;    // meters
-  cellsX: number; cellsZ: number;  // intervals, not sample counts
-  heightScale: number; datum: number;
+  originX: number;
+  originZ: number; // meters, local Cartesian
+  width: number;
+  depth: number; // meters
+  cellsX: number;
+  cellsZ: number; // intervals, not sample counts
+  heightScale: number;
+  datum: number;
   boundary: 'closed' | 'open' | 'periodic';
 };
 type TileKey = { level: number; x: number; z: number };
 type FieldDescriptor = {
-  semantic: string; units: string;
-  encoding: 'f32'; domain: WorldDomain; tile: TileKey;
-  algorithmVersion: string; backend: Backend;
+  semantic: string;
+  units: string;
+  encoding: 'f32';
+  domain: WorldDomain;
+  tile: TileKey;
+  algorithmVersion: string;
+  backend: Backend;
 };
 ```
 
@@ -101,13 +111,13 @@ Preserve world-space seed derivation: global seed + authored stream + algorithm 
 
 Compile the reachable directed acyclic graph into a plan with typed ports, input channel dependencies, domain/halo requirements, algorithm version, precision, cost, scratch buffers and supported backends. Preserve declared and legacy diagnostic port behavior. Reject cycles, unsupported ports and domain mismatches clearly; disconnected experiments are not scheduled.
 
-| Operator class | Examples | Evaluation rule |
-| --- | --- | --- |
-| Pointwise | World-space noise, blend, remap, terrace, simple masks | Independent interiors evaluated at canonical global coordinates |
-| Local / bounded neighborhood | Normals, curvature, blur, bounded warp, material analysis | Exact required halo in meters/cells, including interpolation support and composed upstream radius |
-| Global reduction | Normalize, histogram, global min/max | Deterministic world/region reduction then common constants; no per-tile normalization unless authored |
-| Global topology | Macro landforms, depression filling, drainage accumulation, unbounded warp, connected-water masks | Whole-domain or explicitly coupled hierarchy; cache a versioned global solution |
-| Iterative transport | Hydraulic/fluid, thermal and coupled erosion | Iteration barriers and conservative flux exchange; no isolated tile resets |
+| Operator class               | Examples                                                                                          | Evaluation rule                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Pointwise                    | World-space noise, blend, remap, terrace, simple masks                                            | Independent interiors evaluated at canonical global coordinates                                       |
+| Local / bounded neighborhood | Normals, curvature, blur, bounded warp, material analysis                                         | Exact required halo in meters/cells, including interpolation support and composed upstream radius     |
+| Global reduction             | Normalize, histogram, global min/max                                                              | Deterministic world/region reduction then common constants; no per-tile normalization unless authored |
+| Global topology              | Macro landforms, depression filling, drainage accumulation, unbounded warp, connected-water masks | Whole-domain or explicitly coupled hierarchy; cache a versioned global solution                       |
+| Iterative transport          | Hydraulic/fluid, thermal and coupled erosion                                                      | Iteration barriers and conservative flux exchange; no isolated tile resets                            |
 
 For a bounded warp request, derive the worst displacement plus interpolation halo; if the bound is impractical, process a larger bucket or fail with a clear reason. Spline distances and grade use global paths, not local per-tile recentering. Paint strokes retain physical footprint and order. Material and diagnostic masks inherit channel semantics, world coordinates and shared borders.
 
@@ -126,12 +136,12 @@ Instrumentation: cold/warm timings, node hit/miss, invalidation reason, peak liv
 Illustrative raw storage for eight Float32 scalar channels, using exact square sample counts:
 
 | Samples | One channel | Eight channels |
-| --- | ---: | ---: |
-| 2048² | 16 MiB | 128 MiB |
-| 4096² | 64 MiB | 512 MiB |
-| 8192² | 256 MiB | 2 GiB |
-| 16384² | 1 GiB | 8 GiB |
-| 32768² | 4 GiB | 32 GiB |
+| ------- | ----------: | -------------: |
+| 2048²   |      16 MiB |        128 MiB |
+| 4096²   |      64 MiB |        512 MiB |
+| 8192²   |     256 MiB |          2 GiB |
+| 16384²  |       1 GiB |          8 GiB |
+| 32768²  |       4 GiB |         32 GiB |
 
 These numbers omit halos, intermediates, copies, encoder/ZIP, geometry, GPU textures and device allocations. Do not relax the current 512 MiB graph budget or PBR preflight merely to expose higher resolutions. Replace with an allocation ledger and request-specific peak estimates, conservative host/GPU budgets, bounded in-flight tiles, pooled buffers and backpressure. GPU binding/device limits are constraints, not VRAM capacity. Track actual allocated bytes and release resources after cancel, device loss, eviction and project close.
 
@@ -142,6 +152,7 @@ Propose an in-memory tile store with optional OPFS disk backing and IndexedDB ma
 Introduce a backend interface with compile/execute/readback/dispose, capability reporting and CPU fallback. Use WGSL compute and explicit buffers; validate required features and device limits, including workgroup size, buffer size, storage binding, dispatch count and optional timestamp-query. Feature-detect secure context, adapter and device; keep unsupported browsers functional. Auto chooses a qualified backend per stage/plan with transfer overhead accounted for. CPU reference always remains selectable. On device loss, invalidate GPU allocations and unfinished results, preserve committed authored data and last valid CPU/host snapshot, offer retry/fallback without falsely labeling the result GPU.
 
 Port in increasing complexity:
+
 1. Pointwise blend/remap/terrace/masks and straightforward noise, deterministic integer streams.
 2. Supported v3 fractals, coordinate transforms, warp, normals, curvature, material masks, PBR map synthesis; keep difficult kernels CPU until qualified.
 3. Grid-based thermal and hydraulic/fluid transport with ping-pong state, controlled time step, reductions and flux reconciliation.
@@ -171,30 +182,30 @@ Move export to a build plan that evaluates the requested graph, not an enlarged 
 
 Stream into a sink (download stream or user-selected file when supported, OPFS staging, bounded ZIP chunk pipeline). Add backpressure, cancellation, partial cleanup, size preflight and checksums. Use ZIP64 or split archives for limits if needed; verify encoder capabilities rather than assuming archives >4 GiB work. Device/browser without streaming sink gets a conservative Blob budget or per-tile export, not an unbounded allocation. A manifest records project/graph hash, schema/algorithm versions, seed streams, backend, domain origin/extent/datum, spacing, sample/interval counts, tiles and overlap, axis convention, units, channel scale/range, per-stage actual resolution and reconstruction status, file sizes/checksums, material/normal conventions and incomplete/complete state. Do not package private local paths or unrelated files.
 
-| Destination | Integration and evidence |
-| --- | --- |
-| Generic | PNG16 + Float32 RAW + named masks/PBR tiles, manifest, reproducible project; independently decode and reassemble every channel |
-| Unreal | Valid Landscape component/sample sizes including 4033 and 8129 profiles; aligned tile names, orientation, X/Y spacing and Z scale/datum; validate imported bounds/heights and shared borders in an actual UE scene |
-| Unity | Supported terrain height grid sizes, tile positions and layer weights; import a multi-tile scene and verify meters, orientation and seamless layer/height edges |
-| Blender | Float32 displacement/heightfields, mesh or displacement workflow and material set; verify physically scaled reconstruction |
-| Houdini / VFX | Named Float32 fields and masks, OpenEXR where encoder/importer is validated; check channel names, data window and linear data |
-| GIS (follow-up) | GeoTIFF and explicit CRS/datum/affine transform for real georeferenced datasets; local Cartesian coordinates are not a CRS |
+| Destination     | Integration and evidence                                                                                                                                                                                           |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Generic         | PNG16 + Float32 RAW + named masks/PBR tiles, manifest, reproducible project; independently decode and reassemble every channel                                                                                     |
+| Unreal          | Valid Landscape component/sample sizes including 4033 and 8129 profiles; aligned tile names, orientation, X/Y spacing and Z scale/datum; validate imported bounds/heights and shared borders in an actual UE scene |
+| Unity           | Supported terrain height grid sizes, tile positions and layer weights; import a multi-tile scene and verify meters, orientation and seamless layer/height edges                                                    |
+| Blender         | Float32 displacement/heightfields, mesh or displacement workflow and material set; verify physically scaled reconstruction                                                                                         |
+| Houdini / VFX   | Named Float32 fields and masks, OpenEXR where encoder/importer is validated; check channel names, data window and linear data                                                                                      |
+| GIS (follow-up) | GeoTIFF and explicit CRS/datum/affine transform for real georeferenced datasets; local Cartesian coordinates are not a CRS                                                                                         |
 
 Prioritize generic + Unreal/Unity in 1.0, then Blender/Houdini verification and EXR as capacity permits; GIS is a distinct future milestone. Target format claims require a real import test or clearly labeled experimental status. Do not invent proprietary format support.
 
 ## 6. Delivery roadmap — sequential, independently reviewable PRs
 
-| Milestone | Work and deliverable | Exit gate |
-| --- | --- | --- |
-| 0 — Baseline and decisions | Pin current main, capture real CPU/GPU/browser performance, memory and quality fixtures; review #42; decide domain/units, cache key, storage budget, release profiles | Reproducible baseline and ADRs reviewed, no production behavior changed |
-| I-A — Planner/refactor | Separate DAG planning and execution, field ownership/typed dependencies, CPU wrapper | Legacy hashes and existing tests unchanged; same output across ordering and ports |
-| I-B — Persistent scheduler | Persistent coordinator, cooperative cancel, immutable cache, budget/diagnostics, downstream invalidation | Cache and cancellation property tests; real cold/warm edit improvements; memory plateaus |
-| II-A — World-space CPU tiles | Opt-in World schema, rectangles/global coordinates, canonical edges/halos, ROI, global/local classification, store | Exact CPU shared borders and stitched references; project migration/roundtrip; no tile normalization |
-| II-B — WebGPU reference | Capability probe, device lifetime, pointwise/noise kernels, backend selection and fallback | Numerical oracle + actual hardware evidence; device-loss recovery; end-to-end speed measured |
-| III — High-res graph/export | Multi-resolution planning, global reductions, disk-backed store, stream 4K/8K full-graph height/masks/PBR, import/mask integration | Native sampled 4K/8K representative graph output, declared coarse stages, complete reassembly, peak-memory and cancellation evidence |
-| IV — Coupled terrain simulation | Global drainage + cross-tile erosion/thermal/fluid, coarse/fine handoff, GPU acceleration where qualified | Conservation, seam, flow and convergence gates; 2×2 and larger references; no artificial tile outlets |
-| V — World release | World overview/ROI workflow polish, generic and engine export profiles, benchmark gallery, docs, compatibility and release QA | All release gates below pass; verified imports; only ship qualified capabilities |
-| VI — Beyond 1.0 | 16K/32K+ logical tiled builds, advanced geology, ecosystem, hydrology, cinematic and GIS extensions | Separate RFCs with own resource and accuracy budgets |
+| Milestone                       | Work and deliverable                                                                                                                                                  | Exit gate                                                                                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 0 — Baseline and decisions      | Pin current main, capture real CPU/GPU/browser performance, memory and quality fixtures; review #42; decide domain/units, cache key, storage budget, release profiles | Reproducible baseline and ADRs reviewed, no production behavior changed                                                              |
+| I-A — Planner/refactor          | Separate DAG planning and execution, field ownership/typed dependencies, CPU wrapper                                                                                  | Legacy hashes and existing tests unchanged; same output across ordering and ports                                                    |
+| I-B — Persistent scheduler      | Persistent coordinator, cooperative cancel, immutable cache, budget/diagnostics, downstream invalidation                                                              | Cache and cancellation property tests; real cold/warm edit improvements; memory plateaus                                             |
+| II-A — World-space CPU tiles    | Opt-in World schema, rectangles/global coordinates, canonical edges/halos, ROI, global/local classification, store                                                    | Exact CPU shared borders and stitched references; project migration/roundtrip; no tile normalization                                 |
+| II-B — WebGPU reference         | Capability probe, device lifetime, pointwise/noise kernels, backend selection and fallback                                                                            | Numerical oracle + actual hardware evidence; device-loss recovery; end-to-end speed measured                                         |
+| III — High-res graph/export     | Multi-resolution planning, global reductions, disk-backed store, stream 4K/8K full-graph height/masks/PBR, import/mask integration                                    | Native sampled 4K/8K representative graph output, declared coarse stages, complete reassembly, peak-memory and cancellation evidence |
+| IV — Coupled terrain simulation | Global drainage + cross-tile erosion/thermal/fluid, coarse/fine handoff, GPU acceleration where qualified                                                             | Conservation, seam, flow and convergence gates; 2×2 and larger references; no artificial tile outlets                                |
+| V — World release               | World overview/ROI workflow polish, generic and engine export profiles, benchmark gallery, docs, compatibility and release QA                                         | All release gates below pass; verified imports; only ship qualified capabilities                                                     |
+| VI — Beyond 1.0                 | 16K/32K+ logical tiled builds, advanced geology, ecosystem, hydrology, cinematic and GIS extensions                                                                   | Separate RFCs with own resource and accuracy budgets                                                                                 |
 
 Implementation PRs should be small enough to review against one gate. Start with I-A/I-B before changing GPU numerics or output limits. Do not start with a complete renderer rewrite, a resolution-slider-only PR, or broad feature expansion. No release schedule is promised; phase exit evidence determines readiness.
 
@@ -202,21 +213,21 @@ Implementation PRs should be small enough to review against one gate. Start with
 
 The following are **proposed engineering targets**, not measured achievements or guarantees. Final thresholds are ratified against the Phase 0 reference suite before performance/accuracy work; do not loosen a failed gate after the fact without a reviewed numerical rationale and recorded evidence.
 
-| Gate | Target / test method |
-| --- | --- |
-| Existing projects | All current routine and CI suites green, 96 Noise Studio compatibility hashes exact, older independent 48 legacy references exact; new tests cover missing-version migration, old presets, undo, save/load, bypass and diagnostics |
-| Cache correctness | Cold cached-vs-uncached CPU byte identity, 100% expected cache-hit/miss matrix for each edit class, no unrelated branch recompute; randomized DAG edits and corrupt cache/version invalidation |
-| CPU world tiles | Exact shared Float32 border/corner bytes for same level; stitched pointwise/local field equals whole-grid oracle under same sample/halo contract; test rectangles, negative origin, odd sizes, partial tiles, multiple seeds, reversed/shuffled tile order |
-| LOD/ROI | Coincident sample identity for identical point evaluations; explicitly test expected filtered differences between levels, shared-edge reconstruction, accurate physical picking and region/full equivalence with proper context |
-| GPU numerics | Integer seeds/hash vectors exact when shared; for continuous bounded pointwise kernels propose max absolute error ≤ 1e-4 and RMSE ≤ 1e-5 in normalized height, with a per-kernel contract for discontinuities/cellular tie cases; no NaN/Inf, range violations, or undisclosed drift; separately gate nonlinear simulations by conservation/field metrics |
+| Gate              | Target / test method                                                                                                                                                                                                                                                                                                                                            |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Existing projects | All current routine and CI suites green, 96 Noise Studio compatibility hashes exact, older independent 48 legacy references exact; new tests cover missing-version migration, old presets, undo, save/load, bypass and diagnostics                                                                                                                              |
+| Cache correctness | Cold cached-vs-uncached CPU byte identity, 100% expected cache-hit/miss matrix for each edit class, no unrelated branch recompute; randomized DAG edits and corrupt cache/version invalidation                                                                                                                                                                  |
+| CPU world tiles   | Exact shared Float32 border/corner bytes for same level; stitched pointwise/local field equals whole-grid oracle under same sample/halo contract; test rectangles, negative origin, odd sizes, partial tiles, multiple seeds, reversed/shuffled tile order                                                                                                      |
+| LOD/ROI           | Coincident sample identity for identical point evaluations; explicitly test expected filtered differences between levels, shared-edge reconstruction, accurate physical picking and region/full equivalence with proper context                                                                                                                                 |
+| GPU numerics      | Integer seeds/hash vectors exact when shared; for continuous bounded pointwise kernels propose max absolute error ≤ 1e-4 and RMSE ≤ 1e-5 in normalized height, with a per-kernel contract for discontinuities/cellular tie cases; no NaN/Inf, range violations, or undisclosed drift; separately gate nonlinear simulations by conservation/field metrics       |
 | Hydrology/erosion | No interior edge treated as an outlet; paired flux signs/volume accounting; propose ≤ 0.1% relative mass residual on nondegenerate closed/open reference tests with an absolute tolerance for near-zero transfer, then calibrate tighter; compare river connectivity, slopes, drainage and sediment fields to untiled solves and convergence at two resolutions |
-| Export | 4096² and 8192² selected representative full graphs, not preview upscales; validate every map's shape, finite data, units, shared encoding and tile checksums; PNG roundtrip ≤ half a quantization step plus Float32 arithmetic tolerance; RAW exact declared representation; reassemble 2×2 and larger packages |
-| Memory | No unbounded host/GPU allocation; stay within configured resource budgets, including staging and retained archive; cold/warm profile at 2K/4K/8K; bounded memory under repeated edit, cancel, export, close/reopen, quota error and device loss |
-| Responsiveness | Target p95 < 100 ms for ordinary editor interaction with active compute, < 250 ms cancel acknowledgement for chunked stages, no stale completion replacing a newer job; record actual times on named devices, not simulation FPS |
-| Performance | Target ≥ 3× end-to-end improvement on qualified GPU 2K/4K compute fixtures, aspirational 10× on selected suitable workloads; include cold compilation, upload/readback, cache and encoding separately; target ≥ 80% warm downstream edit improvement on representative expensive-upstream graphs |
-| Browser/device | Automated Chromium CPU fallback, GPU-capable hardware Chromium, integrated GPU and a constrained device; qualify additional browsers explicitly; test adapter unavailable, lost device, shader compilation error, storage denied, cancellation and memory preflight |
-| Visual quality | Actual fixed-camera/lighting captures from generated worlds; valleys/ridges cross boundaries without seams; compare height, slope, flow, wear, deposition, materials and silhouettes; no generated marketing mockups in evidence |
-| Release | Five existing PR workflows plus new World Engine QA, real hardware report, documented limitations, manual production import fixtures and verified release deployment; no known blocking regressions |
+| Export            | 4096² and 8192² selected representative full graphs, not preview upscales; validate every map's shape, finite data, units, shared encoding and tile checksums; PNG roundtrip ≤ half a quantization step plus Float32 arithmetic tolerance; RAW exact declared representation; reassemble 2×2 and larger packages                                                |
+| Memory            | No unbounded host/GPU allocation; stay within configured resource budgets, including staging and retained archive; cold/warm profile at 2K/4K/8K; bounded memory under repeated edit, cancel, export, close/reopen, quota error and device loss                                                                                                                 |
+| Responsiveness    | Target p95 < 100 ms for ordinary editor interaction with active compute, < 250 ms cancel acknowledgement for chunked stages, no stale completion replacing a newer job; record actual times on named devices, not simulation FPS                                                                                                                                |
+| Performance       | Target ≥ 3× end-to-end improvement on qualified GPU 2K/4K compute fixtures, aspirational 10× on selected suitable workloads; include cold compilation, upload/readback, cache and encoding separately; target ≥ 80% warm downstream edit improvement on representative expensive-upstream graphs                                                                |
+| Browser/device    | Automated Chromium CPU fallback, GPU-capable hardware Chromium, integrated GPU and a constrained device; qualify additional browsers explicitly; test adapter unavailable, lost device, shader compilation error, storage denied, cancellation and memory preflight                                                                                             |
+| Visual quality    | Actual fixed-camera/lighting captures from generated worlds; valleys/ridges cross boundaries without seams; compare height, slope, flow, wear, deposition, materials and silhouettes; no generated marketing mockups in evidence                                                                                                                                |
+| Release           | Five existing PR workflows plus new World Engine QA, real hardware report, documented limitations, manual production import fixtures and verified release deployment; no known blocking regressions                                                                                                                                                             |
 
 For 32K+ stretch tests use logical tiled dimensions (e.g., 32768 intervals / 32769 samples), not a mandatory monolithic allocation or a promise of fully native 32K erosion. Benchmark multiple sizes; no large jobs in routine PR CI that would make feedback impractical. Nightly/manual QA may generate 8K+ artifacts and store reports.
 
@@ -232,36 +243,37 @@ For 32K+ stretch tests use logical tiled dimensions (e.g., 32768 intervals / 327
 
 Names below are proposals, not existing files or a commitment to churn. Integrate with actual ownership after Phase 0.
 
-| Module | Responsibility |
-| --- | --- |
-| src/model/world.ts / project.ts | Opt-in schema, migration, domain and manifests |
-| src/engine/plan/ | DAG compiler, typed field dependencies, stage planning and invalidation |
-| src/engine/compute/ | Coordinator, task protocol, allocator, CPU and WebGPU adapters, instrumentation |
-| src/engine/tiles/ | Canonical sample grid, tile/halo helpers, ownership, field handles, LOD and store |
-| src/engine/noiseStudio/ | Global-coordinate sampler adaptation, versioned kernel contract |
-| src/engine/hydrology.ts, landscape.ts, fluid.ts, fluvial.ts | Reference solvers and explicitly versioned boundary exchange/refinement modules |
-| src/hooks/useTerrainEngine.ts | Persistent service integration, epoch-safe preview and build state |
-| src/render/ / src/components/ | World overview, ROI, truthful progressive viewport, seam-safe mesh/display |
-| src/export/ | Build-plan export, streaming sink, format profiles, common manifest and budget |
-| tests/ / .github/workflows/ | Independent oracles, cache/tile/GPU/property tests, import acceptance, profiles |
+| Module                                                      | Responsibility                                                                    |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| src/model/world.ts / project.ts                             | Opt-in schema, migration, domain and manifests                                    |
+| src/engine/plan/                                            | DAG compiler, typed field dependencies, stage planning and invalidation           |
+| src/engine/compute/                                         | Coordinator, task protocol, allocator, CPU and WebGPU adapters, instrumentation   |
+| src/engine/tiles/                                           | Canonical sample grid, tile/halo helpers, ownership, field handles, LOD and store |
+| src/engine/noiseStudio/                                     | Global-coordinate sampler adaptation, versioned kernel contract                   |
+| src/engine/hydrology.ts, landscape.ts, fluid.ts, fluvial.ts | Reference solvers and explicitly versioned boundary exchange/refinement modules   |
+| src/hooks/useTerrainEngine.ts                               | Persistent service integration, epoch-safe preview and build state                |
+| src/render/ / src/components/                               | World overview, ROI, truthful progressive viewport, seam-safe mesh/display        |
+| src/export/                                                 | Build-plan export, streaming sink, format profiles, common manifest and budget    |
+| tests/ / .github/workflows/                                 | Independent oracles, cache/tile/GPU/property tests, import acceptance, profiles   |
 
 Keep the CPU single-domain path and renderer available behind feature gates. Prefer a new versioned module to changing old algorithm math. Maintain schema/algorithm/cache versions, migrations, third-party attribution and dependency lockfile integrity. No paid service, network, telemetry or cross-origin isolation requirement without separate approval.
 
 ## 9. Risks, decisions and review checklist
 
-| Risk | Mitigation / decision to ratify |
-| --- | --- |
-| Legacy look changes | Versioned world mode; exact CPU legacy references; explicit upgrade |
-| Seams despite matching height | Check normals, slopes, flow, masks and material color; authoritative shared samples and halo/flux exchange |
-| Global operations masquerade as local | Scope manifest; full/global or proven coupled evaluation; no silent local normalization |
-| GPU/device fragmentation | CPU fallback, capability negotiation, hardware verification, bounded stages and device recovery |
-| Browser memory/storage failures | Allocation ledger, storage quota handling, bounded staging, eviction and truthful preflight |
-| Long-running cancellation | Cooperative chunked tasks, epochs, disposable legacy workers, cleanup and last-good snapshot |
-| GPU drift | Qualified per-kernel numerical tolerance, versioned solver semantics, no untested mixing |
-| Import/export mismatch | One axis/datum contract; independent decoding and actual engine imports |
-| Large scope / conflicts | Sequential reviewable PRs; reconcile #42; freeze acceptance criteria per milestone; do not mix feature work with unrelated rewrites |
+| Risk                                  | Mitigation / decision to ratify                                                                                                     |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Legacy look changes                   | Versioned world mode; exact CPU legacy references; explicit upgrade                                                                 |
+| Seams despite matching height         | Check normals, slopes, flow, masks and material color; authoritative shared samples and halo/flux exchange                          |
+| Global operations masquerade as local | Scope manifest; full/global or proven coupled evaluation; no silent local normalization                                             |
+| GPU/device fragmentation              | CPU fallback, capability negotiation, hardware verification, bounded stages and device recovery                                     |
+| Browser memory/storage failures       | Allocation ledger, storage quota handling, bounded staging, eviction and truthful preflight                                         |
+| Long-running cancellation             | Cooperative chunked tasks, epochs, disposable legacy workers, cleanup and last-good snapshot                                        |
+| GPU drift                             | Qualified per-kernel numerical tolerance, versioned solver semantics, no untested mixing                                            |
+| Import/export mismatch                | One axis/datum contract; independent decoding and actual engine imports                                                             |
+| Large scope / conflicts               | Sequential reviewable PRs; reconcile #42; freeze acceptance criteria per milestone; do not mix feature work with unrelated rewrites |
 
 Reviewer decisions:
+
 - [ ] Confirm World Engine as the next flagship and CPU-first planner/cache as the first implementation.
 - [ ] Approve opt-in World versioning, canonical interval-grid and shared-border ownership; settle units/datum/periodic boundary semantics before code.
 - [ ] Approve persistent coordinator, cache/OPFS policy and conservative no-GPU fallback.

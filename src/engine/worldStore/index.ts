@@ -1,5 +1,11 @@
 import type { WorldRegionResult } from '../world';
-import { regionBytes, regionChecksum, validRegion, WORLD_REGION_CACHE_VERSION } from './codec';
+import {
+  regionBytes,
+  regionChecksum,
+  snapshotRegion,
+  validRegion,
+  WORLD_REGION_CACHE_VERSION,
+} from './codec';
 import { MemoryWorldRegionStorage, openWorldRegionStorage } from './storage';
 import type { StoredRegion, StoredRegionMetadata, WorldRegionStorage } from './storage';
 
@@ -33,7 +39,9 @@ export interface WorldRegionStoreOptions {
 }
 
 /** Atomic, versioned CPU-region cache with bounded LRU and recoverable storage failures. */
-export async function createWorldRegionStore(options: WorldRegionStoreOptions = {}): Promise<WorldRegionStore> {
+export async function createWorldRegionStore(
+  options: WorldRegionStoreOptions = {},
+): Promise<WorldRegionStore> {
   const requested = options.maxBytes ?? 64 * 1024 * 1024;
   const maxBytes = Number.isFinite(requested) ? Math.max(0, Math.floor(requested)) : 0;
   const maxEntries = Math.max(1, Math.min(1024, Math.floor(options.maxEntries ?? 128) || 128));
@@ -42,8 +50,18 @@ export async function createWorldRegionStore(options: WorldRegionStoreOptions = 
   let closed = false;
   let clock = Date.now();
   let queue = Promise.resolve();
-  const state: WorldRegionStoreStats = { backend: storage.kind, bytes: 0, budgetBytes: maxBytes,
-    entries: 0, hits: 0, misses: 0, evictions: 0, rejectedWrites: 0, corruptEntries: 0, lastError: null };
+  const state: WorldRegionStoreStats = {
+    backend: storage.kind,
+    bytes: 0,
+    budgetBytes: maxBytes,
+    entries: 0,
+    hits: 0,
+    misses: 0,
+    evictions: 0,
+    rejectedWrites: 0,
+    corruptEntries: 0,
+    lastError: null,
+  };
   const tick = () => (clock = Math.max(clock + 1, Date.now()));
   const recount = () => {
     state.bytes = [...records.values()].reduce((total, record) => total + record.bytes, 0);
@@ -54,23 +72,30 @@ export async function createWorldRegionStore(options: WorldRegionStoreOptions = 
     storage = new MemoryWorldRegionStorage();
     records.clear();
     state.backend = 'memory';
-    state.lastError = error instanceof Error ? error.message : 'World cache storage is unavailable.';
+    state.lastError =
+      error instanceof Error ? error.message : 'World cache storage is unavailable.';
     recount();
   };
   const enqueue = <T>(operation: () => Promise<T>) => {
     const pending = queue.then(operation);
-    queue = pending.then(() => undefined, () => undefined);
+    queue = pending.then(
+      () => undefined,
+      () => undefined,
+    );
     return pending;
   };
   const evictionKeys = (incomingBytes = 0, replacing?: string) => {
-    const candidates = [...records.values()].filter((record) => record.key !== replacing)
+    const candidates = [...records.values()]
+      .filter((record) => record.key !== replacing)
       .sort((a, b) => a.lastUsed - b.lastUsed || a.key.localeCompare(b.key));
     let bytes = candidates.reduce((total, record) => total + record.bytes, incomingBytes);
     let count = candidates.length + (replacing === undefined ? 0 : 1);
     const removed: string[] = [];
     for (const record of candidates) {
       if (bytes <= maxBytes && count <= maxEntries) break;
-      removed.push(record.key); bytes -= record.bytes; count--;
+      removed.push(record.key);
+      bytes -= record.bytes;
+      count--;
     }
     return removed;
   };
@@ -80,10 +105,23 @@ export async function createWorldRegionStore(options: WorldRegionStoreOptions = 
       storage = await openWorldRegionStorage(indexedDB, options.databaseName);
     state.backend = storage.kind;
     const metadata = await storage.list();
-    const invalid = metadata.filter((record) => !record || record.version !== WORLD_REGION_CACHE_VERSION ||
-      typeof record.key !== 'string' || !Number.isSafeInteger(record.bytes) || record.bytes < 0 ||
-      !Number.isFinite(record.lastUsed)).map((record) => record?.key).filter((key): key is string => typeof key === 'string');
-    records = new Map(metadata.filter((record) => record && !invalid.includes(record.key)).map((record) => [record.key, record]));
+    const validMetadata = (record: StoredRegionMetadata) =>
+      Boolean(
+        record &&
+        record.version === WORLD_REGION_CACHE_VERSION &&
+        typeof record.key === 'string' &&
+        Number.isSafeInteger(record.bytes) &&
+        record.bytes > 0 &&
+        Number.isFinite(record.lastUsed),
+      );
+    const invalidRecords = metadata.filter((record) => !validMetadata(record));
+    const invalid = invalidRecords
+      .map((record) => record?.key)
+      .filter((key): key is string => typeof key === 'string');
+    // A corrupt index without usable keys cannot be repaired selectively.
+    // This database contains only rebuildable regions, so reset it safely.
+    if (invalid.length !== invalidRecords.length) await storage.clear();
+    else records = new Map(metadata.filter(validMetadata).map((record) => [record.key, record]));
     const remove = [...invalid, ...evictionKeys()];
     if (remove.length) {
       await storage.remove(remove);
@@ -91,20 +129,37 @@ export async function createWorldRegionStore(options: WorldRegionStoreOptions = 
       state.evictions += remove.length;
     }
     recount();
-  } catch (error) { fallback(error); }
+  } catch (error) {
+    fallback(error);
+  }
 
   return {
     get(key) {
       return enqueue(async () => {
-        if (closed) { state.misses++; return null; }
+        if (closed) {
+          state.misses++;
+          return null;
+        }
         try {
           const record = await storage.read(key);
-          if (!record) { records.delete(key); recount(); state.misses++; return null; }
-          if (record.version !== WORLD_REGION_CACHE_VERSION || record.key !== key ||
-            !validRegion(record.result) || record.bytes !== regionBytes(key, record.result) ||
-            record.checksum !== regionChecksum(record.result)) {
+          if (!record) {
+            records.delete(key);
+            recount();
+            state.misses++;
+            return null;
+          }
+          if (
+            record.version !== WORLD_REGION_CACHE_VERSION ||
+            record.key !== key ||
+            !validRegion(record.result) ||
+            record.bytes !== regionBytes(key, record.result) ||
+            record.checksum !== regionChecksum(record.result)
+          ) {
             await storage.remove([key]);
-            records.delete(key); recount(); state.corruptEntries++; state.misses++;
+            records.delete(key);
+            recount();
+            state.corruptEntries++;
+            state.misses++;
             return null;
           }
           const lastUsed = tick();
@@ -113,24 +168,49 @@ export async function createWorldRegionStore(options: WorldRegionStoreOptions = 
           recount();
           state.hits++;
           return record.result;
-        } catch (error) { fallback(error); state.misses++; return null; }
+        } catch (error) {
+          fallback(error);
+          state.misses++;
+          return null;
+        }
       });
     },
     put(key, result) {
       return enqueue(async () => {
         if (closed) return;
         if (typeof key !== 'string' || key.length > 1024 * 1024 || !validRegion(result)) {
-          state.rejectedWrites++; return;
+          state.rejectedWrites++;
+          return;
         }
-        const bytes = regionBytes(key, result);
-        if (bytes > maxBytes) { state.rejectedWrites++; return; }
-        // Copy once before admission. IDB performs its own structured clone;
-        // memory storage keeps this cache-owned snapshot and copies only reads.
-        const record: StoredRegion = { key, version: WORLD_REGION_CACHE_VERSION, bytes,
-          lastUsed: tick(), checksum: regionChecksum(result), result: structuredClone(result) };
+        let record: StoredRegion;
+        try {
+          const bytes = regionBytes(key, result);
+          if (bytes > maxBytes) {
+            state.rejectedWrites++;
+            return;
+          }
+          // Copy once before admission. IDB performs its own structured clone;
+          // memory storage keeps this cache-owned snapshot and copies only reads.
+          record = {
+            key,
+            version: WORLD_REGION_CACHE_VERSION,
+            bytes,
+            lastUsed: tick(),
+            checksum: regionChecksum(result),
+            result: snapshotRegion(result),
+          };
+        } catch (error) {
+          // Optional caching must not turn a complete terrain into a failed
+          // build if a snapshot cannot be allocated or serialized.
+          state.rejectedWrites++;
+          state.lastError =
+            error instanceof Error ? error.message : 'Could not snapshot the cached region.';
+          return;
+        }
         let committed;
-        try { committed = await storage.commit(record, { maxBytes, maxEntries }); }
-        catch (error) {
+        try {
+          committed = await storage.commit(record, { maxBytes, maxEntries });
+        } catch (error) {
           state.rejectedWrites++;
           fallback(error);
           committed = await storage.commit(record, { maxBytes, maxEntries });
@@ -143,13 +223,25 @@ export async function createWorldRegionStore(options: WorldRegionStoreOptions = 
     clear() {
       return enqueue(async () => {
         if (closed) return;
-        try { await storage.clear(); } catch (error) { fallback(error); }
-        records.clear(); recount();
+        try {
+          await storage.clear();
+        } catch (error) {
+          fallback(error);
+        }
+        records.clear();
+        recount();
       });
     },
     close() {
-      return enqueue(async () => { closed = true; storage.close(); records.clear(); recount(); });
+      return enqueue(async () => {
+        closed = true;
+        storage.close();
+        records.clear();
+        recount();
+      });
     },
-    stats() { return { ...state }; },
+    stats() {
+      return { ...state };
+    },
   };
 }

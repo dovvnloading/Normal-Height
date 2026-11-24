@@ -94,8 +94,10 @@ export function estimatedWorkingBytes(
   for (const node of graph.nodes)
     if (needed.has(node.id) && node.kind === 'mountain' && node.params.profile === 'fluvial') {
       const solver = Math.min(resolution, FLUVIAL_MAX_RESOLUTION);
-      transient = Math.max(transient, solver * solver * 144 +
-        (resolution > FLUVIAL_MAX_RESOLUTION ? 3 * cell : 0));
+      transient = Math.max(
+        transient,
+        solver * solver * 144 + (resolution > FLUVIAL_MAX_RESOLUTION ? 3 * cell : 0),
+      );
     }
   return transient > 0 ? Math.max(settled, reserve + 13 * cell + transient) : settled;
 }
@@ -107,27 +109,39 @@ export function estimatedWorkingBytes(
  * samples are not claimed as additional erosion.
  */
 function formFluvialUplands(
-  source: Float32Array, n: number, options: FluvialOptions,
+  source: Float32Array,
+  n: number,
+  options: FluvialOptions,
 ): Float32Array {
   if (n <= FLUVIAL_MAX_RESOLUTION) return evolveFluvialLandscape(source, n, options).height;
   const m = FLUVIAL_MAX_RESOLUTION;
   const coarse = new Float32Array(m * m);
-  for (let y = 0; y < m; y++) for (let x = 0; x < m; x++)
-    coarse[y * m + x] = sampleHeight(source, n, (x * (n - 1)) / (m - 1), (y * (n - 1)) / (m - 1));
+  for (let y = 0; y < m; y++)
+    for (let x = 0; x < m; x++)
+      coarse[y * m + x] = sampleHeight(source, n, (x * (n - 1)) / (m - 1), (y * (n - 1)) / (m - 1));
   const formed = evolveFluvialLandscape(coarse, m, options).height;
   for (let i = 0; i < formed.length; i++) formed[i] -= coarse[i];
   const output = new Float32Array(n * n);
-  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++)
-    output[y * n + x] = source[y * n + x] +
-      sampleHeight(formed, m, (x * (m - 1)) / (n - 1), (y * (m - 1)) / (n - 1));
+  for (let y = 0; y < n; y++)
+    for (let x = 0; x < n; x++)
+      output[y * n + x] =
+        source[y * n + x] +
+        sampleHeight(formed, m, (x * (m - 1)) / (n - 1), (y * (m - 1)) / (n - 1));
   return output;
 }
 
 /** The project's physical tile width and height scale, in meters. */
-interface PhysicalScale { worldSize: number; heightScale: number }
+interface PhysicalScale {
+  worldSize: number;
+  heightScale: number;
+}
 
 function createMountains(
-  node: TerrainNode, n: number, noise: Noise, seed: number, physical?: PhysicalScale,
+  node: TerrainNode,
+  n: number,
+  noise: Noise,
+  seed: number,
+  physical?: PhysicalScale,
 ): Float32Array {
   const landform = text(node, 'profile', 'range');
   if (landform === 'orogenic' || landform === 'fluvial') {
@@ -135,7 +149,8 @@ function createMountains(
     // onto a smooth mountain image. The normal mountain model remains
     // separately available for exact legacy comparisons.
     const broadNode: TerrainNode = {
-      ...node, params: { ...node.params, profile: 'range' },
+      ...node,
+      params: { ...node.params, profile: 'range' },
     };
     const upliftSource = createMountains(broadNode, n, noise, seed);
     const strength = number(node, 'dissection', 0.82, 0, 1);
@@ -253,9 +268,8 @@ function createNoise(node: TerrainNode, n: number, noise: Noise): Float32Array {
   // Rotation preserves lengths; anisotropic stretch changes the largest
   // singular value of the grid-to-noise transform. Use that conservative
   // scalar footprint for octave visibility in corrected sampling.
-  const footprint = node.params.noiseModel === 'v2'
-    ? scale * Math.max(stretch, 1 / stretch) / (n - 1)
-    : 0;
+  const footprint =
+    node.params.noiseModel === 'v2' ? (scale * Math.max(stretch, 1 / stretch)) / (n - 1) : 0;
   for (let y = 0; y < n; y++)
     for (let x = 0; x < n; x++) {
       const px = (x / (n - 1) - 0.5) * scale,
@@ -263,7 +277,8 @@ function createNoise(node: TerrainNode, n: number, noise: Noise): Float32Array {
       const u = (px * cos - py * sin) / stretch + 17.319,
         v = (px * sin + py * cos) * stretch + 8.173;
       map[y * n + x] =
-        offset + amplitude * noise.sample(mode, u, v, octaves, persistence, lacunarity, warp, footprint);
+        offset +
+        amplitude * noise.sample(mode, u, v, octaves, persistence, lacunarity, warp, footprint);
     }
   return map;
 }
@@ -293,9 +308,14 @@ export function evaluateGraph(
   const evictionStart = cache?.evictions || 0;
   cache?.prepare(WORKING_MEMORY_BUDGET - estimatedBytes, needed);
   const diagnostics: ComputeDiagnostics = {
-    backend: 'cpu-reference', cacheHits: 0, cacheMisses: 0,
-    cacheBytes: 0, cacheBudgetBytes: cache?.budgetBytes || 0,
-    estimatedWorkingBytes: estimatedBytes, evictions: 0, nodes: [],
+    backend: 'cpu-reference',
+    cacheHits: 0,
+    cacheMisses: 0,
+    cacheBytes: 0,
+    cacheBudgetBytes: cache?.budgetBytes || 0,
+    estimatedWorkingBytes: estimatedBytes,
+    evictions: 0,
+    nodes: [],
   };
   const fields = new Map<string, WorkingField>();
   const nodeKeys = new Map<string, string>();
@@ -317,7 +337,7 @@ export function evaluateGraph(
   const calculate = (node: TerrainNode): WorkingField => {
     const cached = fields.get(node.id);
     if (cached) return cached;
-    const references: { edge: typeof project.graph.edges[number]; field: WorkingField }[] = [];
+    const references: { edge: (typeof project.graph.edges)[number]; field: WorkingField }[] = [];
     for (const edge of incoming.get(node.id) || []) {
       if (!usesInput(edge, node)) continue;
       references.push({ edge, field: calculate(byId.get(edge.source)!) });
@@ -325,10 +345,17 @@ export function evaluateGraph(
     const begin = performance.now();
     const progress = (fraction: number) =>
       options.onProgress?.((completed + clamp(fraction)) / Math.max(needed.size, 1), node.label);
-    const key = cache?.identity(project, node, n, references.map(({ edge }) => ({
-      port: inputHandle(edge, node), channel: edge.sourceHandle || 'height',
-      contentId: nodeKeys.get(edge.source)!,
-    }))) || node.id;
+    const key =
+      cache?.identity(
+        project,
+        node,
+        n,
+        references.map(({ edge }) => ({
+          port: inputHandle(edge, node),
+          channel: edge.sourceHandle || 'height',
+          contentId: nodeKeys.get(edge.source)!,
+        })),
+      ) || node.id;
     nodeKeys.set(node.id, key);
     const reused = cache?.lookup(key) || pending.get(key);
     if (reused) {
@@ -336,8 +363,12 @@ export function evaluateGraph(
       thumbnails[node.id] = thumbnail(reused.height, n);
       nodeTimings[node.id] = performance.now() - begin;
       diagnostics.cacheHits++;
-      diagnostics.nodes.push({ nodeId: node.id, status: 'hit', reason: 'reused',
-        durationMs: nodeTimings[node.id] });
+      diagnostics.nodes.push({
+        nodeId: node.id,
+        status: 'hit',
+        reason: 'reused',
+        durationMs: nodeTimings[node.id],
+      });
       completed++;
       progress(0);
       return reused;
@@ -347,10 +378,18 @@ export function evaluateGraph(
     const inputs = new Map<string, WorkingField>();
     for (const { edge, field } of references) {
       const handle = edge.sourceHandle || 'height';
-      inputs.set(inputHandle(edge, node), handle === 'height' ? field : {
-        ...field,
-        height: normalizeDiagnostic(field[handle as 'flow' | 'wear' | 'deposition'], handle === 'flow'),
-      });
+      inputs.set(
+        inputHandle(edge, node),
+        handle === 'height'
+          ? field
+          : {
+              ...field,
+              height: normalizeDiagnostic(
+                field[handle as 'flow' | 'wear' | 'deposition'],
+                handle === 'flow',
+              ),
+            },
+      );
     }
     progress(0);
     const input = inputs.get('in') || inputs.get('a');
@@ -358,17 +397,25 @@ export function evaluateGraph(
       ((Number(project.seed) || 0) +
         Math.round(number(node, 'seed', 0, -2147483647, 2147483647))) >>>
       0;
-    const noise = new Noise(seed,
-      node.kind === 'noise' && node.params.noiseModel === 'v2' ? 'v2' : 'legacy');
+    const noise = new Noise(
+      seed,
+      node.kind === 'noise' && node.params.noiseModel === 'v2' ? 'v2' : 'legacy',
+    );
     let field: WorkingField;
     if (node.bypassed && input) field = input;
     else if (node.kind === 'mountain')
-      field = baseField(createMountains(node, n, noise, seed, {
-        worldSize: project.worldSize, heightScale: project.heightScale,
-      }));
-    else if (node.kind === 'noise') field = baseField(node.params.noiseModel === 'v3'
-      ? generateStudioNoise(node.params, project.seed, n, project.worldSize, progress)
-      : createNoise(node, n, noise));
+      field = baseField(
+        createMountains(node, n, noise, seed, {
+          worldSize: project.worldSize,
+          heightScale: project.heightScale,
+        }),
+      );
+    else if (node.kind === 'noise')
+      field = baseField(
+        node.params.noiseModel === 'v3'
+          ? generateStudioNoise(node.params, project.seed, n, project.worldSize, progress)
+          : createNoise(node, n, noise),
+      );
     else {
       if (!input) throw new Error(`Connect a height input to “${node.label}”.`);
       field = { ...input };
@@ -430,10 +477,16 @@ export function evaluateGraph(
               gravity: number(node, 'gravity', 4, 0.01, 20),
               seed,
               multiscale: node.params.multiscale !== false,
-              method: text(node, 'method', 'landscape') === 'hybrid' ? 'hybrid' :
-                text(node, 'method', 'landscape') === 'fluid' ? 'fluid' :
-                text(node, 'method', 'landscape') === 'droplet' ? 'droplet' :
-                text(node, 'method', 'landscape') === 'watershed' ? 'watershed' : 'landscape',
+              method:
+                text(node, 'method', 'landscape') === 'hybrid'
+                  ? 'hybrid'
+                  : text(node, 'method', 'landscape') === 'fluid'
+                    ? 'fluid'
+                    : text(node, 'method', 'landscape') === 'droplet'
+                      ? 'droplet'
+                      : text(node, 'method', 'landscape') === 'watershed'
+                        ? 'watershed'
+                        : 'landscape',
               cycles: number(node, 'cycles', 28, 4, 72),
               featureMeters: number(node, 'featureMeters', 140, 24, 600),
               hillslope: number(node, 'hillslope', 0.38, 0, 1),
@@ -462,16 +515,19 @@ export function evaluateGraph(
             sedimentBudget: result.sedimentBudget
               ? input.sedimentBudget
                 ? {
-                    erodedVolumeM3: input.sedimentBudget.erodedVolumeM3 +
-                      result.sedimentBudget.erodedVolumeM3,
-                    depositedVolumeM3: input.sedimentBudget.depositedVolumeM3 +
+                    erodedVolumeM3:
+                      input.sedimentBudget.erodedVolumeM3 + result.sedimentBudget.erodedVolumeM3,
+                    depositedVolumeM3:
+                      input.sedimentBudget.depositedVolumeM3 +
                       result.sedimentBudget.depositedVolumeM3,
-                    exportedVolumeM3: input.sedimentBudget.exportedVolumeM3 +
+                    exportedVolumeM3:
+                      input.sedimentBudget.exportedVolumeM3 +
                       result.sedimentBudget.exportedVolumeM3,
-                    suspendedVolumeM3: input.sedimentBudget.suspendedVolumeM3 +
+                    suspendedVolumeM3:
+                      input.sedimentBudget.suspendedVolumeM3 +
                       result.sedimentBudget.suspendedVolumeM3,
-                    balanceErrorM3: input.sedimentBudget.balanceErrorM3 +
-                      result.sedimentBudget.balanceErrorM3,
+                    balanceErrorM3:
+                      input.sedimentBudget.balanceErrorM3 + result.sedimentBudget.balanceErrorM3,
                   }
                 : result.sedimentBudget
               : input.sedimentBudget,
@@ -598,8 +654,12 @@ export function evaluateGraph(
     if (cache) pending.set(key, field);
     thumbnails[node.id] = thumbnail(field.height, n);
     nodeTimings[node.id] = performance.now() - begin;
-    diagnostics.nodes.push({ nodeId: node.id, status: 'computed', reason,
-      durationMs: nodeTimings[node.id] });
+    diagnostics.nodes.push({
+      nodeId: node.id,
+      status: 'computed',
+      reason,
+      durationMs: nodeTimings[node.id],
+    });
     completed++;
     progress(0);
     return field;

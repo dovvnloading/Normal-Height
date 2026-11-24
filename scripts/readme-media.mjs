@@ -31,12 +31,20 @@ const browser = await chromium.launch({
   channel: software ? undefined : 'chrome',
   executablePath: process.env.NH_CHROMIUM_PATH || undefined,
   headless: true,
-  args: software ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] : [`--use-angle=${angle}`, '--ignore-gpu-blocklist'],
+  args: software
+    ? [
+        '--use-gl=angle',
+        '--use-angle=swiftshader',
+        '--enable-unsafe-swiftshader',
+        '--disable-dev-shm-usage',
+      ]
+    : [`--use-angle=${angle}`, '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({
   viewport: { width: 1600, height: 1000 },
   deviceScaleFactor: 1,
 });
+page.setDefaultTimeout(120_000);
 const canvas = page.locator('.nh-three-host canvas');
 
 async function ready() {
@@ -83,6 +91,8 @@ await ready();
 // Golden-hour sky lighting on the studio tile.
 await page.getByRole('button', { name: 'Display settings' }).click();
 await page.getByRole('button', { name: 'Golden hour sky preset' }).click();
+// Freeze wind using the actual display control for static software captures.
+await page.getByLabel('Wind speed', { exact: true }).press('Home');
 await page.keyboard.press('Escape');
 await page.evaluate(() => document.activeElement?.blur());
 await page.waitForTimeout(3000);
@@ -108,7 +118,9 @@ rmSync(WORLD_FRAMES, { recursive: true, force: true });
 mkdirSync(WORLD_FRAMES, { recursive: true });
 let worldFrame = 0;
 const worldShot = async () => {
-  await page.screenshot({ path: join(WORLD_FRAMES, `f${String(worldFrame++).padStart(4, '0')}.png`) });
+  await page.screenshot({
+    path: join(WORLD_FRAMES, `f${String(worldFrame++).padStart(4, '0')}.png`),
+  });
 };
 await page.getByRole('button', { name: 'World Studio', exact: true }).click();
 const world = page.getByRole('dialog', { name: 'World Studio', exact: true });
@@ -184,17 +196,27 @@ for (const name of TOUR) {
   await page.getByRole('button', { name: 'Exit viewport focus mode' }).click();
   await page.waitForTimeout(500);
 }
-writeFileSync(join(OUT, 'capture-provenance.json'), JSON.stringify({
-  capturedAt: new Date().toISOString(),
-  revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-  browser: browser.version(),
-  rendering: software ? 'Chromium / ANGLE SwiftShader software rendering; not hardware performance evidence' : `Chrome / ANGLE ${angle}`,
-  viewport: { width: 1600, height: 1000 },
-  application: 'Actual production build',
-  landscapes: TOUR,
-  world: 'Alpine graph, 2048 interval domain, 256 sample global reference; reconstructed global stages disclosed in UI',
-  script: 'scripts/readme-media.mjs',
-}, null, 2) + '\n');
+writeFileSync(
+  join(OUT, 'capture-provenance.json'),
+  JSON.stringify(
+    {
+      capturedAt: new Date().toISOString(),
+      revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+      browser: browser.version(),
+      rendering: software
+        ? 'Chromium / ANGLE SwiftShader software rendering; not hardware performance evidence'
+        : `Chrome / ANGLE ${angle}`,
+      viewport: { width: 1600, height: 1000 },
+      application: 'Actual production build',
+      landscapes: TOUR,
+      world:
+        'Alpine graph, 2048 interval domain, 256 sample global reference; reconstructed global stages disclosed in UI',
+      script: 'scripts/readme-media.mjs',
+    },
+    null,
+    2,
+  ) + '\n',
+);
 await browser.close();
 
 // Shared adaptive palette for all frames keeps the GIF small and flicker-free.
@@ -222,5 +244,7 @@ execFileSync(
     stdio: 'inherit',
   },
 );
-execFileSync(python, ['-c', encoder, WORLD_FRAMES, join(OUT, 'world-workflow.gif'), '960', '1'], { stdio: 'inherit' });
+execFileSync(python, ['-c', encoder, WORLD_FRAMES, join(OUT, 'world-workflow.gif'), '960', '1'], {
+  stdio: 'inherit',
+});
 console.log(`Wrote updated studio, world, diagnostics and tour media to ${OUT}`);

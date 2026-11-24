@@ -15,7 +15,9 @@ export function parseProject(raw: unknown): TerrainProject {
     throw new Error('This file does not contain a terrain project.');
   const p = raw as Record<string, unknown>;
   if (p.version !== 1 && p.version !== 2)
-    throw new Error('This project version is not supported. Expected Normal Height v1 or World v2.');
+    throw new Error(
+      'This project version is not supported. Expected Normal Height v1 or World v2.',
+    );
   if (p.version === 2) {
     const worldError = validateWorldDefinition(p.world);
     if (worldError) throw new Error(worldError);
@@ -54,7 +56,11 @@ export function parseProject(raw: unknown): TerrainProject {
       n.params && typeof n.params === 'object' ? (n.params as Record<string, unknown>) : {};
     const studio = kind === 'noise' && params.noiseModel === 'v3';
     const definitions = studio
-      ? [...new Map([...NODE_DEFINITIONS[kind].params, ...STUDIO_PARAMS].map(d => [d.key, d])).values()]
+      ? [
+          ...new Map(
+            [...NODE_DEFINITIONS[kind].params, ...STUDIO_PARAMS].map((d) => [d.key, d]),
+          ).values(),
+        ]
       : NODE_DEFINITIONS[kind].params;
     if (studio) validateStudioParams(params);
     for (const def of definitions) {
@@ -144,7 +150,10 @@ export function parseProject(raw: unknown): TerrainProject {
       throw new Error('Invalid PBR surface settings.');
     const rawSurface = p.surface as Record<string, unknown>;
     const biome = rawSurface.biome;
-    if (biome !== undefined && (typeof biome !== 'string' || !['alpine', 'arid', 'volcanic'].includes(biome)))
+    if (
+      biome !== undefined &&
+      (typeof biome !== 'string' || !['alpine', 'arid', 'volcanic'].includes(biome))
+    )
       throw new Error('Unknown PBR biome.');
     const clean = resolveSurface();
     if (biome !== undefined) clean.biome = biome as typeof clean.biome;
@@ -182,7 +191,9 @@ export function parseProject(raw: unknown): TerrainProject {
     heightScale: p.heightScale,
     presetId: typeof p.presetId === 'string' ? p.presetId : 'custom',
     ...(surface ? { surface } : {}),
-    ...(p.materialPaint !== undefined ? { materialPaint: parseMaterialPaint(p.materialPaint) } : {}),
+    ...(p.materialPaint !== undefined
+      ? { materialPaint: parseMaterialPaint(p.materialPaint) }
+      : {}),
     graph: { nodes, edges },
   };
 }
@@ -198,7 +209,9 @@ export function downloadBlob(blob: Blob, filename: string) {
 }
 export function saveProject(project: TerrainProject) {
   downloadBlob(
-    new Blob([JSON.stringify({ ...project, surface: resolveSurface(project.surface) }, null, 2)], { type: 'application/json' }),
+    new Blob([JSON.stringify({ ...project, surface: resolveSurface(project.surface) }, null, 2)], {
+      type: 'application/json',
+    }),
     `${slug(project.name)}.nhterrain.json`,
   );
 }
