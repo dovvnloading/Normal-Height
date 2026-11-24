@@ -214,18 +214,24 @@ test('dark noise library fits a small viewport and supports scrolling and keyboa
   await captureStudio(page, testInfo, 'studio-noise-library-desktop-dark.png');
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog, 'Resizing must preserve the open Noise Studio dialog').toBeVisible();
   await expect
-    .poll(async () => {
-      const bounds = await dialog.boundingBox();
-      return Boolean(
-        bounds &&
-        bounds.x >= 0 &&
-        bounds.y >= 0 &&
-        bounds.x + bounds.width <= 391 &&
-        bounds.y + bounds.height <= 845,
-      );
-    })
-    .toBe(true);
+    .poll(
+      async () => {
+        const bounds = await dialog.boundingBox();
+        if (!bounds) return ['The open dialog is missing from layout.'];
+        const violations: string[] = [];
+        if (bounds.x < 0) violations.push(`Left edge ${bounds.x} is outside the viewport.`);
+        if (bounds.y < 0) violations.push(`Top edge ${bounds.y} is outside the viewport.`);
+        if (bounds.x + bounds.width > 391)
+          violations.push(`Right edge ${bounds.x + bounds.width} exceeds the 390 px viewport.`);
+        if (bounds.y + bounds.height > 845)
+          violations.push(`Bottom edge ${bounds.y + bounds.height} exceeds the 844 px viewport.`);
+        return violations;
+      },
+      { message: 'Every dialog edge must fit the 390 × 844 viewport.' },
+    )
+    .toEqual([]);
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   const scroll = dialog.locator('.studio-browser-scroll');
   expect(await scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(

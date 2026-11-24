@@ -103,15 +103,20 @@ export default function App() {
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   // Sidebars become temporary overlays at different breakpoints. Close each
   // only when crossing into its overlay layout; otherwise a panel opened on
-  // desktop can cover the viewport's toolbar after a browser resize.
+  // desktop can cover the viewport's toolbar after a browser resize. Preserve
+  // panels with an open dialog so resizing cannot discard a selection or export.
   useEffect(() => {
     const libraryOverlay = window.matchMedia('(max-width: 1050px)');
     const bothOverlays = window.matchMedia('(max-width: 760px)');
     const hideLibrary = (event: MediaQueryListEvent) => {
-      if (event.matches) setLeftOpen(false);
+      if (event.matches && !document.querySelector('.library dialog[open]')) {
+        setLeftOpen(false);
+      }
     };
     const hideBoth = (event: MediaQueryListEvent) => {
-      if (event.matches) { setLeftOpen(false); setRightOpen(false); }
+      if (!event.matches) return;
+      if (!document.querySelector('.library dialog[open]')) setLeftOpen(false);
+      if (!document.querySelector('.inspector dialog[open]')) setRightOpen(false);
     };
     libraryOverlay.addEventListener('change', hideLibrary);
     bothOverlays.addEventListener('change', hideBoth);
