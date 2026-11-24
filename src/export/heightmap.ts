@@ -6,6 +6,7 @@ import type { PBRChannel } from '../materials/pbr';
 import type { HeightField, TerrainProject } from '../model/types';
 import { slug } from '../model/project';
 import { listMaskOutputs } from './maskOutputs';
+import { isSinglePBRExportFormat } from './budget';
 
 const encoder = new TextEncoder();
 function chunk(type: string, data: Uint8Array) {
@@ -232,8 +233,7 @@ export function makeExport(
     bytes = encodeRawHeight(field, project.heightScale);
     filename = `${name}-${field.resolution}-elevation-f32le.raw`;
   } else {
-    const pbrChannels = ['basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'detailNormal', 'normalGL', 'normalDX'];
-    const pixels = pbrChannels.includes(format)
+    const pixels = isSinglePBRExportFormat(format)
       ? pbrPixels(generatePBR(field, project), field, project,
           format === 'normalDX' || format === 'normalGL' ? 'normal' : format as PBRChannel, format === 'normalDX')
       : format === 'normal'

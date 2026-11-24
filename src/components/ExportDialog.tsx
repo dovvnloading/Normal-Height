@@ -5,7 +5,7 @@ import { TerrainIcon, EXPORT_ICON_NAMES } from './TerrainIcon';
 import { createTerrainWorker } from '../hooks/useTerrainEngine';
 import type { ExportFormat } from '../export/heightmap';
 import { listMaskOutputs } from '../export/maskOutputs';
-import { pbrBudgetMiB, checkPBRExportBudget } from '../export/budget';
+import { pbrBudgetMiB, checkPBRExportBudget, isPBRExportFormat } from '../export/budget';
 import { downloadBlob } from '../model/project';
 import type { TerrainProject, WorkerResponse } from '../model/types';
 
@@ -53,9 +53,9 @@ export function ExportDialog({
     if (format === 'mask16' && !mask?.input) return;
     const memoryGiB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const memoryBudgetMiB = pbrBudgetMiB(memoryGiB);
-    if (format === 'pbr') {
+    if (isPBRExportFormat(format)) {
       try {
-        checkPBRExportBudget(resolution, memoryBudgetMiB);
+        checkPBRExportBudget(resolution, memoryBudgetMiB, format, bundle);
       } catch (error) {
         setError(error instanceof Error ? error.message : 'PBR export exceeds device memory budget.');
         setSuccess('');

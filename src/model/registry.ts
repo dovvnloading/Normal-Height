@@ -282,6 +282,18 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         options: NOISE_MODES,
         section: 'Noise',
       },
+      {
+        key: 'noiseModel',
+        label: 'Noise algorithm',
+        type: 'select',
+        default: 'v2',
+        options: [
+          { value: 'v2', label: 'Corrected sampling (v2)' },
+          { value: 'legacy', label: 'Original sampling (legacy)' },
+        ],
+        description: 'New nodes use bounded noise and corrected controls. Legacy preserves older node appearance.',
+        section: 'Noise',
+      },
       range(
         'scale',
         'Frequency',
@@ -319,7 +331,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         1,
         10,
         1,
-        'Number of fractal layers. Some base modes use a single layer.',
+        'Number of fractal layers. Wave uses these layers for phase distortion.',
         'Fractal',
       ),
       range(
@@ -349,7 +361,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         0,
         2,
         0.01,
-        'Coordinate distortion in warped and Naki-inspired patterns.',
+        'Wave phase distortion or warped/Naki coordinate distortion. In corrected sampling, zero disables distortion.',
         'Transform',
       ),
       range('rotation', 'Rotation', 0, -180, 180, 1, 'Rotate the noise field.', 'Transform', '°'),
@@ -943,6 +955,17 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     params: [],
   },
 };
+/** Hide settings the selected procedural noise algorithm cannot use. */
+export function noiseParamVisible(node: TerrainNode, key: string): boolean {
+  if (node.kind !== 'noise') return true;
+  const mode = node.params.mode ?? 'ridged';
+  if (key === 'octaves' || key === 'persistence' || key === 'lacunarity') {
+    if (mode === 'wave') return node.params.noiseModel === 'v2';
+    return !['perlin', 'simplex', 'voronoi', 'voronoi-edge', 'cellular'].includes(String(mode));
+  }
+  if (key === 'warp') return ['wave', 'warped', 'naki'].includes(String(mode));
+  return true;
+}
 export function createNode(
   kind: NodeKind,
   position = { x: 0, y: 0 },

@@ -437,6 +437,39 @@ test('seed and erosion parameter changes regenerate the actual height data', asy
   ).toHaveValue('0.46');
 });
 
+test('cancels numeric drafts on Escape and commits on Enter or ordinary blur', async ({ page }) => {
+  const field = page.getByRole('spinbutton', { name: 'Erosion rate value', exact: true });
+  const undo = page.getByRole('button', { name: 'Undo', exact: true });
+  const original = await field.inputValue();
+  const changed = original === '0.46' ? '0.35' : '0.46';
+  await expect(undo).toBeDisabled();
+
+  await field.fill(changed);
+  await field.press('Escape');
+  await expect(field).not.toBeFocused();
+  await expect(field).toHaveValue(original);
+  await expect(undo).toBeDisabled();
+
+  await field.fill(changed);
+  await field.press('Enter');
+  await expect(field).not.toBeFocused();
+  await expect(field).toHaveValue(changed);
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(field).toHaveValue(original);
+  await expect(undo).toBeDisabled();
+
+  await field.fill(changed);
+  await field.press('Tab');
+  await expect(field).not.toBeFocused();
+  await expect(field).toHaveValue(changed);
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect(field).toHaveValue(original);
+  await expect(undo).toBeDisabled();
+  await ready(page);
+});
+
 test('authors noise nodes, uses undo and redo, groups nodes, and edits a note', async ({
   page,
 }) => {
@@ -473,6 +506,25 @@ test('authors noise nodes, uses undo and redo, groups nodes, and edits a note', 
     'Keep the broad drainage, then refine the tributaries.',
   );
   await expect(graph(page).locator('.react-flow__node-annotation')).toHaveCount(1);
+});
+
+test('shows only noise controls used by the chosen algorithm and family', async ({ page }) => {
+  await page.getByRole('complementary', { name: 'Node library', exact: true })
+    .getByRole('button', { name: /Procedural noise/ }).click();
+  const family = page.getByRole('combobox', { name: 'Noise family', exact: true });
+  const algorithm = page.getByRole('combobox', { name: 'Noise algorithm', exact: true });
+  const octaves = page.getByRole('spinbutton', { name: 'Octaves value', exact: true });
+  await expect(algorithm).toHaveValue('v2');
+  await family.selectOption('perlin');
+  await expect(octaves).toHaveCount(0);
+  await family.selectOption('wave');
+  await expect(octaves).toBeVisible();
+  await algorithm.selectOption('legacy');
+  await expect(octaves).toHaveCount(0);
+  await expect(page.getByText('Legacy Wave uses a fixed three-layer phase fractal.', { exact: false }))
+    .toBeVisible();
+  await algorithm.selectOption('v2');
+  await expect(octaves).toBeVisible();
 });
 
 test('draws a real editable river and ridge, connects it before erosion, and saves the path', async ({

@@ -2,7 +2,7 @@
 import type { HeightField, TerrainProject } from '../model/types';
 import { makeExport } from './heightmap';
 import type { ExportFormat } from './heightmap';
-import { checkPBRExportBudget } from './budget';
+import { checkPBRExportBudget, isPBRExportFormat } from './budget';
 
 type EncodeRequest = {
   type: 'encode';
@@ -22,8 +22,10 @@ worker.addEventListener('message', (event: MessageEvent<EncodeRequest>) => {
   try {
     const stage = request.format === 'mask16' ? 'Encoding 16-bit mask' : 'Synthesizing and packing maps';
     worker.postMessage({ type: 'progress', id: request.id, stage });
-    if (request.format === 'pbr') {
-      checkPBRExportBudget(request.field.resolution, request.memoryBudgetMiB ?? 512);
+    if (isPBRExportFormat(request.format)) {
+      checkPBRExportBudget(
+        request.field.resolution, request.memoryBudgetMiB ?? 512, request.format, request.bundle,
+      );
     }
     const output = makeExport(request.field, request.project, request.format, request.bundle, request.outputNodeId);
     // fflate returns a full owned ArrayBuffer. Copy only when an encoder

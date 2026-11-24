@@ -1,0 +1,37 @@
+name: Numeric input browser acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/components/Controls.tsx'
+      - 'tests/e2e/studio.spec.ts'
+      - '.github/workflows/numeric-input-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  numeric-input:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Verify cancellation and undo behavior
+        run: npx playwright test tests/e2e/studio.spec.ts --grep "cancels numeric drafts" --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: numeric-input-browser-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
