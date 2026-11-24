@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { TerrainNode, TerrainProject } from '../src/model/types';
-import { evaluateGraph, hydraulicErosion, thermalErosion, validateGraph } from '../src/engine';
+import {
+  estimatedWorkingBytes,
+  evaluateGraph,
+  hydraulicErosion,
+  thermalErosion,
+  validateGraph,
+} from '../src/engine';
 
 const node = (
   id: string,
@@ -120,6 +126,73 @@ describe('terrain evaluation', () => {
     scene.graph.nodes[1].bypassed = true;
     const original = evaluateGraph(scene, { resolution: 48, previewNodeId: 'range' });
     expect(evaluateGraph(scene, { resolution: 48 }).field.height).toEqual(original.field.height);
+  });
+
+  it('does not evaluate broken secondary branches when a Blend is bypassed', () => {
+    const scene = project([
+      node('range', 'mountain'),
+      { ...node('blend', 'blend'), bypassed: true },
+      node('out', 'output'),
+    ]);
+    scene.graph.edges[0].targetHandle = 'a';
+    scene.graph.nodes.push(node('broken', 'remap'));
+    scene.graph.edges.push(
+      { id: 'b', source: 'broken', target: 'blend', targetHandle: 'b' },
+      {
+        id: 'mask',
+        source: 'broken',
+        target: 'blend',
+        targetHandle: 'mask',
+        sourceHandle: 'flow',
+      },
+    );
+    expect(validateGraph(scene.graph)).toBeNull();
+    const original = evaluateGraph(scene, { resolution: 32, previewNodeId: 'range' });
+    const stages: string[] = [];
+    const bypassed = evaluateGraph(scene, {
+      resolution: 32,
+      onProgress: (_, stage) => stages.push(stage),
+    });
+    expect(bypassed.field).toEqual(original.field);
+    expect(Object.keys(bypassed.thumbnails)).toEqual(['range', 'blend', 'out']);
+    expect(bypassed.nodeTimings).not.toHaveProperty('broken');
+    expect(stages).not.toContain('broken');
+
+    // Unused diagnostic routes must not reserve a full-resolution buffer.
+    const needed = new Set(['range', 'blend', 'out']);
+    const withoutSecondary = { ...scene.graph, edges: scene.graph.edges.slice(0, 2) };
+    expect(estimatedWorkingBytes(scene.graph, needed, 1024)).toBe(
+      estimatedWorkingBytes(withoutSecondary, needed, 1024),
+    );
+
+    scene.graph.nodes[1].bypassed = false;
+    expect(() => evaluateGraph(scene, { resolution: 32 })).toThrow(
+      'Connect a height input to “broken”',
+    );
+  });
+
+  it('excludes an unused Hydraulic mask branch from evaluation and memory preflight', () => {
+    const scene = project([
+      node('source', 'noise', { mode: 'perlin', amplitude: 0, offset: 0.5 }),
+      { ...node('rain', 'hydraulic'), bypassed: true },
+      node('out', 'output'),
+    ]);
+    // This valid, connected branch exceeds the 1024² working-memory budget
+    // when used. It is irrelevant to the bypassed Hydraulic node.
+    let previous = 'source';
+    for (let i = 0; i < 30; i++) {
+      const id = `maskWarp${i}`;
+      scene.graph.nodes.push(node(id, 'warp'));
+      scene.graph.edges.push({ id, source: previous, target: id });
+      previous = id;
+    }
+    scene.graph.edges.push({ id: 'mask', source: previous, target: 'rain', targetHandle: 'mask' });
+    const bypassed = evaluateGraph(scene, { resolution: 1024 });
+    expect(bypassed.field.height).toHaveLength(1024 * 1024);
+    expect(bypassed.field.height.every((value) => value === 0.5)).toBe(true);
+    expect(Object.keys(bypassed.thumbnails)).toEqual(['source', 'rain', 'out']);
+    scene.graph.nodes[1].bypassed = false;
+    expect(() => evaluateGraph(scene, { resolution: 1024 })).toThrow(/512 MiB/);
   });
 
   it('honors a connected zero mask for hydraulic and blend nodes', () => {
