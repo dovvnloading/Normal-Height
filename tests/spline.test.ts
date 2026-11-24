@@ -9,6 +9,7 @@ import { parseProject } from '../src/model/project';
 
 const river = {
   mode: 'river' as const, width: 0.024, strength: 0.15, falloff: 3, downhill: true,
+  worldSize: 8000, heightScale: 2400,
 };
 const ridge = { ...river, mode: 'ridge' as const };
 const diagonal = [{ x: 0.1, y: 0.1 }, { x: 0.46, y: 0.54 }, { x: 0.92, y: 0.89 }];
@@ -76,6 +77,42 @@ describe('non-destructive spline terrain authoring', () => {
     for (let i = 0; i < cut.length; i++) expect(cut[i]).toBeLessThanOrEqual(input[i]);
     const free = sculptSpline(input, n, path, { ...river, downhill: false });
     expect(at(free, n, path.at(-1)!)).toBeGreaterThan(at(cut, n, path.at(-1)!) + 0.2);
+  });
+
+  it('maintains the same physical minimum river grade at working and export resolutions', () => {
+    const project = createProject();
+    project.worldSize = 4000;
+    project.heightScale = 1800;
+    const source = createNode('noise', { x: 0, y: 0 }, 'flat');
+    source.params = { ...source.params, mode: 'perlin', amplitude: 0, offset: 0.5 };
+    const stage = createNode('spline', { x: 200, y: 0 }, 'river');
+    stage.params = { ...stage.params, mode: 'river', strength: 0.09, width: 0.04, downhill: true };
+    stage.path = [{ x: 0.1, y: 0.5 }, { x: 0.9, y: 0.5 }];
+    const output = createNode('output', { x: 400, y: 0 }, 'out');
+    project.graph = {
+      nodes: [source, stage, output],
+      edges: [
+        { id: 'flat-river', source: 'flat', target: 'river' },
+        { id: 'river-out', source: 'river', target: 'out' },
+      ],
+    };
+
+    // Interior points avoid end-cap effects. At y = 0.5, the subpixel bank
+    // offset is the same at each point, so it cancels in the elevation drop.
+    const gradeAt = (n: number) => {
+      const result = evaluateGraph(project, { resolution: n }).field.height;
+      const head = at(result, n, { x: 0.2, y: 0.5 });
+      const tail = at(result, n, { x: 0.8, y: 0.5 });
+      expect(head).toBeGreaterThan(tail);
+      return (head - tail) * project.heightScale / (0.6 * project.worldSize);
+    };
+    for (const n of [256, 512, 1024]) expect(gradeAt(n)).toBeCloseTo(0.0018396, 6);
+
+    // Changing physical dimensions changes the normalized height drop, not
+    // the minimum grade measured in meters per meter.
+    project.worldSize = 8000;
+    project.heightScale = 900;
+    expect(gradeAt(256)).toBeCloseTo(0.0018396, 6);
   });
 
   it('keeps path influence approximately resolution-independent and returns unmodified input when strength is zero', () => {
