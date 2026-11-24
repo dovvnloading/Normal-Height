@@ -31,6 +31,7 @@ import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
 import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
+import { STUDIO_KERNELS } from './model/noiseStudio';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
 import { loadViewSettings, saveViewSettings } from './model/viewSettings';
@@ -321,7 +322,9 @@ export default function App() {
       }
       const node = createNode(kind, position);
       if (params) node.params = { ...node.params, ...params };
-      if (kind === 'noise' && params?.mode)
+      if (kind === 'noise' && params?.noiseModel === 'v3' && params?.kernel)
+        node.label = `${STUDIO_KERNELS.find(([key]) => key === params.kernel)?.[1] ?? 'Studio'} noise`;
+      else if (kind === 'noise' && params?.mode)
         node.label =
           String(params.mode)
             .replace(/-/g, ' ')
@@ -447,7 +450,7 @@ export default function App() {
       const next = createProject(id);
       apply(next);
       const designer = next.graph.nodes.find((node) => node.kind === 'spline');
-      setSelectedId(designer?.id ?? next.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ?? null);
+      setSelectedId(designer?.id ?? next.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ?? next.graph.nodes.find((node) => node.kind === 'noise')?.id ?? null);
       setPreviewNodeId(undefined);
       setEditingSplineId(designer?.id ?? null);
       if (designer) {
@@ -493,7 +496,7 @@ export default function App() {
   };
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || modal) return;
+      if (event.defaultPrevented || modal || document.querySelector('dialog[open]')) return;
       const command = event.ctrlKey || event.metaKey;
       if (command && event.key.toLowerCase() === 'k') {
         event.preventDefault();
@@ -739,6 +742,7 @@ export default function App() {
         {leftOpen && (
           <Library
             seed={project.seed}
+            worldSize={project.worldSize}
             onSeed={(seed) => updateProject({ seed })}
             onAdd={addNode}
             onPreset={loadPreset}
@@ -862,11 +866,16 @@ export default function App() {
             project={project}
             previewNodeId={previewNodeId ?? output?.id}
             onParam={(key, value) => {
-              if (selected)
+              const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
+              if (current)
                 updateNode(
-                  { params: { ...selected.params, [key]: value } },
-                  `${selected.id}-${key}`,
+                  { params: { ...current.params, [key]: value } },
+                  `${current.id}-${key}`,
                 );
+            }}
+            onParams={(patch) => {
+              const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
+              if (current) updateNode({ params: { ...current.params, ...patch } });
             }}
             onRename={(label) => updateNode({ label }, `${selectedId}-label`)}
             onBypass={() => selected && updateNode({ bypassed: !selected.bypassed })}
@@ -978,6 +987,7 @@ export default function App() {
         >
           <Library
             seed={project.seed}
+            worldSize={project.worldSize}
             onSeed={(seed) => updateProject({ seed })}
             onAdd={addNode}
             onPreset={loadPreset}

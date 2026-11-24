@@ -8,6 +8,7 @@ import type {
   TerrainProject,
 } from '../model/types';
 import { clamp, mix, Noise, smoothstep } from './noise';
+import { generateStudioNoise } from './noiseStudio';
 import { hydraulicErosion, sampleHeight, thermalErosion } from './erosion';
 import type { SedimentBudget } from './erosion';
 import { generateOrogenicRelief } from './orogeny';
@@ -451,7 +452,9 @@ export function evaluateGraph(
       field = baseField(createMountains(node, n, noise, seed, {
         worldSize: project.worldSize, heightScale: project.heightScale,
       }));
-    else if (node.kind === 'noise') field = baseField(createNoise(node, n, noise));
+    else if (node.kind === 'noise') field = baseField(node.params.noiseModel === 'v3'
+      ? generateStudioNoise(node.params, project.seed, n, project.worldSize, progress)
+      : createNoise(node, n, noise));
     else {
       if (!input) throw new Error(`Connect a height input to “${node.label}”.`);
       field = { ...input };
