@@ -29,6 +29,7 @@ export default defineConfig({
     // unlike the default Linux headless shell/SwiftShader golden environment.
     channel: process.env.PBR_REAL_GPU ? 'chromium' : undefined,
     launchOptions: {
+      executablePath: process.env.NH_CHROMIUM_PATH || undefined,
       args: process.env.PBR_REAL_GPU
         ? ['--use-gl=angle', '--use-angle=metal', '--ignore-gpu-blocklist']
         : [

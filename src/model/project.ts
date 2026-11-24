@@ -3,6 +3,8 @@ import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
 import { resolveSurface, SPLAT_LAYERS, SURFACE_LIMITS } from '../materials/pbr';
 import { NODE_DEFINITIONS, createNode } from './registry';
 import { resolveStudioSettings, STUDIO_PARAMS, validateStudioParams } from './noiseStudio';
+import { validateWorldDefinition } from './world';
+import type { WorldDefinition } from './world';
 import type { NodeKind, TerrainProject, TerrainNode, TerrainEdge, ParamValue } from './types';
 
 export const STORAGE_KEY = 'normal-height.project.v1';
@@ -12,8 +14,14 @@ export function parseProject(raw: unknown): TerrainProject {
   if (!raw || typeof raw !== 'object')
     throw new Error('This file does not contain a terrain project.');
   const p = raw as Record<string, unknown>;
-  if (p.version !== 1)
-    throw new Error('This project version is not supported. Expected a Normal Height v1 project.');
+  if (p.version !== 1 && p.version !== 2)
+    throw new Error('This project version is not supported. Expected Normal Height v1 or World v2.');
+  if (p.version === 2) {
+    const worldError = validateWorldDefinition(p.world);
+    if (worldError) throw new Error(worldError);
+  } else if (p.world !== undefined) {
+    throw new Error('World settings require an explicitly versioned World v2 project.');
+  }
   const g = p.graph as { nodes: unknown[]; edges: unknown[] } | undefined;
   if (
     !g ||
@@ -165,7 +173,8 @@ export function parseProject(raw: unknown): TerrainProject {
     surface = clean;
   }
   return {
-    version: 1,
+    version: p.version,
+    ...(p.version === 2 ? { world: structuredClone(p.world as WorldDefinition) } : {}),
     name: typeof p.name === 'string' ? p.name.slice(0, 100) : 'Untitled terrain',
     seed: Math.floor(p.seed),
     resolution: Math.floor(p.resolution),

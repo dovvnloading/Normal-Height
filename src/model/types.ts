@@ -2,6 +2,8 @@ import type { MaterialStroke } from '../materials/materialPaint';
 import type { SplinePoint } from './splines';
 import type { SurfaceSettings } from '../materials/pbr';
 import type { SedimentBudget } from '../engine/erosion';
+import type { ComputeDiagnostics } from '../engine/compute/cache';
+import type { WorldDefinition } from './world';
 
 export type NodeKind =
   | 'mountain'
@@ -43,7 +45,9 @@ export interface TerrainGraph {
   edges: TerrainEdge[];
 }
 export interface TerrainProject {
-  version: 1;
+  version: 1 | 2;
+  /** Explicit opt-in World schema. Version 1 retains the original single-domain pipeline. */
+  world?: WorldDefinition;
   name: string;
   seed: number;
   resolution: number;
@@ -79,6 +83,8 @@ export interface EvaluationResult {
   stats: TerrainStats;
   duration: number;
   outputNodeId: string;
+  /** CPU execution and persistent-cache measurements, when available. */
+  diagnostics?: ComputeDiagnostics;
 }
 export interface EvaluationOptions {
   resolution: number;

@@ -7,26 +7,31 @@
 // Renders in installed Google Chrome on the hardware GPU (ANGLE D3D11 / Metal /
 // GL) so PBR materials, sky and shadows look as they do for users. The GIF is
 // encoded with Python + Pillow (`pip install pillow`).
+// For a reproducible CI/software capture, use NH_MEDIA_SOFTWARE=1. These
+// captures are real UI output, but are not hardware-GPU benchmark evidence.
 import { chromium } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const BASE = process.env.NH_URL ?? 'http://127.0.0.1:4173';
 const OUT = resolve('docs/images');
 const FRAMES = join(tmpdir(), 'nh-readme-frames');
-const TOUR = ['Alpine watershed', 'Granite massif', 'Volcanic caldera', 'Folded highlands'];
+const WORLD_FRAMES = join(tmpdir(), 'nh-world-frames');
+const TOUR = ['Alpine watershed', 'Studio ridgelands', 'Studio wind dunes', 'Studio impact field'];
 const FRAMES_PER_LANDSCAPE = 28;
 const ORBIT_PX_PER_FRAME = 8;
 const GIF_WIDTH = 640;
 const GIF_FPS = 10;
 
 const angle = { win32: 'd3d11', darwin: 'metal' }[process.platform] ?? 'gl';
+const software = process.env.NH_MEDIA_SOFTWARE === '1';
 const browser = await chromium.launch({
-  channel: 'chrome',
+  channel: software ? undefined : 'chrome',
+  executablePath: process.env.NH_CHROMIUM_PATH || undefined,
   headless: true,
-  args: [`--use-angle=${angle}`, '--ignore-gpu-blocklist'],
+  args: software ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] : [`--use-angle=${angle}`, '--ignore-gpu-blocklist'],
 });
 const page = await browser.newPage({
   viewport: { width: 1600, height: 1000 },
@@ -91,6 +96,55 @@ await page.waitForTimeout(1500);
 await page.screenshot({ path: join(OUT, 'studio-flow.png') });
 await show3d();
 
+// Record real persistent-cache telemetry after a warm build.
+await page.getByRole('button', { name: 'Build terrain', exact: true }).click();
+await ready();
+await page.getByRole('button', { name: 'Compute diagnostics', exact: true }).click();
+await page.screenshot({ path: join(OUT, 'compute-cache.png') });
+await page.getByRole('button', { name: 'Close Compute diagnostics', exact: true }).click();
+
+// World coordinates, region selection, native detail and stage disclosure.
+rmSync(WORLD_FRAMES, { recursive: true, force: true });
+mkdirSync(WORLD_FRAMES, { recursive: true });
+let worldFrame = 0;
+const worldShot = async () => {
+  await page.screenshot({ path: join(WORLD_FRAMES, `f${String(worldFrame++).padStart(4, '0')}.png`) });
+};
+await page.getByRole('button', { name: 'World Studio', exact: true }).click();
+const world = page.getByRole('dialog', { name: 'World Studio', exact: true });
+await world.getByText('World overview ready', { exact: true }).waitFor({ timeout: 180_000 });
+await worldShot();
+await world.getByLabel('East intervals', { exact: true }).fill('2048');
+await world.getByLabel('South intervals', { exact: true }).fill('2048');
+await world.getByRole('button', { name: 'Build world', exact: true }).click();
+await world.getByText('World overview ready', { exact: true }).waitFor({ timeout: 180_000 });
+await worldShot();
+const worldMap = world.getByRole('button', { name: /^World region map/ });
+await worldMap.focus();
+await page.keyboard.press('ArrowRight');
+await page.keyboard.press('ArrowDown');
+await worldShot();
+await page.screenshot({ path: join(OUT, 'world-studio.png') });
+await world.getByRole('button', { name: 'Refine region', exact: true }).click();
+await world.getByText('Region ready', { exact: true }).waitFor({ timeout: 180_000 });
+await worldShot();
+await world.getByLabel('World map channel').selectOption('height');
+await worldShot();
+await world.getByLabel('World map channel').selectOption('flow');
+await worldShot();
+await world.getByLabel('World map channel').selectOption('relief');
+await world.getByRole('tab', { name: 'Compute', exact: true }).click();
+await world.locator('summary').click();
+await worldShot();
+await page.screenshot({ path: join(OUT, 'world-stage-report.png') });
+await world.getByRole('button', { name: 'Overview', exact: true }).click();
+await world.getByText('World overview ready', { exact: true }).waitFor({ timeout: 180_000 });
+await world.locator('summary').click();
+await world.getByRole('tab', { name: 'Export', exact: true }).click();
+await worldShot();
+await page.screenshot({ path: join(OUT, 'world-export.png') });
+await world.getByRole('button', { name: 'Close World Studio', exact: true }).click();
+
 // Landscape tour: orbit each preset in viewport focus mode, without the
 // viewport chrome, captioned with the landscape name.
 await page.addStyleTag({
@@ -130,6 +184,17 @@ for (const name of TOUR) {
   await page.getByRole('button', { name: 'Exit viewport focus mode' }).click();
   await page.waitForTimeout(500);
 }
+writeFileSync(join(OUT, 'capture-provenance.json'), JSON.stringify({
+  capturedAt: new Date().toISOString(),
+  revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+  browser: browser.version(),
+  rendering: software ? 'Chromium / ANGLE SwiftShader software rendering; not hardware performance evidence' : `Chrome / ANGLE ${angle}`,
+  viewport: { width: 1600, height: 1000 },
+  application: 'Actual production build',
+  landscapes: TOUR,
+  world: 'Alpine graph, 2048 interval domain, 256 sample global reference; reconstructed global stages disclosed in UI',
+  script: 'scripts/readme-media.mjs',
+}, null, 2) + '\n');
 await browser.close();
 
 // Shared adaptive palette for all frames keeps the GIF small and flicker-free.
@@ -157,4 +222,5 @@ execFileSync(
     stdio: 'inherit',
   },
 );
-console.log(`Wrote studio-3d.png, studio-flow.png and landscape-tour.gif to ${OUT}`);
+execFileSync(python, ['-c', encoder, WORLD_FRAMES, join(OUT, 'world-workflow.gif'), '960', '1'], { stdio: 'inherit' });
+console.log(`Wrote updated studio, world, diagnostics and tour media to ${OUT}`);

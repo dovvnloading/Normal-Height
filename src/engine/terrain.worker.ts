@@ -1,8 +1,10 @@
 /// <reference lib="webworker" />
 import type { GenerateRequest, WorkerResponse } from '../model/types';
 import { evaluateGraph } from './index';
+import { GraphFieldCache } from './compute/cache';
 
 const worker = self as unknown as DedicatedWorkerGlobalScope;
+const cache = new GraphFieldCache();
 worker.addEventListener('message', (event: MessageEvent<GenerateRequest>) => {
   const request = event.data;
   if (request.type !== 'generate') return;
@@ -10,17 +12,21 @@ worker.addEventListener('message', (event: MessageEvent<GenerateRequest>) => {
     worker.postMessage(response, transfers);
   try {
     let lastProgress = 0;
-    const result = evaluateGraph(request.project, {
-      resolution: request.resolution,
-      previewNodeId: request.previewNodeId,
-      onProgress: (progress, stage) => {
-        const now = performance.now();
-        if (now - lastProgress > 60 || progress === 1) {
-          send({ type: 'progress', id: request.id, progress, stage });
-          lastProgress = now;
-        }
+    const result = evaluateGraph(
+      request.project,
+      {
+        resolution: request.resolution,
+        previewNodeId: request.previewNodeId,
+        onProgress: (progress, stage) => {
+          const now = performance.now();
+          if (now - lastProgress > 60 || progress === 1) {
+            send({ type: 'progress', id: request.id, progress, stage });
+            lastProgress = now;
+          }
+        },
       },
-    });
+      cache,
+    );
     const buffers = new Set<ArrayBuffer>();
     for (const array of [
       result.field.height,

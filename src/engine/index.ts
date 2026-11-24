@@ -1,8 +1,6 @@
 import type {
   EvaluationOptions,
   EvaluationResult,
-  HeightField,
-  TerrainEdge,
   TerrainGraph,
   TerrainNode,
   TerrainProject,
@@ -10,38 +8,19 @@ import type {
 import { clamp, mix, Noise, smoothstep } from './noise';
 import { generateStudioNoise } from './noiseStudio';
 import { hydraulicErosion, sampleHeight, thermalErosion } from './erosion';
-import type { SedimentBudget } from './erosion';
 import { generateOrogenicRelief } from './orogeny';
 import { evolveFluvialLandscape, FLUVIAL_DEFAULTS, FLUVIAL_MAX_RESOLUTION } from './fluvial';
 import type { FluvialOptions } from './fluvial';
 import { sculptSpline } from './spline';
-import { validSplinePoint, MAX_SPLINE_POINTS } from '../model/splines';
+import { compileGraph, inputHandle, metadata, usesInput } from './plan/graph';
+import { cloneWorkingField, GraphFieldCache } from './compute/cache';
+import type { CachedField, ComputeDiagnostics } from './compute/cache';
+export { validateGraph } from './plan/graph';
 
 export { hydraulicErosion, thermalErosion } from './erosion';
 export { Noise, randomGenerator } from './noise';
 
-interface WorkingField extends HeightField {
-  eroded: number;
-  deposited: number;
-  exportedSediment: number;
-  sedimentBudget?: SedimentBudget;
-}
-const kinds = new Set([
-  'mountain',
-  'noise',
-  'warp',
-  'spline',
-  'hydraulic',
-  'thermal',
-  'terrace',
-  'remap',
-  'blend',
-  'mask',
-  'output',
-  'note',
-  'group',
-]);
-const metadata = (node: TerrainNode) => node.kind === 'note' || node.kind === 'group';
+type WorkingField = CachedField;
 const number = (
   node: TerrainNode,
   key: string,
@@ -54,75 +33,6 @@ const number = (
 };
 const text = (node: TerrainNode, key: string, fallback: string): string =>
   String(node.params[key] ?? fallback);
-const inputHandle = (edge: TerrainEdge, node: TerrainNode) =>
-  edge.targetHandle || (node.kind === 'blend' ? 'a' : 'in');
-// Bypassed processors forward their primary input; secondary branches are not dependencies.
-const usesInput = (edge: TerrainEdge, node: TerrainNode) =>
-  !node.bypassed || inputHandle(edge, node) === (node.kind === 'blend' ? 'a' : 'in');
-
-/** Structural errors are rejected; unfinished, disconnected nodes may remain on the canvas. */
-export function validateGraph(graph: TerrainGraph): string | null {
-  if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges))
-    return 'This project does not contain a valid terrain graph.';
-  if (graph.nodes.length > 256 || graph.edges.length > 768)
-    return 'The graph exceeds the 256-node or 768-connection limit.';
-  const nodes = new Map<string, TerrainNode>();
-  for (const node of graph.nodes) {
-    if (!node.id || nodes.has(node.id)) return 'Each node must have a unique identifier.';
-    if (!kinds.has(node.kind)) return `Unknown node type: ${String(node.kind)}.`;
-    if (!node.params || typeof node.params !== 'object')
-      return `“${node.label || node.id}” has invalid parameters.`;
-    if (node.kind === 'spline' &&
-      (!Array.isArray(node.path) || node.path.length < 2 ||
-       node.path.length > MAX_SPLINE_POINTS || !node.path.every(validSplinePoint)))
-      return `“${node.label || node.id}” needs at least two valid spline points.`;
-    nodes.set(node.id, node);
-  }
-  const ports = new Set<string>(),
-    edgeIds = new Set<string>();
-  const outgoing = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    if (!edge.id || edgeIds.has(edge.id)) return 'Each connection must have a unique identifier.';
-    edgeIds.add(edge.id);
-    const source = nodes.get(edge.source),
-      target = nodes.get(edge.target);
-    if (!source || !target) return 'A connection refers to a missing node.';
-    if (metadata(source) || metadata(target)) return 'Notes and groups cannot carry terrain data.';
-    if (source.id === target.id) return 'A node cannot connect to itself.';
-    const handle = inputHandle(edge, target);
-    const inputs =
-      target.kind === 'blend'
-        ? ['a', 'b', 'mask']
-        : target.kind === 'hydraulic'
-          ? ['in', 'mask']
-          : ['mountain', 'noise'].includes(target.kind)
-            ? []
-            : ['in'];
-    if (!inputs.includes(handle)) return `“${target.label}” does not have a “${handle}” input.`;
-    if (!['height', 'flow', 'wear', 'deposition'].includes(edge.sourceHandle || 'height'))
-      return 'A connection uses an unknown output channel.';
-    const port = `${target.id}:${handle}`;
-    if (ports.has(port))
-      return `“${target.label}” already has a connection on its “${handle}” input.`;
-    ports.add(port);
-    outgoing.set(source.id, [...(outgoing.get(source.id) || []), target.id]);
-  }
-  const visited = new Set<string>(),
-    active = new Set<string>();
-  const visit = (id: string): boolean => {
-    if (active.has(id)) return false;
-    if (visited.has(id)) return true;
-    active.add(id);
-    for (const next of outgoing.get(id) || []) if (!visit(next)) return false;
-    active.delete(id);
-    visited.add(id);
-    return true;
-  };
-  for (const node of graph.nodes)
-    if (!visit(node.id))
-      return 'This connection creates a cycle. Terrain must flow forward through the graph.';
-  return null;
-}
 
 function normalizeDiagnostic(values: Float32Array, logarithmic = false): Float32Array {
   let max = 0;
@@ -361,36 +271,14 @@ function createNoise(node: TerrainNode, n: number, noise: Noise): Float32Array {
 export function evaluateGraph(
   project: TerrainProject,
   options: EvaluationOptions,
+  cache?: GraphFieldCache,
 ): EvaluationResult {
   const started = performance.now();
-  const error = validateGraph(project.graph);
-  if (error) throw new Error(error);
+  const { target, byId, incoming, needed } = compileGraph(project, options.previewNodeId);
   if (!Number.isFinite(options.resolution) || options.resolution < 16 || options.resolution > 2048)
     throw new Error('Choose a terrain resolution between 16 and 2048 samples.');
   const n = Math.round(options.resolution),
     length = n * n;
-  const byId = new Map(project.graph.nodes.map((node) => [node.id, node]));
-  const target = options.previewNodeId
-    ? byId.get(options.previewNodeId)
-    : project.graph.nodes.find((node) => node.kind === 'output');
-  if (!target || metadata(target))
-    throw new Error(
-      options.previewNodeId
-        ? 'Choose a terrain node to preview.'
-        : 'Add an Output node and connect a terrain to it.',
-    );
-  const incoming = new Map<string, TerrainEdge[]>();
-  for (const edge of project.graph.edges)
-    incoming.set(edge.target, [...(incoming.get(edge.target) || []), edge]);
-  const needed = new Set<string>();
-  const markNeeded = (id: string) => {
-    if (needed.has(id)) return;
-    needed.add(id);
-    const node = byId.get(id)!;
-    for (const edge of incoming.get(id) || [])
-      if (usesInput(edge, node)) markNeeded(edge.source);
-  };
-  markNeeded(target.id);
   const estimatedBytes = estimatedWorkingBytes(project.graph, needed, n);
   if (estimatedBytes > WORKING_MEMORY_BUDGET) {
     const smaller =
@@ -402,7 +290,16 @@ export function evaluateGraph(
       `This connected graph at ${n} × ${n} exceeds the 512 MiB working-memory budget (estimated ${Math.ceil(estimatedBytes / 1024 / 1024)} MiB). Choose ${smaller} × ${smaller} or reduce the connected stages.`,
     );
   }
+  const evictionStart = cache?.evictions || 0;
+  cache?.prepare(WORKING_MEMORY_BUDGET - estimatedBytes, needed);
+  const diagnostics: ComputeDiagnostics = {
+    backend: 'cpu-reference', cacheHits: 0, cacheMisses: 0,
+    cacheBytes: 0, cacheBudgetBytes: cache?.budgetBytes || 0,
+    estimatedWorkingBytes: estimatedBytes, evictions: 0, nodes: [],
+  };
   const fields = new Map<string, WorkingField>();
+  const nodeKeys = new Map<string, string>();
+  const pending = new Map<string, WorkingField>();
   const thumbnails: Record<string, Float32Array> = {},
     nodeTimings: Record<string, number> = {};
   const empty = new Float32Array(length);
@@ -420,24 +317,41 @@ export function evaluateGraph(
   const calculate = (node: TerrainNode): WorkingField => {
     const cached = fields.get(node.id);
     if (cached) return cached;
-    const inputs = new Map<string, WorkingField>();
+    const references: { edge: typeof project.graph.edges[number]; field: WorkingField }[] = [];
     for (const edge of incoming.get(node.id) || []) {
       if (!usesInput(edge, node)) continue;
-      let field = calculate(byId.get(edge.source)!);
-      const handle = edge.sourceHandle || 'height';
-      if (handle !== 'height')
-        field = {
-          ...field,
-          height: normalizeDiagnostic(
-            field[handle as 'flow' | 'wear' | 'deposition'],
-            handle === 'flow',
-          ),
-        };
-      inputs.set(inputHandle(edge, node), field);
+      references.push({ edge, field: calculate(byId.get(edge.source)!) });
     }
     const begin = performance.now();
     const progress = (fraction: number) =>
       options.onProgress?.((completed + clamp(fraction)) / Math.max(needed.size, 1), node.label);
+    const key = cache?.identity(project, node, n, references.map(({ edge }) => ({
+      port: inputHandle(edge, node), channel: edge.sourceHandle || 'height',
+      contentId: nodeKeys.get(edge.source)!,
+    }))) || node.id;
+    nodeKeys.set(node.id, key);
+    const reused = cache?.lookup(key) || pending.get(key);
+    if (reused) {
+      fields.set(node.id, reused);
+      thumbnails[node.id] = thumbnail(reused.height, n);
+      nodeTimings[node.id] = performance.now() - begin;
+      diagnostics.cacheHits++;
+      diagnostics.nodes.push({ nodeId: node.id, status: 'hit', reason: 'reused',
+        durationMs: nodeTimings[node.id] });
+      completed++;
+      progress(0);
+      return reused;
+    }
+    diagnostics.cacheMisses++;
+    const reason = cache?.reason(node.id, key) || 'not-cached';
+    const inputs = new Map<string, WorkingField>();
+    for (const { edge, field } of references) {
+      const handle = edge.sourceHandle || 'height';
+      inputs.set(inputHandle(edge, node), handle === 'height' ? field : {
+        ...field,
+        height: normalizeDiagnostic(field[handle as 'flow' | 'wear' | 'deposition'], handle === 'flow'),
+      });
+    }
     progress(0);
     const input = inputs.get('in') || inputs.get('a');
     const seed =
@@ -535,7 +449,13 @@ export function evaluateGraph(
           );
           field = {
             resolution: n,
-            ...result,
+            // Only declared graph channels enter the immutable cache. Solver
+            // scratch/mobile-layer arrays must not outlive this stage unseen
+            // by the cache's buffer ledger.
+            height: result.height,
+            flow: result.flow,
+            wear: result.wear,
+            deposition: result.deposition,
             eroded: input.eroded + result.eroded,
             deposited: input.deposited + result.deposited,
             exportedSediment: input.exportedSediment + result.exportedSediment,
@@ -675,13 +595,18 @@ export function evaluateGraph(
       }
     }
     fields.set(node.id, field);
+    if (cache) pending.set(key, field);
     thumbnails[node.id] = thumbnail(field.height, n);
     nodeTimings[node.id] = performance.now() - begin;
+    diagnostics.nodes.push({ nodeId: node.id, status: 'computed', reason,
+      durationMs: nodeTimings[node.id] });
     completed++;
     progress(0);
     return field;
   };
-  const output = calculate(target);
+  const calculated = calculate(target);
+  // Cached fields remain worker-owned; callers may edit or transfer this snapshot.
+  const output = cache ? cloneWorkingField(calculated) : calculated;
   let min = Infinity,
     max = -Infinity,
     sum = 0;
@@ -692,6 +617,9 @@ export function evaluateGraph(
     max = Math.max(max, value);
     sum += value;
   }
+  cache?.commit(pending, nodeKeys);
+  diagnostics.cacheBytes = cache?.bytes || 0;
+  diagnostics.evictions = (cache?.evictions || 0) - evictionStart;
   options.onProgress?.(1, 'Terrain ready');
   return {
     field: {
@@ -714,5 +642,6 @@ export function evaluateGraph(
     },
     duration: performance.now() - started,
     outputNodeId: target.id,
+    diagnostics,
   };
 }

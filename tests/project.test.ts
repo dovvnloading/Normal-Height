@@ -37,7 +37,7 @@ describe('project import boundaries', () => {
     b.parentId = 'a';
     p.graph.nodes.push(a, b);
     expect(() => parseProject(p)).toThrow('cycle');
-    expect(() => parseProject({ ...createProject(), version: 2 })).toThrow('version');
+    expect(() => parseProject({ ...createProject(), version: 3 })).toThrow('version');
   });
   it('rejects identifiers that collide with diagnostic object prototypes', () => {
     const p = createProject();

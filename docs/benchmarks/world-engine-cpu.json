@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "capturedAt": "2026-11-24T22:34:06.684Z",
+  "sourceBase": "0906f95f064eda8b27ed4098364eb6d3e214476d",
+  "implementation": "World Engine persistent CPU cache working tree",
+  "sourceHeadMode": "uncommitted working tree based on sourceBase",
+  "implementationFileHashes": {
+    "src/engine/index.ts": "a96f2c4ae8e21d1b40e181b00fcde19bd7cf4e89d133f86650ce218c42a9776d",
+    "src/engine/plan/graph.ts": "9d970265628bf18365453a6626e3a5a607dbe0a530b66992f53a9aa44156fe92",
+    "src/engine/compute/cache.ts": "91f97fa2a924e4a9b24232de0821be69b977ea0cb3689cf48ccc68260aa50f2e",
+    "src/engine/compute/client.ts": "7f6163b7e52a005439c18044f6ec1fd7a4cc82a184c9f7b319bec7b59e83aa6d",
+    "tests/compute-cache-profile.test.ts": "44b297af6e81cda8fdbf891d3fec69d89581c3676046860aa31543aee5ebe5bf"
+  },
+  "environment": {
+    "runtime": "v24.22.3",
+    "platform": "linux",
+    "release": "6.18.57",
+    "arch": "x64",
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "logicalCpus": 9
+  },
+  "fixture": {
+    "preset": "alpine",
+    "seed": 48271,
+    "resolution": 512,
+    "repeats": 3,
+    "downstreamEdit": "added downstream remap brightness 0 → 0.01/0.02/0.03",
+    "backend": "cpu-reference"
+  },
+  "measuredScope": "evaluateGraph wall time including validation, thumbnails, snapshot copies, statistics and cache publication; excludes worker transfer, browser rendering and export encoding",
+  "memoryScope": "retained unique field buffers and conservative working-memory preflight; not measured process peak memory",
+  "medians": {
+    "uncachedMs": 4860.039790999996,
+    "coldCacheMs": 4629.320408,
+    "unchangedMs": 13.207962000000407,
+    "downstreamEditMs": 19.826865000000907,
+    "uncachedDownstreamEditMs": 4567.5551909999995,
+    "downstreamEditImprovementPercent": 99.5659195308889
+  },
+  "samples": [
+    {
+      "repeat": 0,
+      "uncachedMs": 5064.929843,
+      "coldCacheMs": 5012.734449999999,
+      "unchangedMs": 29.494744999999966,
+      "downstreamEditMs": 19.826865000000907,
+      "uncachedDownstreamEditMs": 5253.491713000001,
+      "unchangedHits": 6,
+      "downstreamEditHits": 4,
+      "downstreamEditMisses": 2,
+      "retainedCacheBytes": 10485760,
+      "estimatedWorkingBytes": 118489088,
+      "baselineHeightSha256": "a68c8437e38e89102f88631164aed2095a3ed11b8126607a2da0a2b85784921a",
+      "editedHeightSha256": "03229589c11186c354f67f2b40c34ed28c069ee482949cd9801233f52fce2d25"
+    },
+    {
+      "repeat": 1,
+      "uncachedMs": 4560.3388620000005,
+      "coldCacheMs": 4629.320408,
+      "unchangedMs": 13.207962000000407,
+      "downstreamEditMs": 23.143222999999125,
+      "uncachedDownstreamEditMs": 4567.5551909999995,
+      "unchangedHits": 6,
+      "downstreamEditHits": 4,
+      "downstreamEditMisses": 2,
+      "retainedCacheBytes": 10485760,
+      "estimatedWorkingBytes": 118489088,
+      "baselineHeightSha256": "a68c8437e38e89102f88631164aed2095a3ed11b8126607a2da0a2b85784921a",
+      "editedHeightSha256": "4712b32ad01dc1927ca4e34e407900585acc0a1ded36b90183ee13d941cfaa87"
+    },
+    {
+      "repeat": 2,
+      "uncachedMs": 4860.039790999996,
+      "coldCacheMs": 4124.962802000002,
+      "unchangedMs": 5.695885000000999,
+      "downstreamEditMs": 13.763883999999962,
+      "uncachedDownstreamEditMs": 4154.8727729999955,
+      "unchangedHits": 6,
+      "downstreamEditHits": 4,
+      "downstreamEditMisses": 2,
+      "retainedCacheBytes": 10485760,
+      "estimatedWorkingBytes": 118489088,
+      "baselineHeightSha256": "a68c8437e38e89102f88631164aed2095a3ed11b8126607a2da0a2b85784921a",
+      "editedHeightSha256": "84d7b1028b9d9789b23b8a74bb8b7ed929861aed09e8ae63e273fddaea33a8d4"
+    }
+  ]
+}

@@ -21,6 +21,8 @@ import {
   CheckCircle2,
   Moon,
   Sun,
+  Globe2,
+  Cpu,
 } from 'lucide-react';
 import { Library } from './components/Library';
 import { Inspector } from './components/Inspector';
@@ -29,6 +31,8 @@ import { TerrainViewport } from './components/TerrainViewport';
 import { ExportDialog } from './components/ExportDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
+import { WorldStudio } from './components/WorldStudio';
+import { ComputePanel } from './components/ComputePanel';
 import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
 import { STUDIO_KERNELS } from './model/noiseStudio';
@@ -98,7 +102,7 @@ export default function App() {
     () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
   );
   const theme: ThemeMode = themeChoice ?? (systemDark ? 'dark' : 'light');
-  const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | null>(null);
+  const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | 'world' | 'compute' | null>(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   // Sidebars become temporary overlays at different breakpoints. Close each
@@ -699,6 +703,10 @@ export default function App() {
           <ChevronDown size={10} />
         </div>
         <div className="workspace-build">
+          <button className="world-open-button" onClick={() => setModal('world')} title="Continuous worlds, regional refinement, and tiled export">
+            <Globe2 size={14} />
+            <span>World Studio</span>
+          </button>
           <label className="working-resolution">
             <span>Working grid</span>
             <select
@@ -912,6 +920,10 @@ export default function App() {
           )}
         </div>
         <div className="status-center">
+          <button className="compute-status-button" onClick={() => setModal('compute')} title="Inspect stage timings and persistent cache" aria-label="Compute diagnostics">
+            <Cpu size={11} />
+            {engine.result?.diagnostics ? ` ${engine.result.diagnostics.cacheHits} cached` : ' CPU reference'}
+          </button>
           <GitBranch size={11} />
           {project.graph.nodes.filter((n) => n.kind !== 'group' && n.kind !== 'note').length} nodes
           <span>·</span>
@@ -983,6 +995,8 @@ export default function App() {
       />
       {modal === 'export' && <ExportDialog project={project} onClose={() => setModal(null)} />}
       {modal === 'help' && <HelpDialog onClose={() => setModal(null)} />}
+      {modal === 'world' && <WorldStudio project={project} onSave={(world) => apply({ ...projectRef.current, version: 2, world })} onClose={() => setModal(null)} />}
+      {modal === 'compute' && <ComputePanel project={project} result={engine.result} stale={engine.stale} onClear={() => { engine.clearCache(); notify('Compute cache cleared. The current preview is retained.'); }} onClose={() => setModal(null)} />}
       {modal === 'palette' && (
         <Modal
           title="Add to your process"
