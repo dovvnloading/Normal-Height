@@ -65,8 +65,12 @@ async function show3d() {
 }
 
 async function loadLandscape(name) {
+  const showLibrary = page.getByRole('button', { name: 'Show node library', exact: true });
+  if (await showLibrary.isVisible()) await showLibrary.click();
   await page.getByRole('button', { name: 'Landscapes', exact: true }).click();
   await page.locator('.library').getByText(name, { exact: true }).click();
+  const hideLibrary = page.getByRole('button', { name: 'Hide node library', exact: true });
+  if (await hideLibrary.isVisible()) await hideLibrary.click();
   await ready();
   await show3d(); // some presets open in the 2D map
 }

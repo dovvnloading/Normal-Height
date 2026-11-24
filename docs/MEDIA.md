@@ -50,8 +50,8 @@ browser acceptance, probes WebGPU/software fallback and captures the running
 studio. Screenshots, GIFs, provenance and browser traces are uploaded as the
 `world-engine-evidence` artifact. After successful same-repository acceptance,
 the workflow commits the newly captured media to the implementation branch.
-It never merges the PR or deploys the application. Media-only changes do not
-retrigger the capture workflow.
+It never merges the PR or deploys the application. The media commit is made by the workflow token and does not create a recursive
+chain of capture runs.
 
 The job uses a normal fast-forward push. If another author advances the branch
 during capture, that push fails safely; the artifact still contains the

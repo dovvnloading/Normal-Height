@@ -213,9 +213,47 @@ Measurements used Node 24.22.3 on an AMD EPYC 9V74 host. They exclude browser
 rendering and are not general performance guarantees. Export process RSS
 peaked at approximately 473 MiB and 543 MiB; the Node/Vite process includes
 compiler/runtime and verification allocations. Estimated live working arrays
-and total process RSS are different measures. Browser heap, constrained-device
-memory behavior, cancellation latency/p95 interaction and hardware performance
-still need separate profiling.
+and total process RSS are different measures. Constrained-device and total-process memory, repeated input/cancellation
+latencies, and hardware performance still need separate profiling. The
+single-run Chromium export measurements below address a narrower scope.
+
+### Actual Chromium 4K / 8K export
+
+A separate opt-in run used Headless Chromium 158.0.8127.18 on a Xeon 6975P-C
+runner, with the editor in 2D mode and the CPU reference selected. It exported
+native Perlin → remap → terrace → output through the real World Studio button,
+production worker, ACK/backpressure, Blob publication and completed download.
+The application build was clean revision `4e0c8cb08ca0531083336016150d748e9098451e`.
+
+| Output samples | Download complete | Independently decoded tiles | Exact shared-border comparisons | 25 ms timer p95 / maximum gap |
+| -------------- | ----------------: | --------------------------: | ------------------------------: | ----------------------------: |
+| 4096²          |            86.9 s |                         256 |                         123,330 |                25.6 / 40.1 ms |
+| 8192²          |           345.1 s |                       1,024 |                         509,826 |                25.2 / 54.0 ms |
+
+The 8K archive contained 67,108,864 unique samples and all 65,536 UInt16 codes.
+Cancelling a preceding 8K export showed its cancelled status after 46.0 ms;
+the complete preview hash was unchanged and no stale download appeared during
+the two subsequent exports. Timer gaps measure main-thread scheduling in this
+fixture, rather than direct input latency. These are single runs, height PNG16
+only, without global erosion, transport, masks, normals or a file-picker sink.
+`performance.memory` returned quantized renderer-heap observations and does not
+establish total browser, worker or GPU peak memory.
+
+[Full browser report](benchmarks/world-engine-browser-export.json) ·
+[successful browser profile run](https://github.com/dovvnloading/Normal-Height/actions/runs/45508227581).
+
+### Actual software WebGPU numerics
+
+The WGSL kernels compiled and executed on Chromium's `google / swiftshader`
+adapter. The runtime probe compared 2,056 results across remap, terrace, five
+blend modes and a height mask: maximum absolute error **2.38 × 10⁻⁷**, RMSE
+**2.04 × 10⁻⁸** against the rounded CPU oracle. A 257² noise → remap → output
+graph ran its remap on WebGPU, with maximum error **1.79 × 10⁻⁷** and RMSE
+**6.69 × 10⁻⁸** versus the CPU graph. Both satisfy the declared 1e-4 maximum /
+1e-5 RMSE thresholds. This is real shader execution and numerical evidence on
+a software adapter. It establishes no hardware acceleration or speedup.
+
+[Software WebGPU report and source attribution](benchmarks/world-gpu-swiftshader.json).
 
 Raw evidence: [CPU cache](benchmarks/world-engine-cpu.json),
 [full graph exports](benchmarks/world-engine-cpu-export.json), and the

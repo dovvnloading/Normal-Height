@@ -52,10 +52,14 @@ The recorded Alpine CPU fixture reduced a downstream remap edit from a median
 **4,593 ms uncached to 18.2 ms with cache reuse**, with exact output equivalence.
 A complete native Perlin → remap → terrace → output graph exported at **4096²
 in 33.0 s** and **8192² in 148.2 s** in the documented Node CPU environment.
-These are fixture measurements, not general browser/GPU speed promises. See the
+Actual Chromium downloads of that native CPU graph completed at **4096² in
+86.9 s** and **8192² in 345.1 s** on a separate Xeon CI runner; every PNG tile
+and shared border was independently verified. These are fixture measurements,
+not general browser/GPU speed promises. See the
 [World Engine guide, evidence and limitations](docs/WORLD_ENGINE.md),
 [cache measurements](docs/benchmarks/world-engine-cpu.json), and
-[export measurements](docs/benchmarks/world-engine-cpu-export.json).
+[export measurements](docs/benchmarks/world-engine-cpu-export.json), and
+[actual browser export evidence](docs/benchmarks/world-engine-browser-export.json).
 
 ## Run the application
 
