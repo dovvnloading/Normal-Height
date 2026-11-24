@@ -9,7 +9,14 @@ export interface SplineSettings {
   strength: number;
   falloff: number;
   downhill: boolean;
+  /** Physical tile width and elevation scale, both in meters. */
+  worldSize: number;
+  heightScale: number;
 }
+
+// Match the previous minimum drop at the default 512-sample, 8 km wide,
+// 2400 m elevation-scale project, but keep it fixed in meters per meter.
+const MIN_RIVER_GRADE = 0.0018396;
 
 /**
  * Shape the real Float32 heightfield along a Catmull–Rom centerline.
@@ -36,6 +43,7 @@ export function sculptSpline(
   const falloff = clamp(settings.falloff, 1.5, 6);
   const isRiver = settings.mode !== 'ridge';
   const n1 = n - 1;
+  const gradePerPixel = MIN_RIVER_GRADE * settings.worldSize / (n1 * settings.heightScale);
   const corePixels = Math.max(0.5, width * n1);
   const influence = corePixels * falloff;
   const influence2 = influence * influence;
@@ -53,7 +61,7 @@ export function sculptSpline(
       ? Math.hypot(x - px[i - 1].x, y - px[i - 1].y)
       : 0;
     const bed = isRiver && settings.downhill
-      ? Math.min(source, previous - segment * 0.000012)
+      ? Math.min(source, previous - segment * gradePerPixel)
       : source;
     beds[i] = bed;
     previous = bed;

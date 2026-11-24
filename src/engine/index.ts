@@ -55,6 +55,9 @@ const text = (node: TerrainNode, key: string, fallback: string): string =>
   String(node.params[key] ?? fallback);
 const inputHandle = (edge: TerrainEdge, node: TerrainNode) =>
   edge.targetHandle || (node.kind === 'blend' ? 'a' : 'in');
+// Bypassed processors forward their primary input; secondary branches are not dependencies.
+const usesInput = (edge: TerrainEdge, node: TerrainNode) =>
+  !node.bypassed || inputHandle(edge, node) === (node.kind === 'blend' ? 'a' : 'in');
 
 /** Structural errors are rejected; unfinished, disconnected nodes may remain on the canvas. */
 export function validateGraph(graph: TerrainGraph): string | null {
@@ -157,8 +160,18 @@ export function estimatedWorkingBytes(
     if (node.bypassed && node.kind !== 'mountain' && node.kind !== 'noise') continue;
     buffers += ['hydraulic', 'warp', 'blend', 'spline'].includes(node.kind) ? 4 : 1;
   }
-  for (const edge of graph.edges)
-    if (needed.has(edge.target) && edge.sourceHandle && edge.sourceHandle !== 'height') buffers++;
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  for (const edge of graph.edges) {
+    const target = byId.get(edge.target);
+    if (
+      target &&
+      needed.has(target.id) &&
+      usesInput(edge, target) &&
+      edge.sourceHandle &&
+      edge.sourceHandle !== 'height'
+    )
+      buffers++;
+  }
   const reserve = 64 * 1024 * 1024;
   const cell = resolution * resolution * Float32Array.BYTES_PER_ELEMENT;
   const settled = reserve + buffers * cell;
@@ -366,7 +379,9 @@ export function evaluateGraph(
   const markNeeded = (id: string) => {
     if (needed.has(id)) return;
     needed.add(id);
-    for (const edge of incoming.get(id) || []) markNeeded(edge.source);
+    const node = byId.get(id)!;
+    for (const edge of incoming.get(id) || [])
+      if (usesInput(edge, node)) markNeeded(edge.source);
   };
   markNeeded(target.id);
   const estimatedBytes = estimatedWorkingBytes(project.graph, needed, n);
@@ -400,6 +415,7 @@ export function evaluateGraph(
     if (cached) return cached;
     const inputs = new Map<string, WorkingField>();
     for (const edge of incoming.get(node.id) || []) {
+      if (!usesInput(edge, node)) continue;
       let field = calculate(byId.get(edge.source)!);
       const handle = edge.sourceHandle || 'height';
       if (handle !== 'height')
@@ -442,6 +458,8 @@ export function evaluateGraph(
             strength: number(node, 'strength', 0.09, 0, 0.55),
             falloff: number(node, 'falloff', 3, 1.5, 6),
             downhill: node.params.downhill !== false,
+            worldSize: project.worldSize,
+            heightScale: project.heightScale,
           });
           break;
         case 'warp': {
