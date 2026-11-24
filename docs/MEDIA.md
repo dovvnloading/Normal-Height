@@ -21,6 +21,13 @@ capture is labeled ANGLE SwiftShader and must never be presented as hardware
 WebGPU or performance evidence. Camera/material/light controls remain actual
 app state. The landscape-tour caption identifies the current preset.
 
+The software profile keeps the six full-quality screenshots, then uses the
+app's **Balanced** mesh fidelity for the four landscape orbits. It captures
+12 real frames per landscape at 5 fps; the hardware profile captures 28 at
+10 fps. Both traverse the same camera arc, and the chosen fidelity, frame
+count and cadence are recorded in provenance. The World walkthrough uses
+eight full application frames at 1 fps in either profile.
+
 ## Regenerate locally
 
 ```bash

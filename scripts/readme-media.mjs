@@ -20,13 +20,15 @@ const OUT = resolve('docs/images');
 const FRAMES = join(tmpdir(), 'nh-readme-frames');
 const WORLD_FRAMES = join(tmpdir(), 'nh-world-frames');
 const TOUR = ['Alpine watershed', 'Studio ridgelands', 'Studio wind dunes', 'Studio impact field'];
-const FRAMES_PER_LANDSCAPE = 28;
-const ORBIT_PX_PER_FRAME = 8;
+const software = process.env.NH_MEDIA_SOFTWARE === '1';
+// Software rendering is substantially slower than a hardware GPU. Keep all
+// four actual scenes and the same camera travel, with a smaller temporal budget.
+const FRAMES_PER_LANDSCAPE = software ? 12 : 28;
+const ORBIT_PX_PER_FRAME = 224 / FRAMES_PER_LANDSCAPE;
 const GIF_WIDTH = 640;
-const GIF_FPS = 10;
+const GIF_FPS = software ? 5 : 10;
 
 const angle = { win32: 'd3d11', darwin: 'metal' }[process.platform] ?? 'gl';
-const software = process.env.NH_MEDIA_SOFTWARE === '1';
 const browser = await chromium.launch({
   channel: software ? undefined : 'chrome',
   executablePath: process.env.NH_CHROMIUM_PATH || undefined,
@@ -75,7 +77,7 @@ async function loadLandscape(name) {
   await show3d(); // some presets open in the 2D map
 }
 
-async function drag(dx, dy, steps = 3) {
+async function drag(dx, dy, steps = 1) {
   const box = await canvas.boundingBox();
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
@@ -169,6 +171,12 @@ await world.getByRole('button', { name: 'Close World Studio', exact: true }).cli
 // Landscape tour: orbit each preset in viewport focus mode, without the
 // viewport chrome, captioned with the landscape name. The GIF output is 640px;
 // a smaller real browser viewport avoids rendering excess software GPU pixels.
+// Use the existing fidelity control only after all full-quality stills are saved.
+if (software) {
+  await page.getByRole('button', { name: 'Scene', exact: true }).click();
+  await page.getByLabel('Terrain mesh fidelity', { exact: true }).selectOption('balanced');
+  await page.getByRole('button', { name: 'Inspector', exact: true }).click();
+}
 await page.setViewportSize({ width: 960, height: 640 });
 await page.waitForTimeout(800);
 await page.addStyleTag({
@@ -181,6 +189,7 @@ rmSync(FRAMES, { recursive: true, force: true });
 mkdirSync(FRAMES, { recursive: true });
 let frame = 0;
 for (const name of TOUR) {
+  const landscapeStarted = Date.now();
   console.log(`Capturing ${FRAMES_PER_LANDSCAPE} real orbit frames: ${name}`);
   if (frame > 0) await loadLandscape(name);
   await page.getByRole('button', { name: 'Focus viewport' }).click();
@@ -205,6 +214,9 @@ for (const name of TOUR) {
     await page
       .locator('.nh-three-pane')
       .screenshot({ path: join(FRAMES, `f${String(frame++).padStart(4, '0')}.png`) });
+    if ((i + 1) % 6 === 0) {
+      console.log(`${name}: ${i + 1}/${FRAMES_PER_LANDSCAPE} frames in ${((Date.now() - landscapeStarted) / 1000).toFixed(1)} s`);
+    }
   }
   await page.getByRole('button', { name: 'Exit viewport focus mode' }).click();
   await page.waitForTimeout(500);
@@ -223,7 +235,9 @@ writeFileSync(
       application: 'Actual production build',
       landscapes: TOUR,
       landscapeViewport: { width: 960, height: 640 },
+      landscapeMeshFidelity: software ? 'balanced' : 'high',
       landscapeFrameCount: frame,
+      landscapeFramesPerSecond: GIF_FPS,
       worldFrameCount: worldFrame,
       staticLighting: 'Golden hour preset; wind speed set to zero through the display controls',
       world:
