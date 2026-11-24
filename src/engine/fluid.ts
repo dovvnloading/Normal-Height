@@ -1,6 +1,7 @@
 import type { ErosionResult, ErosionSettings } from './erosion';
 import { clamp, Noise } from './noise';
 import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
+import { reconstructionWeight } from './erosionMask';
 
 const DIAGONAL = 1 / Math.SQRT2;
 const DX = [1, 0, 1, -1] as const;
@@ -123,6 +124,7 @@ export function fluidGridErosion(
   let previous: {
     size: number; original: Float32Array; height: Float32Array;
     mobile: Float32Array; water: Float32Array; sediment: Float32Array;
+    mask: Float32Array | undefined;
   } | undefined;
   let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
   let physicalRain = 0, physicalWaterExport = 0, physicalEvaporation = 0;
@@ -134,16 +136,22 @@ export function fluidGridErosion(
     const cellMeters = worldMeters / Math.max(1, m - 1);
     const original = resize(input, n, m);
     const height = original.slice();
+    const materialMask = mask ? resize(mask, n, m) : undefined;
+    if (materialMask) for (let i = 0; i < length; i++) materialMask[i] = clamp(materialMask[i]);
     if (previous) {
       for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
         const sx = x * (previous.size - 1) / (m - 1);
         const sy = y * (previous.size - 1) / (m - 1);
-        height[y * m + x] +=
+        const i = y * m + x;
+        const weight = materialMask && previous.mask
+          ? reconstructionWeight(materialMask[i], bilinear(previous.mask, previous.size, sx, sy))
+          : 1;
+        height[i] += weight * (
           bilinear(previous.height, previous.size, sx, sy) -
-          bilinear(previous.original, previous.size, sx, sy);
+          bilinear(previous.original, previous.size, sx, sy)
+        );
       }
     }
-    const materialMask = mask ? resize(mask, n, m) : undefined;
     // Transported water and suspended sediment persist across coarse-to-fine
     // stages; deposits are tracked in a separate mobile layer.
     const mobile = previous
@@ -343,7 +351,7 @@ export function fluidGridErosion(
       completed++;
       progress?.(Math.min(0.999, completed / numberOfSteps));
     }
-    previous = { size: m, original, height, mobile, water, sediment };
+    previous = { size: m, original, height, mobile, water, sediment, mask: materialMask };
     finalFlow = cumulativeFlow;
   }
 
@@ -362,8 +370,10 @@ export function fluidGridErosion(
       const sy = y * (previous.size - 1) / Math.max(1, n - 1);
       const delta = bilinear(previous.height, previous.size, sx, sy) -
         bilinear(previous.original, previous.size, sx, sy);
-      const changed = delta * (mask ? clamp(mask[i]) : 1);
-      height[i] += changed;
+      const weight = mask && previous.mask
+        ? reconstructionWeight(mask[i], bilinear(previous.mask, previous.size, sx, sy))
+        : 1;
+      height[i] += delta * weight;
       flow[i] = bilinear(finalFlow, previous.size, sx, sy);
       const actual = height[i] - input[i];
       if (actual < 0) {

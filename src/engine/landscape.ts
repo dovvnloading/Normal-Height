@@ -3,6 +3,7 @@ import type { ErosionResult, ErosionSettings } from './erosion';
 import { createDrainageWorkspace, routeDrainage } from './hydrology';
 import { accumulateMultiFlow } from './landscapeFlow';
 import { createHillslopeWorkspace, relaxLayeredHillslope } from './hillslope';
+import { reconstructionWeight } from './erosionMask';
 
 // Matches the D8 ordering used in landscapeFlow's partition fractions.
 const FLOW_DX = [-1, 0, 1, -1, 1, -1, 0, 1] as const;
@@ -138,7 +139,10 @@ export function landscapeErosion(
   const stages = desired.filter((value, i) => desired.indexOf(value) === i);
   const weights = stages.map((_, i) => stages.length === 1
     ? 1 : stages.length === 2 ? [0.58, 0.42][i] : [0.43, 0.34, 0.23][i]);
-  let previous: { resolution: number; height: Float32Array; original: Float32Array; alluvium: Float32Array } | null = null;
+  let previous: {
+    resolution: number; height: Float32Array; original: Float32Array;
+    alluvium: Float32Array; mask: Float32Array | null;
+  } | null = null;
   let physicalEroded = 0, physicalDeposited = 0, physicalExported = 0;
   const initialSoil = Math.max(0, settings.soilDepthMeters ?? 1.5) / heightScale;
   const rockFactor = 1 - clamp(settings.bedrockResistance ?? 0.6);
@@ -149,6 +153,8 @@ export function landscapeErosion(
     const m = stages[stageIndex], cell = world / (m - 1), size = m * m;
     const original = resample(input, n, m);
     const height = original.slice();
+    const stageMask = mask ? resample(mask, n, m) : null;
+    if (stageMask) for (let i = 0; i < size; i++) stageMask[i] = clamp(stageMask[i]);
     if (previous) {
       // Transfer only physical height changes. Recover the fine structure of
       // the *source* DEM instead of interpolating coarse erosional pixels into
@@ -157,8 +163,12 @@ export function landscapeErosion(
       for (let y = 0; y < m; y++) for (let x = 0; x < m; x++) {
         const sx = x * (old.resolution - 1) / (m - 1);
         const sy = y * (old.resolution - 1) / (m - 1);
-        height[y * m + x] += sample(old.height, old.resolution, sx, sy) -
-          sample(old.original, old.resolution, sx, sy);
+        const i = y * m + x;
+        const weight = stageMask && old.mask
+          ? reconstructionWeight(stageMask[i], sample(old.mask, old.resolution, sx, sy))
+          : 1;
+        height[i] += weight * (sample(old.height, old.resolution, sx, sy) -
+          sample(old.original, old.resolution, sx, sy));
       }
     }
     // Height is split into immobile rock and mobile alluvium. The original
@@ -173,7 +183,6 @@ export function landscapeErosion(
         : initialSoil;
       bedrock[i] = height[i] - alluvium[i];
     }
-    const stageMask = mask ? resample(mask, n, m) : null;
     const rain = new Float32Array(size);
     const drainage = createDrainageWorkspace(m);
     const sediment = new Float32Array(size);
@@ -411,7 +420,7 @@ export function landscapeErosion(
     physicalEroded += stageEroded * volumePerSample;
     physicalDeposited += stageDeposited * volumePerSample;
     physicalExported += stageExported * volumePerSample;
-    previous = { resolution: m, height, original, alluvium };
+    previous = { resolution: m, height, original, alluvium, mask: stageMask };
   }
 
   // Recompose the original resolution from the last simulated river/valley
@@ -423,6 +432,7 @@ export function landscapeErosion(
   const flow = new Float32Array(count);
   if (previous) {
     let protectedChanges: Float32Array | null = null;
+    let reconstructedMask = previous.mask;
     if (settings.bedrockPreserve) {
       const resolution = previous.resolution;
       const changes = new Float32Array(resolution * resolution);
@@ -432,6 +442,7 @@ export function landscapeErosion(
       // the input's fine-scale pre-incised bedrock is retained bit-for-bit
       // in the final re-composition rather than being flattened by creep.
       protectedChanges = smoothDisplacement(changes, resolution);
+      if (reconstructedMask) reconstructedMask = smoothDisplacement(reconstructedMask, resolution);
     }
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
       const i = y * n + x;
@@ -441,8 +452,10 @@ export function landscapeErosion(
         ? sample(protectedChanges, previous.resolution, sx, sy)
         : sample(previous.height, previous.resolution, sx, sy) -
           sample(previous.original, previous.resolution, sx, sy);
-      const permission = mask ? clamp(mask[i]) : 1;
-      result[i] += net * permission;
+      const weight = mask && reconstructedMask
+        ? reconstructionWeight(mask[i], sample(reconstructedMask, previous.resolution, sx, sy))
+        : 1;
+      result[i] += net * weight;
       flow[i] = latestFlow
         ? sample(latestFlow, latestResolution,
             x * (latestResolution - 1) / (n - 1),
