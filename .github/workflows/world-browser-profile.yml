@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, labeled]
+    types: [labeled]
     paths:
       - 'src/engine/**'
       - 'src/export/world*'
@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   profile:
-    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'world-browser-profile') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.label.name == 'world-browser-profile' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
