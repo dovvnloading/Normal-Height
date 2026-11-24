@@ -81,6 +81,16 @@ Projects saved without a noise algorithm are loaded in **Original sampling
 explicitly to adopt the new appearance; its seed and other authored parameters
 are retained. The selection is serialized with the project.
 
+Corrected sampling also fades fractal octaves as their lattice spacing
+approaches the output grid's Nyquist limit. The footprint uses the authored
+frequency, rotation and stretch; warped fractal detail also estimates local
+coordinate expansion. Low-frequency amplitude is retained rather than
+renormalized when fine detail becomes unresolved. Folded fractals approximate
+unresolved octaves by their ensemble means. This is a conservative octave
+filter, not exact analytic integration of the entire noise spectrum (especially
+for highly anisotropic stretch, nonlinear warps, and single-layer cellular
+or wave patterns). Fine detail can resolve as export resolution increases.
+
 ### River and ridge designer (Normal Height 1.1)
 
 - Add **River / ridge spline** from **Shape & transform**. The app inserts it before the first hydraulic-erosion stage (or terrain output) when a height connection is available, then opens the 2D editor.
