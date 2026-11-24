@@ -2,6 +2,7 @@ import { parseMaterialPaint } from '../materials/materialPaint';
 import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
 import { resolveSurface, SPLAT_LAYERS, SURFACE_LIMITS } from '../materials/pbr';
 import { NODE_DEFINITIONS, createNode } from './registry';
+import { resolveStudioSettings, STUDIO_PARAMS, validateStudioParams } from './noiseStudio';
 import type { NodeKind, TerrainProject, TerrainNode, TerrainEdge, ParamValue } from './types';
 
 export const STORAGE_KEY = 'normal-height.project.v1';
@@ -43,7 +44,12 @@ export function parseProject(raw: unknown): TerrainProject {
     clean.label = typeof n.label === 'string' ? n.label.slice(0, 100) : clean.label;
     const params =
       n.params && typeof n.params === 'object' ? (n.params as Record<string, unknown>) : {};
-    for (const def of NODE_DEFINITIONS[kind].params) {
+    const studio = kind === 'noise' && params.noiseModel === 'v3';
+    const definitions = studio
+      ? [...new Map([...NODE_DEFINITIONS[kind].params, ...STUDIO_PARAMS].map(d => [d.key, d])).values()]
+      : NODE_DEFINITIONS[kind].params;
+    if (studio) validateStudioParams(params);
+    for (const def of definitions) {
       const value = params[def.key];
       if (value === undefined) continue;
       if (def.type === 'range' || def.type === 'number') {
@@ -61,6 +67,7 @@ export function parseProject(raw: unknown): TerrainProject {
     // Missing version means an older procedural noise node. Preserve its
     // exact seeded appearance instead of silently opting it into new math.
     if (kind === 'noise' && params.noiseModel === undefined) clean.params.noiseModel = 'legacy';
+    if (studio) Object.assign(clean.params, resolveStudioSettings(clean.params));
     if (kind === 'spline') {
       if (
         !Array.isArray(n.path) ||

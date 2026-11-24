@@ -1,4 +1,5 @@
 import { DEFAULT_SPLINE_PATH } from './splines';
+import { STUDIO_DEFAULTS, STUDIO_PARAMS, studioParamVisible } from './noiseStudio';
 import type { NodeDefinition, NodeKind, ParamDefinition, TerrainNode } from './types';
 
 const range = (
@@ -255,7 +256,7 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     category: 'Source',
     color: '#617b63',
     description:
-      'A seeded scalar field. Choose a noise family, then shape its frequency, fractal structure, and coordinate transform.',
+      'Noise Studio: independent generators, fractal structure, seeded distortion, seamless blending, and reproducible recipes.',
     inputs: [],
     outputs: output,
     params: [
@@ -271,12 +272,13 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
         key: 'noiseModel',
         label: 'Noise algorithm',
         type: 'select',
-        default: 'v2',
+        default: 'v3',
         options: [
+          { value: 'v3', label: 'Noise Studio (v3)' },
           { value: 'v2', label: 'Corrected sampling (v2)' },
           { value: 'legacy', label: 'Original sampling (legacy)' },
         ],
-        description: 'New nodes use bounded noise and corrected controls. Legacy preserves older node appearance.',
+        description: 'New nodes use Noise Studio. Saved v2 and legacy nodes keep their original appearance until explicitly upgraded.',
         section: 'Noise',
       },
       range(
@@ -905,9 +907,20 @@ export const NODE_DEFINITIONS: Record<NodeKind, NodeDefinition> = {
     params: [],
   },
 };
+// Keep the old ranges for older saved projects. Studio uses its own shared
+// schema for both UI controls and validation, including wider fractal ranges.
+export const LEGACY_NOISE_PARAMS = NODE_DEFINITIONS.noise.params;
+const legacyNoiseKeys = new Set(LEGACY_NOISE_PARAMS.map(p => p.key));
+NODE_DEFINITIONS.noise.params = [
+  ...LEGACY_NOISE_PARAMS,
+  ...STUDIO_PARAMS.filter(p => !legacyNoiseKeys.has(p.key)),
+];
 /** Hide settings the selected procedural noise algorithm cannot use. */
 export function noiseParamVisible(node: TerrainNode, key: string): boolean {
   if (node.kind !== 'noise') return true;
+  if (node.params.noiseModel === 'v3')
+    return !['mode', 'stretch', 'warp'].includes(key) && studioParamVisible(node.params, key);
+  if (!legacyNoiseKeys.has(key)) return false;
   const mode = node.params.mode ?? 'ridged';
   if (key === 'octaves' || key === 'persistence' || key === 'lacunarity') {
     if (mode === 'wave') return node.params.noiseModel === 'v2';
@@ -927,7 +940,10 @@ export function createNode(
     kind,
     label: d.label,
     position,
-    params: Object.fromEntries(d.params.map((p) => [p.key, p.default])),
+    params: {
+      ...Object.fromEntries(d.params.map((p) => [p.key, p.default])),
+      ...(kind === 'noise' ? STUDIO_DEFAULTS : {}),
+    },
     ...(kind === 'spline' ? { path: DEFAULT_SPLINE_PATH.map((p) => ({ ...p })) } : {}),
     ...(kind === 'note' ? { width: 240, height: 150 } : {}),
     ...(kind === 'group' ? { width: 600, height: 280 } : {}),

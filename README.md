@@ -61,16 +61,53 @@ relief against the reference, not its Flow mask or material textures.
 
 
 - **Mountain range generator:** direction, width, relief, sharpness, fractal detail, and distortion. Profiles include connected alpine ranges, broad massifs, volcanic calderas, and badlands.
-- **Twelve procedural noise families:** Perlin, simplex, fractal Brownian motion, ridged multifractal, billow, turbulence, Voronoi F1, Voronoi ridges, cellular, wave, warped turbulence, and an independently designed Naki-inspired pattern.
+- **Noise Studio v3:** 14 base generators, 10 fractal modes, independently seeded domain distortion, physical feature sizes, editable remap curves, and 18 artist presets. The original 12 noise families remain available as versioned compatibility choices.
 - **Shaping nodes:** domain warp, terrace, and height remap.
 - **Combination nodes:** blend fields with mix/add/multiply/min/max operations and optional masks; height and slope masks can also limit hydraulic erosion.
-- **Reproducible seeds:** a project seed plus per-node offsets. Changing node positions or selection does not change the generated terrain.
-- **Six editable landscape graphs:** Alpine watershed, Granite massif, Desert badlands, Volcanic caldera, Folded highlands, and the spline-enabled River-cut highlands.
+- **Reproducible seeds:** project-linked or independent Studio seeds, optional seed names, resolved stream locks, and separate warp seeds. Explore nine variations, bookmark looks, and restore recent choices. Moving or reordering nodes does not change the random streams.
+- **Editable landscape graphs:** regional uplands, mountains, badlands, calderas, spline-enabled highlands, and three Studio examples for ridges, dunes, and crater fields.
+
+### Noise Studio
+
+![Noise Studio artist presets rendered from the real sampler with a shared seed and fixed grayscale range](docs/images/noise-studio-presets.png)
+
+Open **Nodes → Browse Noise Studio** to explore generated previews, or add a
+**Procedural noise** node. The inspector separates the base generator from its
+fractal structure, distortion, coordinates, shaping, and sampling quality.
+
+| Stage | Choices |
+| --- | --- |
+| Base field | OpenSimplex2S, OpenSimplex2, Perlin, Value, Cubic Value, Worley/cellular, sparse Gabor, sparse spots, craters, wave, dunes, folded strata, white, Gaussian |
+| Fractal | Single layer, fBm, ridged, billow, absolute turbulence, ping-pong, hybrid, heterogeneous, Swiss, Jordan |
+| Cellular | F1, F2, F2−F1, F1/F2, cell value, smooth F1, true Euclidean edge distance; three distance metrics where applicable |
+| Distortion | Independent, progressive, or curl displacement with separate frequency, layer controls and seed |
+| Coordinates | Tile frequency or feature size in meters, separate X/Y scaling, rotation, translation, octave rotation |
+| Output | Black/white levels, gamma, contrast, bias, invert, editable curve, amplitude, elevation offset |
+| Sampling | Footprint filtering, optional 4/16 samples, unfiltered reference, seamless four-way blending |
+
+**Capture A** retains an independent reference while you edit B. The library and
+seed explorer generate actual heightfields in cancellable workers. Applying a
+preset, seed variation, imported recipe, or seed lock is one undo step.
+
+**Export source** writes the selected noise directly at up to **8192 × 8192**,
+with 16-bit PNG or Float32 RAW, a versioned recipe and reproduction metadata.
+Generation and encoding use strips; the final archive still occupies browser
+memory. This export contains the procedural source before downstream graph
+operations. Full terrain simulation exports retain their existing 2048² limit.
+
+See the [Noise Studio guide](docs/NOISE_STUDIO.md) for controls, seed semantics,
+reproducibility, measured performance and quality limits, and the
+[research and numerical contracts](docs/NOISE_RESEARCH.md) for algorithm sources.
 
 ### Procedural noise compatibility
 
-New Procedural noise nodes use **Noise algorithm → Corrected sampling (v2)**.
-This bounds Perlin without hard-clipping its extrema, smoothly compresses strong
+New Procedural noise nodes use **Noise Studio (v3)**. Existing v2 and legacy
+nodes keep their previous sampling until you choose **Upgrade to Studio**.
+Upgrading changes the pattern and is undoable. The algorithm version is saved
+with each node. Existing authored landscape presets keep their original version;
+the new Studio landscapes opt in explicitly.
+
+**Corrected sampling (v2)** bounds Perlin without hard-clipping its extrema, smoothly compresses strong
 turbulence and Voronoi ridge values, makes Wave's fractal controls effective,
 and makes Naki's zero Warp amount a true unwarped lobe field. Single-layer
 families hide the unused fractal controls. The engine's calibrated mountain,
@@ -197,6 +234,7 @@ the actual Height and shaded-relief maps, not the Flow channel alone. See
 | Normal PNG                   | 8-bit RGB OpenGL tangent-space +Y normals, based on physical dimensions                   |
 | Full PBR ZIP                 | Coordinated base color, normals (GL/DX/detail), roughness, AO, metallic, ORM, Unity HDRP mask, splat weights, curvature, 16-bit terrain height, 16-bit signed relief, metadata and project |
 | Flow / wear / deposition PNG | 8-bit display visualizations; not physical flow-rate measurements                         |
+| Noise source ZIP             | Up to 8K PNG16 or Float32 scalar RAW, `.nhnoise.json` recipe, resolved seed and decoding metadata |
 | Project                      | Versioned `.nhterrain.json`, containing graph, parameters, seeds, and physical dimensions |
 | ZIP bundle                   | Map, metadata, and reproducible project file                                              |
 
