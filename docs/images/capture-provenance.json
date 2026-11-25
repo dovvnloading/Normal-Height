@@ -1,0 +1,30 @@
+{
+  "capturedAt": "2026-11-25T00:29:49.003Z",
+  "revision": "69a58c9e9d057867622c3cf2a891b1b6936b8c78",
+  "browser": "158.0.8127.18",
+  "rendering": "Chromium / ANGLE SwiftShader software rendering; not hardware performance evidence",
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "application": "Actual production build",
+  "landscapes": [
+    "Alpine watershed",
+    "Studio ridgelands",
+    "Studio wind dunes",
+    "Studio impact field"
+  ],
+  "landscapeViewport": {
+    "width": 960,
+    "height": 640
+  },
+  "landscapeMeshFidelity": "balanced",
+  "landscapeCameraMode": "Four cardinal views through the camera bookmarks",
+  "landscapeFrameCount": 16,
+  "landscapeFramesPerSecond": 1,
+  "worldFrameCount": 8,
+  "staticLighting": "Screenshots and World walkthrough: golden hour preset; wind speed set to zero through the display controls",
+  "landscapeLighting": "Neutral studio lighting; sky dome disabled through the display controls",
+  "world": "Alpine graph, 2048 interval domain, 256 sample global reference; reconstructed global stages disclosed in UI",
+  "script": "scripts/readme-media.mjs"
+}
