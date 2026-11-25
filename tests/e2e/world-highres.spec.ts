@@ -237,21 +237,22 @@ test('actual CPU World UI downloads and independently verifies 4096 and 8192 PNG
       visibilityState: document.visibilityState,
     }));
     await page.getByRole('button', { name: 'World Studio', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: 'World Studio', exact: true });
+    const dialog = page.getByRole('region', { name: 'World Studio', exact: true });
     await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible({
       timeout: 90_000,
     });
-    await dialog.getByRole('tab', { name: 'Compute', exact: true }).click();
+    await dialog.getByRole('tab', { name: 'Simulate', exact: true }).click();
+    await dialog.getByText('Compute & local cache', { exact: true }).click();
     await expect(dialog.getByLabel('World compute backend')).toHaveValue('cpu-reference');
     await expect(dialog.getByLabel('Remember completed CPU regions')).not.toBeChecked();
-    await expect(dialog.getByLabel('Enable conservative transport')).not.toBeChecked();
-    await dialog.getByRole('tab', { name: 'Export', exact: true }).click();
+    await expect(dialog.getByLabel('Enable world transport')).not.toBeChecked();
+    await dialog.getByRole('tab', { name: 'Deliver', exact: true }).click();
     await dialog.getByLabel('World export profile').selectOption('generic');
     await dialog.getByLabel('World height format').selectOption('png16');
     await dialog.getByLabel('Flow, wear & deposition', { exact: true }).uncheck();
     await dialog.getByLabel('Terrain normal map', { exact: true }).uncheck();
     const button = dialog.getByRole('button', { name: 'Download world package', exact: true });
-    const map = dialog.locator('canvas[aria-label="Actual generated world heightfield"]');
+    const map = dialog.locator('.wv-plane > .wv-field > canvas.wv-raster').last();
     const previewHash = async () =>
       createHash('sha256')
         .update(await map.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()))
@@ -265,13 +266,18 @@ test('actual CPU World UI downloads and independently verifies 4096 and 8192 PNG
     await expect(button).toBeEnabled();
     const cancelStart = performance.now();
     await button.click();
-    await expect(dialog.getByRole('status')).toContainText('Measuring common elevation range', {
-      timeout: 90_000,
-    });
-    const cancelledPhase = await dialog.getByRole('status').innerText();
+    await expect(dialog.locator('.we-export-job-stage')).toContainText(
+      'Measuring common elevation range',
+      {
+        timeout: 90_000,
+      },
+    );
+    const cancelledPhase = await dialog.locator('.we-export-job-stage').innerText();
     const cancelActionStart = performance.now();
     await dialog.getByRole('button', { name: 'Cancel export', exact: true }).click();
-    await expect(dialog.getByRole('status')).toHaveText('Export cancelled');
+    await expect(
+      dialog.getByText('Export cancelled. Your world is unchanged.', { exact: true }),
+    ).toBeVisible();
     const cancelActionThroughVisibleStatusMs = performance.now() - cancelActionStart;
     await expect(button).toBeEnabled();
     const afterCancel = await previewHash();
@@ -316,7 +322,9 @@ test('actual CPU World UI downloads and independently verifies 4096 and 8192 PNG
         0,
       );
       await expect(button).toBeEnabled();
-      await expect(dialog.getByRole('status')).toContainText(result.filename as string);
+      await expect(
+        dialog.getByRole('region', { name: 'Last completed world export' }),
+      ).toContainText(result.filename as string);
       const verificationStart = performance.now();
       result.archive = verifyWorldProfileArchive(await readFile(downloadedPath!), {
         samples,

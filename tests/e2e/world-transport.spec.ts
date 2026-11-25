@@ -63,38 +63,36 @@ test('World transport is opt-in and reports a finite conservative 64² reference
   await page.getByRole('button', { name: 'Build terrain', exact: true }).click();
   await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible({ timeout: 90_000 });
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'World Studio', exact: true });
+  const dialog = page.getByRole('region', { name: 'World Studio', exact: true });
   await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible({
     timeout: 90_000,
   });
 
-  await dialog.getByRole('tab', { name: 'Compute', exact: true }).click();
-  const enabled = dialog.getByLabel('Enable conservative transport', { exact: true });
+  await dialog.getByLabel('Automatic world previews').uncheck();
+  await dialog.getByRole('tab', { name: 'Simulate', exact: true }).click();
+  const enabled = dialog.getByLabel('Enable world transport', { exact: true });
   await expect(enabled).not.toBeChecked();
   await expect(dialog.getByText('Water balance residual', { exact: true })).toHaveCount(0);
+  await dialog.getByText('Compute & local cache', { exact: true }).click();
   await dialog.getByLabel('World compute backend').selectOption('cpu-reference');
-  await dialog.getByLabel('Global reference resolution').selectOption('64');
+  await dialog.getByLabel('Global reference').selectOption('64');
   await enabled.check();
   await dialog.getByLabel('Transport iterations', { exact: true }).fill('8');
-  await expect(
-    dialog.getByText(
-      /Experimental water, sediment and thermal transport over the complete reference grid/,
-    ),
-  ).toBeVisible();
+  await dialog.getByLabel('Transport iterations', { exact: true }).press('Enter');
+  await expect(dialog.getByText(/Experimental artistic transport/)).toBeVisible();
   await dialog.getByRole('button', { name: 'Build world', exact: true }).click();
   await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible({
     timeout: 90_000,
   });
   await expect(dialog.getByText('Water balance residual', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Solid balance residual', { exact: true })).toBeVisible();
-  await expect(
-    dialog.getByText(/Budgets measure the reference simulation before fine-grid reconstruction/),
-  ).toBeVisible();
+  await expect(dialog.getByText(/Budgets describe the coarse simulation/)).toBeVisible();
 
+  await dialog.getByRole('tab', { name: 'Analyze', exact: true }).click();
   const pending = page.waitForEvent('download');
-  await dialog.getByRole('button', { name: 'Download build report', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Download stage report', exact: true }).click();
   const download = await pending;
-  expect(download.suggestedFilename()).toBe('world-build-report.json');
+  expect(download.suggestedFilename()).toBe('world-transport-acceptance-world-report.json');
   const path = await download.path();
   expect(path).toBeTruthy();
   const raw = await readFile(path!, 'utf8');
@@ -148,7 +146,8 @@ test('World transport is opt-in and reports a finite conservative 64² reference
   expect(transport!.spacingZ).toBeCloseTo(4000 / 63, 10);
   expect(transport!.reason).toMatch(/Experimental whole-domain finite-volume/);
   expect(report.warnings.join('\n')).toMatch(/not a calibrated geophysical simulation/);
-  await dialog.getByLabel('World map channel').selectOption('flow');
+  await dialog.getByRole('tab', { name: 'Explore', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Flow', exact: true }).click();
   await page.screenshot({ path: info.outputPath('world-transport-64.png') });
   expect(errors).toEqual([]);
 });

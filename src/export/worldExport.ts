@@ -92,8 +92,21 @@ export interface WorldExportManifest {
 export type WorldExportRequest =
   | { type: 'export'; id: number; options: WorldExportOptions }
   | { type: 'ack'; id: number; sequence: number };
+/** Counted work within the current phase, rather than an estimated time remaining. */
+export interface WorldExportProgress {
+  phase: 'prepare' | 'range' | 'encode' | 'masks' | 'archive';
+  completed?: number;
+  total?: number;
+  unit?: 'tiles';
+}
 export type WorldExportResponse =
-  | { type: 'progress'; id: number; progress: number; stage: string }
+  | {
+      type: 'progress';
+      id: number;
+      progress: number;
+      stage: string;
+      detail?: WorldExportProgress;
+    }
   | { type: 'chunk'; id: number; sequence: number; bytes: ArrayBuffer }
   | { type: 'complete'; id: number; filename: string; manifest: WorldExportManifest }
   | { type: 'error'; id: number; message: string };
@@ -391,13 +404,13 @@ function assertNotAborted(signal?: AbortSignal) {
 export async function streamWorldExport(
   options: WorldExportOptions,
   onChunk: (bytes: Uint8Array, final: boolean) => void | Promise<void>,
-  onProgress: (progress: number, stage: string) => void = () => {},
+  onProgress: (progress: number, stage: string, detail?: WorldExportProgress) => void = () => {},
   signal?: AbortSignal,
 ): Promise<WorldExportManifest> {
   let reportedProgress = 0;
-  const report = (fraction: number, stage: string) => {
+  const report = (fraction: number, stage: string, detail?: WorldExportProgress) => {
     reportedProgress = Math.max(reportedProgress, Math.min(1, Math.max(0, fraction)));
-    onProgress(reportedProgress, stage);
+    onProgress(reportedProgress, stage, detail);
   };
   const memory = checkWorldExportBudget(options),
     tiles = tileList(options, memory.tileIntervals),
@@ -409,10 +422,10 @@ export async function streamWorldExport(
         : { ...stage },
     );
   assertNotAborted(signal);
-  report(0, 'Compiling world graph');
+  report(0, 'Compiling world graph', { phase: 'prepare' });
   const prepared = await prepareWorldEvaluation(options.project, options.world, {
     signal,
-    onProgress: (p, stage) => report(p * 0.08, stage),
+    onProgress: (p, stage) => report(p * 0.08, stage, { phase: 'prepare' }),
   });
   const ranges: Record<string, [number, number]> = {
     height: [Infinity, -Infinity],
@@ -548,6 +561,12 @@ export async function streamWorldExport(
   try {
     // Each tile includes shared samples. Repeated observations cannot change
     // min/max, and encoding never selects a separate range for a tile.
+    report(0.08, 'Measuring common elevation range', {
+      phase: 'range',
+      completed: 0,
+      total: tiles.length,
+      unit: 'tiles',
+    });
     for (let index = 0; index < tiles.length; index++) {
       assertNotAborted(signal);
       const tile = tiles[index],
@@ -569,6 +588,7 @@ export async function streamWorldExport(
       report(
         0.08 + (0.35 * (index + 1)) / tiles.length,
         `Measuring common elevation range · tile ${index + 1}/${tiles.length}`,
+        { phase: 'range', completed: index + 1, total: tiles.length, unit: 'tiles' },
       );
     }
     const d = options.world.domain,
@@ -651,6 +671,12 @@ export async function streamWorldExport(
     for (const map of maps)
       if (map !== 'height' && map !== 'normalGL')
         manifest.encoding.diagnosticRanges[map] = ranges[map];
+    report(0.43, 'Encoding world maps', {
+      phase: 'encode',
+      completed: 0,
+      total: tiles.length,
+      unit: 'tiles',
+    });
     for (let index = 0; index < tiles.length; index++) {
       assertNotAborted(signal);
       const tile = tiles[index],
@@ -773,14 +799,23 @@ export async function streamWorldExport(
       report(
         0.43 + (0.48 * (index + 1)) / tiles.length,
         `Encoding world maps · tile ${index + 1}/${tiles.length}`,
+        { phase: 'encode', completed: index + 1, total: tiles.length, unit: 'tiles' },
       );
     }
     prepared.dispose();
     // Masks use the same spatial/export contracts and fixed weight encoding.
     // Separate prepared evaluations keep each mask's global dependencies honest.
+    const maskTileCount = (options.masks?.length || 0) * tiles.length;
+    let maskTilesComplete = 0;
     for (let maskIndex = 0; maskIndex < (options.masks?.length || 0); maskIndex++) {
       const mask = options.masks![maskIndex],
         name = slug(mask.name);
+      report(0.91 + (0.06 * maskTilesComplete) / maskTileCount, `Preparing mask ${mask.name}`, {
+        phase: 'masks',
+        completed: maskTilesComplete,
+        total: maskTileCount,
+        unit: 'tiles',
+      });
       const maskWorld = options.world.transport?.enabled
         ? { ...options.world, transport: { ...options.world.transport, enabled: false } }
         : options.world;
@@ -806,17 +841,23 @@ export async function streamWorldExport(
           );
           tile.files.push(file.record(`mask:${name}`, 'png16'));
           manifest.maskStages[name] = exportStages(result.stages);
+          maskTilesComplete++;
+          report(
+            0.91 + (0.06 * maskTilesComplete) / maskTileCount,
+            `Encoding mask ${mask.name} · tile ${maskTilesComplete}/${maskTileCount}`,
+            { phase: 'masks', completed: maskTilesComplete, total: maskTileCount, unit: 'tiles' },
+          );
         }
       } finally {
         maskEngine.dispose();
       }
-      report(0.91 + (0.06 * (maskIndex + 1)) / options.masks!.length, `Encoding mask ${mask.name}`);
     }
     if (options.world.transport?.enabled && options.masks?.length)
       manifest.warnings.push(
         'Authored mask branches are evaluated before optional post-graph World transport. Scalar weights are not treated as elevations or eroded.',
       );
     prepared.dispose();
+    report(0.97, 'Packing manifest, import notes and project', { phase: 'archive' });
     const notes = `NORMAL HEIGHT WORLD EXPORT\n\n${manifest.approximation}\n\n${manifest.borders}\n\n${manifest.importQualification}\n\nRead manifest.json for common height encoding, physical origin, stage spacing, byte order and per-file checksums.\n\nThe project file retains the authored graph and world. Neither a high output size nor a GPU pointwise pass means every simulation ran at that resolution or on the GPU.\n\n${JSON.stringify(manifest.profileSettings, null, 2)}\n`;
     add('README.txt').push(strToU8(notes), true);
     add('project.nhterrain.json').push(
@@ -826,7 +867,7 @@ export async function streamWorldExport(
     add('manifest.json').push(strToU8(JSON.stringify(manifest, null, 2)), true);
     zip.end();
     await flush();
-    report(1, 'World export ready');
+    report(1, 'World export ready', { phase: 'archive', completed: 1, total: 1 });
     return manifest;
   } finally {
     prepared.dispose();

@@ -24,6 +24,7 @@ interface FileSinkProbe {
   acknowledgmentsWhileWriting: number;
   holdOpen: boolean;
   holdFirstWrite: boolean;
+  failNextWrite: boolean;
   choose(): void;
   open(): void;
   releaseWrite(): void;
@@ -51,6 +52,7 @@ test.beforeEach(async ({ page }) => {
       acknowledgmentsWhileWriting: 0,
       holdOpen: false,
       holdFirstWrite: false,
+      failNextWrite: false,
       choose: () => choose?.(),
       open: () => open?.(),
       releaseWrite: () => releaseWrite?.(),
@@ -67,6 +69,10 @@ test.beforeEach(async ({ page }) => {
     const writer = {
       async write(bytes: ArrayBuffer) {
         probe.writeCalls++;
+        if (probe.failNextWrite) {
+          probe.failNextWrite = false;
+          throw new Error('Injected file write failure');
+        }
         probe.activeWrites++;
         probe.maxActiveWrites = Math.max(probe.maxActiveWrites, probe.activeWrites);
         parts.push(bytes.slice(0));
@@ -182,9 +188,9 @@ async function openExport(page: Page, duplicateMasks = false) {
   await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '2D map', exact: true }).click();
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'World Studio', exact: true });
+  const dialog = page.getByRole('region', { name: 'World Studio', exact: true });
   await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible();
-  await dialog.getByRole('tab', { name: 'Export', exact: true }).click();
+  await dialog.getByRole('tab', { name: 'Deliver', exact: true }).click();
   await dialog.getByLabel('World export samples').selectOption('512');
   await dialog.getByLabel('World height format').selectOption('raw32');
   await dialog.getByLabel('Flow, wear & deposition', { exact: true }).uncheck();
@@ -200,8 +206,10 @@ test('invalid file exports are rejected before the picker and a corrected reques
   await masks.nth(0).check();
   await masks.nth(1).check();
   const save = dialog.getByRole('button', { name: 'Save directly to file', exact: true });
-  await save.click();
-  await expect(dialog.getByRole('status')).toContainText('Mask filenames must have unique');
+  await expect(save).toBeDisabled();
+  await expect(
+    dialog.getByText('Mask filenames must have unique nonempty names.', { exact: true }).first(),
+  ).toBeVisible();
   expect(
     await page.evaluate(() => {
       const p = (window as ProbeWindow).__worldFileSink;
@@ -213,7 +221,9 @@ test('invalid file exports are rejected before the picker and a corrected reques
   await expect(dialog.getByRole('button', { name: 'Cancel export', exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as ProbeWindow).__worldFileSink.pickerCalls)).toBe(1);
   await page.evaluate(() => (window as ProbeWindow).__worldFileSink.rejectPicker());
-  await expect(dialog.getByRole('status')).toHaveText('Export cancelled');
+  await expect(
+    dialog.getByText('Export cancelled. Your world is unchanged.', { exact: true }),
+  ).toBeVisible();
   await expect(save).toBeEnabled();
 });
 
@@ -249,13 +259,13 @@ test('file preparation is reserved once and cancellation aborts a late writable 
       return [p.pickerCalls, p.openCalls, p.writeCalls, p.closeCalls];
     }),
   ).toEqual([1, 1, 0, 0]);
-  await expect(dialog.getByRole('status')).toHaveText('Export cancelled');
+  await expect(
+    dialog.getByText('Export cancelled. Your world is unchanged.', { exact: true }),
+  ).toBeVisible();
   await expect(save).toBeEnabled();
 });
 
-test('cancelling or closing before the picker resolves never opens a writable stream', async ({
-  page,
-}) => {
+test('cancelling before the picker resolves never opens a writable stream', async ({ page }) => {
   const dialog = await openExport(page);
   const save = dialog.getByRole('button', { name: 'Save directly to file', exact: true });
   await save.click();
@@ -266,6 +276,13 @@ test('cancelling or closing before the picker resolves never opens a writable st
   });
   expect(await page.evaluate(() => (window as ProbeWindow).__worldFileSink.openCalls)).toBe(0);
   await expect(save).toBeEnabled();
+});
+
+test('an export keeps its captured settings and completes while the World workspace is hidden', async ({
+  page,
+}) => {
+  const dialog = await openExport(page);
+  const save = dialog.getByRole('button', { name: 'Save directly to file', exact: true });
   await save.click();
   await dialog.getByRole('button', { name: 'Close World Studio', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -273,12 +290,18 @@ test('cancelling or closing before the picker resolves never opens a writable st
     (window as ProbeWindow).__worldFileSink.choose();
     await Promise.resolve();
   });
-  expect(
-    await page.evaluate(() => {
-      const p = (window as ProbeWindow).__worldFileSink;
-      return [p.pickerCalls, p.openCalls, p.writeCalls, p.closeCalls];
-    }),
-  ).toEqual([2, 0, 0, 0]);
+  await expect
+    .poll(() => page.evaluate(() => (window as ProbeWindow).__worldFileSink.closeCalls))
+    .toBe(1);
+  expect(await page.evaluate(() => (window as ProbeWindow).__worldFileSink.abortCalls)).toBe(0);
+  await page.getByRole('button', { name: 'World Studio', exact: true }).click();
+  await expect(dialog.getByRole('tab', { name: 'Deliver', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await expect(dialog.getByRole('region', { name: 'Last completed world export' })).toContainText(
+    'world-file-lifecycle-world-512x512-generic.zip',
+  );
 });
 
 test('the production export worker waits for file writes and closes a valid RAW archive', async ({
@@ -302,7 +325,7 @@ test('the production export worker waits for file writes and closes a valid RAW 
     }),
   ).toEqual([1, 0, 0]);
   await page.evaluate(() => (window as ProbeWindow).__worldFileSink.releaseWrite());
-  await expect(dialog.getByRole('status')).toContainText(
+  await expect(dialog.getByRole('region', { name: 'Last completed world export' })).toContainText(
     'world-file-lifecycle-world-512x512-generic.zip',
   );
   const observed = await page.evaluate(async () => {
@@ -350,4 +373,71 @@ test('the production export worker waits for file writes and closes a valid RAW 
     dialog.getByRole('button', { name: 'Save directly to file', exact: true }),
   ).toBeEnabled();
   expect(errors).toEqual([]);
+});
+
+test('a failed writable is aborted and the captured package can be retried', async ({ page }) => {
+  const workspace = await openExport(page);
+  await page.evaluate(() => {
+    (window as ProbeWindow).__worldFileSink.failNextWrite = true;
+  });
+  await workspace.getByRole('button', { name: 'Save directly to file', exact: true }).click();
+  await page.evaluate(() => (window as ProbeWindow).__worldFileSink.choose());
+  await expect(
+    workspace.getByRole('alert').filter({ hasText: 'Injected file write failure' }),
+  ).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as ProbeWindow).__worldFileSink.abortCalls))
+    .toBe(1);
+  await expect(workspace.getByRole('button', { name: 'Cancel export', exact: true })).toHaveCount(
+    0,
+  );
+  await workspace.getByLabel('World export profile').selectOption('unity');
+  await workspace.getByRole('button', { name: 'Retry export', exact: true }).click();
+  await expect(workspace.getByLabel('World export profile')).toHaveValue('generic');
+  await expect(workspace.getByLabel('World height format')).toHaveValue('raw32');
+  await page.evaluate(() => (window as ProbeWindow).__worldFileSink.choose());
+  await expect(
+    workspace.getByRole('region', { name: 'Last completed world export' }),
+  ).toContainText('World package saved');
+  expect(await page.evaluate(() => (window as ProbeWindow).__worldFileSink.closeCalls)).toBe(1);
+  const archive = await page.evaluate(() => (window as ProbeWindow).__worldFileSink.archive());
+  const files = unzipSync(Buffer.from(archive, 'base64'));
+  const manifest = JSON.parse(strFromU8(files['manifest.json'])) as WorldExportManifest;
+  expect(manifest.dimensions.samples).toEqual([512, 512]);
+  expect(manifest.encoding.heightFormat).toBe('raw32');
+  await expect(workspace.getByLabel('World export profile')).toHaveValue('unity');
+});
+
+test('worker startup failure leaves the controls usable and retry initiates a real download', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const NativeWorker = window.Worker;
+    let fail = true;
+    const WrappedWorker = function (url: string | URL, options?: WorkerOptions) {
+      if (fail && String(url).includes('worldExport')) {
+        fail = false;
+        throw new Error('Injected world export startup failure');
+      }
+      return new NativeWorker(url, options);
+    } as unknown as typeof Worker;
+    WrappedWorker.prototype = NativeWorker.prototype;
+    window.Worker = WrappedWorker;
+  });
+  const workspace = await openExport(page);
+  await workspace.getByRole('button', { name: 'Download world package', exact: true }).click();
+  await expect(
+    workspace.getByRole('alert').filter({ hasText: 'Injected world export startup failure' }),
+  ).toBeVisible();
+  await expect(
+    workspace.getByRole('button', { name: 'Download world package', exact: true }),
+  ).toBeEnabled();
+  const download = page.waitForEvent('download');
+  await workspace.getByRole('button', { name: 'Retry export', exact: true }).click();
+  expect((await download).suggestedFilename()).toBe(
+    'world-file-lifecycle-world-512x512-generic.zip',
+  );
+  await expect(
+    workspace.getByRole('region', { name: 'Last completed world export' }),
+  ).toContainText('Download initiated');
 });
