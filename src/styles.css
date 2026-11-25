@@ -1596,6 +1596,24 @@ kbd {
   overflow: hidden;
   appearance: none;
 }
+.export-progress progress:indeterminate {
+  appearance: auto;
+  accent-color: #718a69;
+  height: 6px;
+}
+.export-modal .error-notice {
+  flex-wrap: wrap;
+}
+.export-modal .error-notice > button {
+  margin-left: auto;
+}
+.export-modal .export-spec > div {
+  gap: 12px;
+}
+.export-modal .export-spec dd {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
 .export-progress progress::-webkit-progress-bar {
   background: #e4e7e2;
 }

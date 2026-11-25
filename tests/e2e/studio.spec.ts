@@ -746,7 +746,7 @@ test('protects the graph inside a modal and exports a real 512-square 16-bit PNG
   expect(metadata.elevationMaxMeters).toBeGreaterThan(metadata.elevationMinMeters);
   expect(files['alpine-watershed.nhterrain.json']).toBeDefined();
   await expect(dialog.getByRole('status')).toContainText(
-    'Downloaded alpine-watershed-512-png16.zip',
+    'Download started: alpine-watershed-512-png16.zip',
   );
 });
 
