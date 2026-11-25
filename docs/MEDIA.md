@@ -22,11 +22,13 @@ WebGPU or performance evidence. Camera/material/light controls remain actual
 app state. The landscape-tour caption identifies the current preset.
 
 The software profile keeps the six full-quality screenshots, then uses the
-app's **Balanced** mesh fidelity for the four landscape orbits. It captures
-12 real frames per landscape at 5 fps; the hardware profile captures 28 at
-10 fps. Both traverse the same camera arc, and the chosen fidelity, frame
-count and cadence are recorded in provenance. The World walkthrough uses
-eight full application frames at 1 fps in either profile.
+app's **Balanced** mesh fidelity and neutral studio lighting for the landscape
+tour. It captures four real cardinal camera views per landscape at 1 fps,
+through the app's camera bookmarks. This avoids the extra software renders
+needed for a damped camera orbit. The hardware profile captures 28 orbit frames
+at 10 fps with golden-hour lighting. The chosen fidelity, lighting, camera
+mode, frame count and cadence are recorded in provenance. The World walkthrough
+uses eight full application frames at 1 fps in either profile.
 
 ## Regenerate locally
 
