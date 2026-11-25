@@ -1,5 +1,5 @@
 import { HeightImportControl } from './HeightImportControl';
-import type { HeightRaster } from '../model/heightRaster';
+import { MAX_PROJECT_RASTER_BYTES, rasterBytes, type HeightRaster } from '../model/heightRaster';
 import { useState } from 'react';
 import {
   SlidersHorizontal,
@@ -25,7 +25,8 @@ import { NoiseStudio } from './NoiseStudio';
 import type { TerrainNode, TerrainProject, ParamValue, ViewSettings } from '../model/types';
 
 interface Props {
-  onImportRaster: (raster: HeightRaster) => void;
+  onImportRaster: (raster: HeightRaster, previous?: HeightRaster) => void;
+  projectSession: number;
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
   onSplineEdit: () => void;
@@ -46,6 +47,7 @@ interface Props {
 }
 export function Inspector({
   onImportRaster,
+  projectSession,
   splineEditing,
   onSplinePath,
   onSplineEdit,
@@ -116,7 +118,18 @@ export function Inspector({
                   </label>
                 )}
               {node.kind === 'heightImport' && (
-                <HeightImportControl key={node.id} raster={node.raster} onImport={onImportRaster} />
+                <HeightImportControl
+                  key={`${projectSession}:${node.id}`}
+                  raster={node.raster}
+                  availableBytes={Math.max(
+                    0,
+                    MAX_PROJECT_RASTER_BYTES - project.graph.nodes.reduce(
+                      (sum, other) => sum + (other.id !== node.id && other.raster ? rasterBytes(other.raster) : 0),
+                      0,
+                    ),
+                  )}
+                  onImport={onImportRaster}
+                />
               )}
               {node.kind === 'noise' && node.params.noiseModel !== 'v3' && (
                 <div className="studio-upgrade">

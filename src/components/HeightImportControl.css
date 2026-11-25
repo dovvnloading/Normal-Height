@@ -1,0 +1,87 @@
+.height-import-current,
+.height-import-pending {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+}
+.height-import-current strong,
+.height-import-pending strong {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+.height-import-current span,
+.height-import-pending span {
+  font-size: 10px;
+  color: var(--muted);
+}
+.height-import-layout {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+}
+.height-import-layout fieldset {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.height-import-layout label {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text);
+}
+.height-import-layout select,
+.height-import-layout input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.height-import-dimensions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.height-import-validation,
+.height-import-status p {
+  font-size: 10px;
+  line-height: 1.55;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.height-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.height-import-actions .button {
+  flex: 1 1 auto;
+  padding: 7px 5px;
+  font-size: 10px;
+}
+.height-import-status {
+  margin-top: 10px;
+}
+.height-import-status progress {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.height-import-budget {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  margin-bottom: 0;
+}
