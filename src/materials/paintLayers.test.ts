@@ -165,12 +165,12 @@ describe('authored paint layers', () => {
       name: 'Height 🗻', width: 2048, height: 1536, format: 'u16le' as const,
       data: 'A'.repeat(8388608),
     };
-    const withRaster = { ...project, name: '雪 terrain 🏔',
+    const withRaster = parseProject({ ...project, name: '雪 terrain 🏔',
       graph: { ...project.graph, nodes: [...project.graph.nodes, {
         id: 'imported', kind: 'heightImport' as const, label: 'Height', params: {},
         position: { x: 0, y: 0 }, raster,
       }] },
-    };
+    });
     const one = { ...withRaster, materialPaint: [fill] };
     const two = { ...withRaster, materialPaint: [fill, fill] };
     expect(projectFileBytes(two)).toBe(new TextEncoder().encode(JSON.stringify(two)).byteLength);
@@ -180,6 +180,16 @@ describe('authored paint layers', () => {
     expect(paintCapacity(near).bytes).toBeLessThanOrEqual(MAX_PROJECT_FILE_BYTES);
     expect(paintCapacity(near).ratio).toBeGreaterThan(0.95);
     expect(paintCapacity(near).points).toBe(count);
+    // Exercise the actual importer at the upper boundary, not only the
+    // capacity estimate or a small selection's roundtrip.
+    const nearJson = serializeProjectFile(near);
+    expect(new TextEncoder().encode(nearJson).byteLength).toBeLessThanOrEqual(MAX_PROJECT_FILE_BYTES);
+    const reopened = parseProject(JSON.parse(nearJson));
+    expect(reopened.name).toBe(withRaster.name);
+    expect(reopened.graph.nodes.find(node => node.id === 'imported')?.raster?.data).toBe(raster.data);
+    expect(reopened.materialPaint?.map(stroke => stroke.selection?.region?.runs.length))
+      .toEqual(Array(count).fill(runs.length));
+    expect(reopened.materialPaint?.at(-1)?.selection?.region?.runs.slice(-6)).toEqual(runs.slice(-6));
     expect(() => applyPaintStrokes(near, [fill])).toThrow('32 MiB');
     const stack = { ...withRaster, paintLayers: [layer('Complex', near.materialPaint)] };
     expect(paintCapacity(stack).bytes).toBeGreaterThan(MAX_PROJECT_FILE_BYTES - perStroke);
@@ -304,6 +314,14 @@ describe('terrain masks and brush dynamics', () => {
       { u: 0.75, v: 0.75 }, { u: 0.25, v: 0.75 },
     ] };
     const center = { u: 0.5, v: 0.5 }, outside = { u: 0.125, v: 0.125 };
+    // These clicks are outside the exact polygon/complement but round to
+    // eligible grid cells. They must not author any paint.
+    const justOutside = { u: 0.24, v: 0.5 };
+    expect(floodPaintSelection(map, n, justOutside, 0, polygon).region?.runs).toEqual([]);
+    const justInside = { u: 0.26, v: 0.5 };
+    // Move the left edge slightly off-grid so the inside click snaps outside.
+    const shifted = { points: polygon.points.map(p => p.u === 0.25 ? { ...p, u: 0.255 } : p), invert: true };
+    expect(floodPaintSelection(map, n, justInside, 0, shifted).region?.runs).toEqual([]);
     const inside = floodPaintSelection(map, n, center, 0, polygon);
     expect(pointInPaintSelection(inside, center)).toBe(true);
     expect(pointInPaintSelection(inside, outside)).toBe(false);

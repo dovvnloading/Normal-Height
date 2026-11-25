@@ -232,6 +232,10 @@ export function floodPaintSelection(
   // material preview is smaller. The fill grid is still bounded at 512.
   const n = Math.max(Math.min(512, resolution), restriction?.region?.resolution ?? 0),
     count = n * n;
+  // Check the actual pointer before rounding to the flood grid. An outside
+  // click near a polygon boundary can otherwise snap onto an eligible cell.
+  if (!pointInPaintSelection(restriction, point))
+    return { points: [], region: { resolution: n, runs: [] } };
   const source = (x: number, y: number) =>
     (Math.round((y / (n - 1)) * (resolution - 1)) * resolution +
       Math.round((x / (n - 1)) * (resolution - 1))) *
