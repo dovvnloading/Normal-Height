@@ -2,10 +2,19 @@
 
 > Historical planning reference from PR #62. The implementation and verified boundaries are documented in [World Engine](WORLD_ENGINE.md), [World transport](WORLD_HYDROLOGY.md), and [PR #63](https://github.com/dovvnloading/Normal-Height/pull/63). The original release gates below remain useful; this RFC is not a claim that every gate has passed.
 
-**Status:** Proposed technical roadmap / RFC for review. No implementation or release approval implied.  
-**Baseline:** `0906f95f064eda8b27ed4098364eb6d3e214476d` (Noise Studio v3, PR #61).  
-**Scope:** Browser-native, GPU-accelerated, multiresolution, tile-aware terrain authoring with a deterministic CPU reference backend.  
-**Decision requested:** Agree to the architecture and phased acceptance gates before opening implementation PRs.
+**Status:** Historical technical roadmap, reconciled with the merged engineering preview. The proposed targets below do not certify a World Engine 1.0 release.
+
+**Original baseline:** `0906f95f064eda8b27ed4098364eb6d3e214476d` (Noise Studio v3, PR #61).
+
+**Scope:** Browser-native, GPU-accelerated, multiresolution, tile-aware terrain authoring with a deterministic CPU reference backend.
+
+**Original decision requested:** Agree to the architecture and phased acceptance gates before opening implementation PRs.
+
+### Reconciliation snapshot — November 25, 2026
+
+[PR #63](https://github.com/dovvnloading/Normal-Height/pull/63) merged the World Engine engineering preview and this roadmap into `main`. [PR #42](https://github.com/dovvnloading/Normal-Height/pull/42) subsequently merged imported rasters, coastal shaping, named-mask output nodes, water presentation and session/raster history for the single-domain Terrain workspace. World tiles still reject the `heightImport`, `coast` and `maskOutput` node types; extending those shared contracts into World evaluation remains follow-up work.
+
+This reconciliation was checked against `main` at `6fa0573a529d2444f18df365bb1cd7d8856ec007`. The baseline observations, proposed architecture, delivery sequence and unchecked review decisions below retain their historical context. Use the [implementation guide and remaining work](WORLD_ENGINE.md#remaining-rfc-work) for shipped capabilities and outstanding qualification. Merging this documentation does not mark the release gates as passed.
 
 ## 1. Why this is the next flagship release
 
@@ -13,9 +22,9 @@ Normal Height already generates physically scaled Float32 terrain, supports vers
 
 The goal is to move from a single terrain tile to a continuous, editable world with regional computation and production-grade export, without losing reproducibility, physical meaning, or the existing lightweight browser workflow.
 
-### Verified starting point
+### Verified starting point at the original baseline
 
-| Area                  | Current main behavior                                                             | Consequence                                                                 |
+| Area                  | Behavior at the original baseline                                                 | Consequence                                                                 |
 | --------------------- | --------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Working grid          | UI up to 1024 × 1024                                                              | Practical preview limit, separate from mesh resolution                      |
 | Full graph            | Evaluator capped at 2048 × 2048; 512 MiB conservative working allocation budget   | Cannot assume 4K/8K by changing a slider                                    |
@@ -33,7 +42,7 @@ Noise Studio's 349 routine passing tests, 96 legacy/v2 reference field hashes an
 
 ### Existing work to integrate, not duplicate
 
-[PR #42](https://github.com/dovvnloading/Normal-Height/pull/42) proposes imported raster sources, coastal shelf shaping, named mask outputs, water presentation and IndexedDB-backed session/raster history. At the baseline review it is open and reports not mergeable. Reconcile its schema, output routing, storage lifecycle and QA against main and Noise Studio before depending on it. Review/rebase/resolve it separately; do not merge it as a side effect of this RFC. Phase I can begin without it, but World Engine's import/mask features must share the eventual accepted contracts rather than creating parallel ones. No claim that those features are shipped in main.
+At the original baseline review, [PR #42](https://github.com/dovvnloading/Normal-Height/pull/42) was open and not mergeable. It has since merged at `b00418ee7a37ea0428b2bb103493d0b91d91a045`, including imported raster sources, coastal shelf shaping, named mask outputs, water presentation and IndexedDB-backed session/raster history. Raster cache identity and working-memory accounting are integrated into the single-domain Terrain evaluator. World Engine's future import/coast/mask support must reuse those accepted schema, routing and storage contracts rather than create parallel implementations. Keep authored raster/session data separate from rebuildable World cache data; do not imply the merged Terrain nodes already work in World tiles.
 
 ## 2. Product experience and release boundary
 
@@ -195,6 +204,8 @@ Prioritize generic + Unreal/Unity in 1.0, then Blender/Houdini verification and 
 
 ## 6. Delivery roadmap — sequential, independently reviewable PRs
 
+This is the original proposed sequence and its intended exit gates. The engineering preview in #63 implements parts of this roadmap; its merge does not certify every milestone. Consult the current implementation guide before selecting follow-up work.
+
 | Milestone                       | Work and deliverable                                                                                                                                                  | Exit gate                                                                                                                            |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | 0 — Baseline and decisions      | Pin current main, capture real CPU/GPU/browser performance, memory and quality fixtures; review #42; decide domain/units, cache key, storage budget, release profiles | Reproducible baseline and ADRs reviewed, no production behavior changed                                                              |
@@ -233,7 +244,7 @@ For 32K+ stretch tests use logical tiled dimensions (e.g., 32768 intervals / 327
 
 ### Benchmark and evidence protocol
 
-- Pin base/head, project files and seeds, resolution/physical extent, solver settings, quality and exact backend. Include default Alpine/Dissected uplands, Noise Studio ridges/Gabor/cellular, multi-branch blends, a cross-boundary synthetic river, an imported raster when #42 lands, and full PBR export.
+- Pin base/head, project files and seeds, resolution/physical extent, solver settings, quality and exact backend. Include default Alpine/Dissected uplands, Noise Studio ridges/Gabor/cellular, multi-branch blends, a cross-boundary synthetic river, imported raster/coast/mask fixtures once World evaluation supports those merged node types, and full PBR export.
 - Use a fixed representative hardware matrix (existing RTX 3060 Ti benchmark platform if available, one integrated GPU, CPU-only/unsupported browser); identify CPU, GPU, driver, browser/version, OS and device limits. Never pass software WebGL/SwiftShader as real hardware WebGPU acceleration.
 - Report cold and warm median/p95 from repeat runs, wall-clock time, compile/upload/compute/readback/encode durations, actual cache hits, peak allocated host/GPU bytes, observable process memory if available, store usage and output size. Record failures and fallback; don't omit slow paths.
 - Record output hashes, numerical errors and conservation residuals; independent decoder/oracle checks; screenshot fixed camera/lighting and unshaded maps with seam close-ups; save raw JSON/CSV and evidence links in docs/benchmarks and CI artifacts.
@@ -241,7 +252,7 @@ For 32K+ stretch tests use logical tiled dimensions (e.g., 32768 intervals / 327
 
 ## 8. Suggested implementation boundaries
 
-Names below are proposals, not existing files or a commitment to churn. Integrate with actual ownership after Phase 0.
+Names below were proposals at the original baseline, not a current inventory or a commitment to churn. Integrate follow-up work with the actual implementation and ownership.
 
 | Module                                                      | Responsibility                                                                    |
 | ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
@@ -272,12 +283,12 @@ Keep the CPU single-domain path and renderer available behind feature gates. Pre
 | Import/export mismatch                | One axis/datum contract; independent decoding and actual engine imports                                                             |
 | Large scope / conflicts               | Sequential reviewable PRs; reconcile #42; freeze acceptance criteria per milestone; do not mix feature work with unrelated rewrites |
 
-Reviewer decisions:
+Reviewer decisions (retained as design review context, not a record of completed release qualification):
 
 - [ ] Confirm World Engine as the next flagship and CPU-first planner/cache as the first implementation.
 - [ ] Approve opt-in World versioning, canonical interval-grid and shared-border ownership; settle units/datum/periodic boundary semantics before code.
 - [ ] Approve persistent coordinator, cache/OPFS policy and conservative no-GPU fallback.
-- [ ] Resolve the PR #42 integration path and prevent parallel import/raster/mask implementations.
+- [ ] Extend the merged PR #42 import/coast/mask contracts into World evaluation without parallel implementations.
 - [ ] Ratify proposed numerical, memory, UX and performance targets after baseline measurement.
 - [ ] Confirm release scope: generic plus Unreal/Unity first, 8K representative full-graph profile with honest stage spacing, 32K+ stretch.
 - [ ] Approve implementation milestone breakdown; no auto-merge or broad deployment from this planning PR.
@@ -296,4 +307,4 @@ These are design references, not claims that Normal Height already implements th
 
 ---
 
-**Immediate next implementation PR (after RFC approval):** baseline/profiling and CPU reference graph planner, followed by persistent scheduling and cache invalidation. First demonstrate that normal edits reuse correct work and preserve every existing reference output. Then build the world coordinate/tile contracts, followed by qualified GPU execution and large exports. The quality bar is proven by numerical invariants, visual evidence, hardware measurements and production round trips, not by feature count.
+**Follow-up implementation:** The CPU planner, persistent scheduling and World foundation shipped in the engineering preview from #63. Use the [implementation guide's remaining work](WORLD_ENGINE.md#remaining-rfc-work) to select separately reviewed extensions and qualification against the retained gates, including World import/coast/mask support, hardware and memory evidence, full World PBR export and production imports. The quality bar is proven by numerical invariants, visual evidence, hardware measurements and production round trips, not by feature count.

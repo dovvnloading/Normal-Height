@@ -108,7 +108,7 @@ retaining the displayed result. Reports are downloadable JSON.
 
 **Remember completed CPU regions** enables a separate 64 MiB cache in
 `normal-height.world-cache`. It is off by default and is rebuildable data,
-separate from authored projects and any future imported raster store.
+separate from authored projects and imported raster/session storage.
 
 Entries contain complete independently owned fields, spatial/stage metadata,
 schema version and CRC32. Reads validate dimensions, finite values, version,
@@ -299,11 +299,20 @@ and their source revision/browser are documented in [MEDIA.md](MEDIA.md).
 
 The implementation covers a useful CPU-first foundation, selected GPU kernels,
 bounded high-resolution graph output and a conservative global transport
-reference. It does not certify every RFC release gate. PR #42's older
-raster/coast/session work requires a targeted rebase over Noise Studio v3;
-its tree must not replace current main. Its authored raster store must remain
-separate from rebuildable world cache data, and imported content will need
-explicit cache-key/byte-accounting integration.
+reference. It does not certify every RFC release gate.
+
+[PR #42](https://github.com/dovvnloading/Normal-Height/pull/42) has merged imported
+rasters, coastal shelf shaping, named-mask output nodes, water presentation and
+session/raster history into the single-domain Terrain workspace. Imported raster
+identity participates in persistent cache keys, and raster allocations are included
+in working-memory preflight and history accounting. Authored raster/session storage
+remains separate from rebuildable World cache data.
+
+World tiles explicitly reject `heightImport`, `coast` and `maskOutput` nodes.
+Extending those merged node contracts into World evaluation and tiled export
+remains follow-up work; their availability in Terrain does not imply native World
+support. The World exporter's existing named-mask branches are distinct from the
+unsupported `maskOutput` node type.
 
 Production imports, full World PBR exports, broader GPU coverage and real
 hardware benchmarks, spatially adaptive multiresolution transport, qualified
