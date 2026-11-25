@@ -6,6 +6,7 @@ import type { MaterialStroke } from './materialPaint';
 import { paintChangeBounds, type TexelRect } from './materialRegion';
 import { generatePBR } from './pbr';
 import { packedPreview, requestPBR } from './pbrClient';
+import { createPaintLayer } from './paintLayers';
 import { assemblePreview, bakePreview } from './previewBake';
 
 const n = 65;
@@ -141,4 +142,59 @@ describe('incremental preview baking', () => {
       vi.unstubAllGlobals();
     }
   });
+});
+
+it('keeps local baking for layer strokes, and rebuilds the whole material for group opacity or masks', async () => {
+  const workers: Array<{ dirty?: TexelRect; complete(): void }> = [];
+  class MockWorker {
+    dirty?: TexelRect;
+    complete = () => {};
+    onmessage?: (event: unknown) => void;
+    constructor() {
+      workers.push(this);
+    }
+    postMessage(message: { field: HeightField; project: typeof scene; dirty?: TexelRect }) {
+      this.dirty = message.dirty;
+      this.complete = () =>
+        this.onmessage?.({
+          data: {
+            type: 'result',
+            bake: bakePreview(message.field, message.project, message.dirty),
+          },
+        });
+    }
+    terminate() {}
+  }
+  vi.stubGlobal('Worker', MockWorker);
+  try {
+    const dem = field();
+    const empty = createPaintLayer('Snow', 'paint-test');
+    let project = { ...scene, paintLayers: [empty] };
+    let request = requestPBR(dem, project);
+    workers.at(-1)!.complete();
+    await request.promise;
+    request.release();
+    project = { ...project, paintLayers: [{ ...empty, strokes: [a] }] };
+    request = requestPBR(dem, project);
+    expect(workers.at(-1)!.dirty).toEqual(paintChangeBounds([], [a], n));
+    workers.at(-1)!.complete();
+    await request.promise;
+    request.release();
+    project = { ...project, paintLayers: [{ ...project.paintLayers[0], opacity: 0.5 }] };
+    request = requestPBR(dem, project);
+    expect(workers.at(-1)!.dirty).toBeUndefined();
+    workers.at(-1)!.complete();
+    expect((await request.promise).splat).toEqual(generatePBR(dem, project).splat);
+    request.release();
+    const count = workers.length;
+    const rename = requestPBR(dem, {
+      ...project,
+      paintLayers: [{ ...project.paintLayers[0], name: 'Renamed', locked: true }],
+    });
+    await rename.promise;
+    rename.release();
+    expect(workers).toHaveLength(count);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

@@ -55,15 +55,19 @@ import type { PBRChannel, PBRMaps } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import type { TerrainNode } from '../model/types';
-import { BrushFeedback, type BrushSettings } from '../render/brushFeedback';
+import { BrushFeedback } from '../render/brushFeedback';
 import { useBrushInput } from '../hooks/useBrushInput';
-import { MaterialBrushControls, MapBrushPreview } from './MaterialBrush';
-import type { MaterialLayer, MaterialStroke } from '../materials/materialPaint';
+import { MapBrushPreview } from './MaterialBrush';
+import { PaintWorkspace } from './PaintWorkspace';
+import { readBrushSettings, writeBrushSettings, strokeSettings, type BrushInputSettings } from '../materials/brushPresets';
+import type { MaterialLayer, MaterialStroke, PaintPoint, PaintSelection } from '../materials/materialPaint';
+import { getPaintLayers, getPaintStrokes, samplePaintMaterial, floodPaintSelection, paintCapacity, type PaintLayer } from '../materials/paintLayers';
 import './TerrainViewport.css';
 
 type Baseline = { field: HeightField; project: TerrainProject; label: string };
 
 interface TerrainViewportProps {
+  paintSession: number;
   spline: TerrainNode | null;
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
@@ -88,7 +92,13 @@ interface TerrainViewportProps {
   onCaptureBaseline: () => void;
   onClearBaseline: () => void;
   onLayerColor: (layer: MaterialLayer, color: string) => void;
-  onPaint: (strokes: MaterialStroke[]) => boolean;
+  onPaint: (strokes: MaterialStroke[], activeLayerId: string) => boolean;
+  onPaintLayersChange: (layers: PaintLayer[]) => void;
+  onPaintNotice: (message: string) => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 const CHANNELS: { value: MapChannel; label: string }[] = [
@@ -113,6 +123,19 @@ const CHANNELS: { value: MapChannel; label: string }[] = [
   { value: 'curvature', label: 'PBR curvature' },
   { value: 'orm', label: 'Packed ORM' },
 ];
+
+function displayMapPixels(source: Uint8ClampedArray, channel: MapChannel) {
+  if (channel !== 'splat') return source;
+  // The fourth channel is snow coverage, not transparency in the map viewer.
+  const display = source.slice();
+  for (let i = 0; i < display.length; i += 4) {
+    display[i] = Math.min(255, source[i] + source[i + 3]);
+    display[i + 1] = Math.min(255, source[i + 1] + source[i + 3]);
+    display[i + 2] = Math.min(255, source[i + 2] + source[i + 3]);
+    display[i + 3] = 255;
+  }
+  return display;
+}
 
 type CameraBookmark = {
   name: string;
@@ -190,7 +213,7 @@ function MapCanvas({
   spline,
   splineEditing,
   onSplinePath,
-  brushFeedback, brushSettings, onPaint,
+  brushFeedback, brushSettings, onPaint, onSampleMaterial, onPaintAction, onPaintNotice, paintSelection,
   initialFraming,
   onFramingChange,
   tool,
@@ -213,8 +236,12 @@ function MapCanvas({
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
   brushFeedback: BrushFeedback | null;
-  brushSettings: BrushSettings;
+  brushSettings: BrushInputSettings;
   onPaint: (strokes: MaterialStroke[]) => boolean;
+  onSampleMaterial: (point: PaintPoint) => void;
+  onPaintAction: (point: PaintPoint, event: PointerEvent) => boolean;
+  onPaintNotice: (message: string) => void;
+  paintSelection: PaintSelection | null;
   initialFraming: MapFraming;
   onFramingChange: (framing: MapFraming) => void;
   tool: ViewportTool;
@@ -233,6 +260,8 @@ function MapCanvas({
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLCanvasElement | null>(null);
+  const committedRasterRef = useRef<HTMLCanvasElement | null>(null);
+  const liveRasterRevision = useRef(-1);
   const baselineRasterRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRasterRef = useRef<HTMLCanvasElement | null>(null);
   const [deltaStats, setDeltaStats] = useState<DifferenceStatistics | null>(null);
@@ -244,7 +273,9 @@ function MapCanvas({
   const [zoom, setZoom] = useState(initialFraming.zoom);
   const [offset, setOffset] = useState(initialFraming.offset);
   const [mapBusy, setMapBusy] = useState(false);
-  const [keyboardPoint, setKeyboardPoint] = useState<TerrainPoint>({ u: 0.5, v: 0.5 });
+  const keyboardPoint = useRef<TerrainPoint>({ u: 0.5, v: 0.5 });
+  const navigationRef = useRef(false);
+  const paintBudget = useMemo(() => paintCapacity(project), [project.paintLayers, project.materialPaint]);
   const [mapError, setMapError] = useState(false);
   useEffect(() => onFramingChange({ zoom, offset }), [zoom, offset]);
   const [sample, setSample] = useState<{
@@ -296,7 +327,16 @@ function MapCanvas({
   };
   useBrushInput(() => canvasRef.current, brushFeedback ? {
     feedback: brushFeedback, settings: brushSettings, pick: mapPoint, commit: onPaint,
+    sample: onSampleMaterial, pickAction: onPaintAction,
+    remainingPoints: paintBudget.maxPoints - paintBudget.points,
+    remainingStrokes: paintBudget.maxStrokes - paintBudget.strokes,
+    onLimit: onPaintNotice,
+    navigation: active => { navigationRef.current = active; },
+    onCursor: point => { if (point) keyboardPoint.current = point; },
+    radiusAt: brushSettings.radiusUnit === 'screen'
+      ? () => Math.max(0.0001, Math.min(0.5, (brushSettings.radiusPixels ?? 48) / layerSize)) : undefined,
   } : null, field, project);
+  useEffect(() => brushFeedback?.registerConsumer('map'), [brushFeedback]);
   const view = useRef({ zoom, offset, dimensions });
   view.current = { zoom, offset, dimensions };
   const zoomAt = useRef<(next: number, x: number, y: number) => void>(() => {});
@@ -365,22 +405,13 @@ function MapCanvas({
       canvas.width = canvas.height = resolution;
       const context = canvas.getContext('2d');
       if (!context) return null;
-      let pixels = source;
-      if (channel === 'splat') {
-        // Splat alpha is a fourth physical material, not canvas transparency.
-        const display = pixels.slice();
-        for (let i = 0; i < display.length; i += 4) {
-          display[i] = Math.min(255, pixels[i] + pixels[i + 3]);
-          display[i + 1] = Math.min(255, pixels[i + 1] + pixels[i + 3]);
-          display[i + 2] = Math.min(255, pixels[i + 2] + pixels[i + 3]);
-          display[i + 3] = 255;
-        }
-        pixels = display;
-      }
+      const pixels = displayMapPixels(source, channel);
       const image = context.createImageData(resolution, resolution);
       image.data.set(pixels);
       context.putImageData(image, 0, 0);
       imageRef.current = canvas;
+      committedRasterRef.current = canvas;
+      liveRasterRevision.current = -1;
       // The visible canvas must repaint for every newly generated map. Changing
       // surface settings/seed does not necessarily change field or view state.
       setRasterVersion((version) => version + 1);
@@ -426,7 +457,7 @@ function MapCanvas({
       request.promise.then((maps) => {
         if (!active) return;
         materialMapsRef.current = maps;
-        feedbackRef.current?.baked(project.materialPaint);
+        feedbackRef.current?.baked(getPaintStrokes(project), 'map');
         paintPixels(pbrPixels(maps, field, project, channel === 'materialNormal' ? 'normal' : channel as PBRChannel));
         setMapBusy(false);
       }).catch(() => {
@@ -441,14 +472,51 @@ function MapCanvas({
     const cached = mapRasters.get(field)?.get(key);
     if (cached) {
       imageRef.current = cached;
+      committedRasterRef.current = cached;
+      liveRasterRevision.current = -1;
       setRasterVersion((version) => version + 1);
     } else {
       const raster = paintPixels(colorizeMap(field, channel, project.worldSize, project.heightScale));
       if (raster) rememberRaster(field, key, raster);
     }
+    feedbackRef.current?.baked(getPaintStrokes(project), 'map');
     return () => { active = false; };
-  }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed, project.materialPaint,
+  }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed, project.materialPaint, project.paintLayers,
     baseline, compareKind]);
+
+  useEffect(() => {
+    if (!brushFeedback) return;
+    const materialChannel = ['basecolor', 'materialNormal', 'detailNormal', 'relief', 'roughness',
+      'ao', 'splat', 'curvature', 'orm', 'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight'].includes(channel);
+    const unsubscribe = brushFeedback.subscribe(() => {
+      const preview = materialChannel ? brushFeedback.liveFor('map') : null;
+      if (preview && preview.revision !== liveRasterRevision.current) {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = preview.maps.resolution;
+        const context = canvas.getContext('2d');
+        if (!context) return;
+        const pixels = pbrPixels(preview.maps, preview.field, preview.project,
+          channel === 'materialNormal' ? 'normal' : channel as PBRChannel);
+        const raster = context.createImageData(canvas.width, canvas.height);
+        raster.data.set(displayMapPixels(pixels, channel));
+        context.putImageData(raster, 0, 0);
+        imageRef.current = canvas;
+        liveRasterRevision.current = preview.revision;
+        setRasterVersion(version => version + 1);
+      } else if (!preview && liveRasterRevision.current !== -1) {
+        imageRef.current = committedRasterRef.current;
+        liveRasterRevision.current = -1;
+        setRasterVersion(version => version + 1);
+      }
+      if (canvasRef.current) canvasRef.current.dataset.brushPreviewStatus = preview ? 'live' : 'idle';
+    });
+    return () => {
+      unsubscribe();
+      imageRef.current = committedRasterRef.current;
+      liveRasterRevision.current = -1;
+      setRasterVersion(version => version + 1);
+    };
+  }, [brushFeedback, channel]);
 
   useEffect(() => {
     overlayRasterRef.current = null;
@@ -639,7 +707,7 @@ function MapCanvas({
               drag.current = null;
             }
           }
-          if ((tool === 'navigate' || event.button !== 0 || event.pointerType === 'touch') &&
+          if ((tool === 'navigate' || navigationRef.current || event.button !== 0 || event.pointerType === 'touch') &&
             touches.current.size < 2) {
             drag.current = { x: event.clientX, y: event.clientY,
               startX: offset.x, startY: offset.y };
@@ -657,7 +725,7 @@ function MapCanvas({
             Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) {
             const point = mapPoint(event.clientX, event.clientY);
             if (point) {
-              setKeyboardPoint(point);
+              keyboardPoint.current = point;
               onChoosePoint(point);
             }
           }
@@ -697,23 +765,42 @@ function MapCanvas({
             const direction = arrows[event.key];
             if (direction) {
               event.preventDefault();
-              const delta = event.shiftKey ? 0.05 : 0.01;
+              const unit = tool === 'paint' ? Math.max(0.000001, Math.min(0.01, brushSettings.radius * 0.25)) : 0.01;
+              const delta = unit * (event.shiftKey ? 5 : event.ctrlKey || event.metaKey ? 0.2 : 1);
               const next = {
-                u: Math.max(0, Math.min(1, keyboardPoint.u + direction[0] * delta)),
-                v: Math.max(0, Math.min(1, keyboardPoint.v + direction[1] * delta)),
+                u: Math.max(0, Math.min(1, keyboardPoint.current.u + direction[0] * delta)),
+                v: Math.max(0, Math.min(1, keyboardPoint.current.v + direction[1] * delta)),
               };
-              setKeyboardPoint(next);
+              keyboardPoint.current = next;
               if (brushFeedback) brushFeedback.hover(next, brushSettings);
               else onHoverPoint(next);
-            } else if (event.key === 'Enter' || event.key === ' ') {
+            } else if (event.key === 'Enter' || (tool !== 'paint' && event.key === ' ')) {
               event.preventDefault();
-              if (brushFeedback) onPaint([{ ...brushSettings, points: [keyboardPoint] }]);
-              else onChoosePoint(keyboardPoint);
+              if (event.repeat) return;
+              if (brushFeedback) {
+                if (onPaintAction(keyboardPoint.current, new PointerEvent('pointerdown'))) return;
+                if (brushFeedback.begin()) {
+                  const stroke = [{ ...strokeSettings(brushSettings), radius: brushSettings.radiusUnit === 'screen'
+                    ? Math.min(0.5, (brushSettings.radiusPixels ?? 48) / layerSize) : brushSettings.radius,
+                    points: [{ ...keyboardPoint.current }] }];
+                  brushFeedback.preview(stroke);
+                  brushFeedback.finish(onPaint(stroke));
+                }
+              } else if (tool !== 'paint') onChoosePoint(keyboardPoint.current);
             }
           }
         }}
       />
       {brushFeedback && <MapBrushPreview feedback={brushFeedback} size={layerSize} left={layerLeft} top={layerTop}/>}
+      {paintSelection && paintSelection.points.length > 0 && (
+        <svg className="nh-paint-selection" aria-hidden="true"
+          style={{ left: layerLeft, top: layerTop, width: layerSize, height: layerSize }} viewBox="0 0 1000 1000">
+          <polygon points={paintSelection.points.map(point => `${point.u * 1000},${point.v * 1000}`).join(' ')}
+            fill="rgba(110,190,166,.1)" stroke="#eafff3" strokeWidth="1.5" strokeDasharray="6 4" vectorEffect="non-scaling-stroke" />
+          {paintSelection.points.map((point, index) => <circle key={index} cx={point.u * 1000} cy={point.v * 1000}
+            r={3 * markerScale} fill="#264a3a" stroke="white" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
+        </svg>
+      )}
       {(hoverPoint || inspectionPoints.length > 0 || cameraFocus) && (
         <svg className="nh-inspection-overlay" aria-hidden="true"
           style={{ left: layerLeft, top: layerTop, width: layerSize, height: layerSize }}
@@ -1030,6 +1117,7 @@ function MapLegend({
 }
 
 export function TerrainViewport({
+  paintSession,
   spline,
   splineEditing,
   onSplinePath,
@@ -1055,6 +1143,12 @@ export function TerrainViewport({
   onClearBaseline,
   onLayerColor,
   onPaint,
+  onPaintLayersChange,
+  onPaintNotice,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
 }: TerrainViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement>(null);
@@ -1063,17 +1157,61 @@ export function TerrainViewport({
   const [showSettings, setShowSettings] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [tool, setTool] = useState<ViewportTool>('navigate');
-  const [brushSettings, setBrushSettings] = useState<BrushSettings>({
-    layer: 'rock', radius: 0.035, strength: 0.9, hardness: 0.55,
-  });
+  const [brushSettings, setBrushSettings] = useState<BrushInputSettings>(() => readBrushSettings());
+  const [activeLayerId, setActiveLayerId] = useState('paint-base');
+  const [paintBefore, setPaintBefore] = useState(false);
+  const [pickingMaterial, setPickingMaterial] = useState(false);
+  const [selectingPaint, setSelectingPaint] = useState(false);
+  const [connectedFill, setConnectedFill] = useState(false);
+  const [paintSelection, setPaintSelection] = useState<PaintSelection | null>(null);
+  const [paintStatus, setPaintStatus] = useState('Ready to paint');
+  const paintLayers = useMemo(() => getPaintLayers(project), [project.paintLayers, project.materialPaint]);
+  const capacity = useMemo(() => paintCapacity(project), [project.paintLayers, project.materialPaint]);
+  const activePaintLayer = paintLayers.find(layer => layer.id === activeLayerId) ?? paintLayers.at(-1);
+  const paintElevationRange = useMemo<[number, number]>(() => {
+    if (!field) return [0, project.heightScale];
+    let min = Infinity, max = -Infinity;
+    for (const height of field.height) { min = Math.min(min, height); max = Math.max(max, height); }
+    return [Math.floor(min * project.heightScale), Math.ceil(max * project.heightScale)];
+  }, [field, project.heightScale]);
+  const effectiveLayerId = activePaintLayer?.id ?? 'paint-base';
+  const pickerMaps = useRef<PBRMaps | null>(null);
+  const paintFocusBefore = useRef(false);
+  const renderProject = useMemo(() => tool === 'paint' && paintBefore
+    ? { ...project, materialPaint: undefined, paintLayers: [] } : project, [project, tool, paintBefore]);
+  const paintBrushSettings: BrushInputSettings = { ...brushSettings,
+    selection: paintSelection && !selectingPaint && (paintSelection.points.length >= 3 || paintSelection.region)
+      ? paintSelection : undefined };
   const surface = useMemo(() => resolveSurface(project.surface), [project.surface]);
   const previousLayer = useRef<MaterialLayer>('rock');
   if (brushSettings.layer !== 'erase') previousLayer.current = brushSettings.layer;
-  const brushFeedback = useMemo(() => tool === 'paint' ? new BrushFeedback() : null, [tool]);
+  const brushFeedback = useMemo(() => new BrushFeedback(), []);
+  useEffect(() => () => brushFeedback.dispose(), [brushFeedback]);
+  useEffect(() => {
+    brushFeedback.clear();
+    setPaintSelection(null); setSelectingPaint(false); setPickingMaterial(false); setConnectedFill(false);
+    setPaintBefore(false); setActiveLayerId('paint-base');
+  }, [paintSession, brushFeedback]);
+  useEffect(() => writeBrushSettings(brushSettings), [brushSettings]);
+  useEffect(() => brushFeedback.subscribe(() => setPaintStatus(current =>
+    current === brushFeedback.status ? current : brushFeedback.status)), [brushFeedback]);
+  useEffect(() => {
+    if (tool !== 'paint' || !field) { pickerMaps.current = null; return; }
+    pickerMaps.current = null;
+    let active = true;
+    const request = requestPBR(field, project);
+    request.promise.then(maps => { if (active) pickerMaps.current = maps; }).catch(() => {});
+    return () => { active = false; request.release(); };
+  }, [field, project, tool]);
   // Spline handles own the 2D pointer surface while editing. Suppress
   // competing inspection tools instead of allowing inert tool selections.
   useEffect(() => {
     if (!splineEditing) return;
+    if (tool === 'paint') {
+      brushFeedback.clear();
+      onFocusModeChange(paintFocusBefore.current);
+      setPaintBefore(false); setPickingMaterial(false); setSelectingPaint(false); setConnectedFill(false);
+    }
     setTool('navigate');
     setInspectionPoints([]);
     setHoverPoint(null);
@@ -1133,22 +1271,142 @@ export function TerrainViewport({
     setShowBookmarks(false);
     setShowLayers(false);
   }, [effectiveMode]);
-  const activeBrush = !splineEditing && !stale && !busy && effectiveMode !== 'compare' && field
-    ? brushFeedback : null;
+  const paintDisabledReason = !field ? 'Build terrain to start painting.'
+    : splineEditing ? 'Finish editing the spline to resume painting.'
+    : busy ? 'Painting paused while terrain builds. Your brush will resume automatically.'
+    : stale ? 'Build the updated terrain to resume painting.'
+    : effectiveMode === 'compare' ? 'Return to 2D, 3D, or Split to resume painting.'
+    : paintBefore ? 'Before view · showing the procedural surface. Switch to After to paint.'
+    : activePaintLayer?.locked ? 'This layer is locked. Unlock it or select another layer.'
+    : activePaintLayer && !activePaintLayer.visible ? 'This layer is hidden. Show it or select another layer.'
+    : capacity.ratio >= 1 ? 'Paint storage is full. Remove unused strokes or layers to continue.'
+    : undefined;
+  const activeBrush = tool === 'paint' && !paintDisabledReason ? brushFeedback : null;
   useEffect(() => {
-    if (tool === 'paint' && !activeBrush) setTool('navigate');
-  }, [tool, activeBrush]);
-  useEffect(() => {
-    activeBrush?.sync(project.materialPaint);
-  }, [activeBrush, project.materialPaint]);
+    if (activeBrush) activeBrush.configure(field, project, effectiveLayerId);
+    else brushFeedback.clear();
+  }, [activeBrush, brushFeedback, field, project, effectiveLayerId]);
   useEffect(() => {
     if (activeBrush) {
       activeBrush.setLayerColors(Object.fromEntries(
         SPLAT_LAYERS.map(layer => [layer, layerColorHex(surface, layer)]),
       ));
-      activeBrush.hover(activeBrush.cursor, brushSettings);
+      activeBrush.setDisplay(brushSettings.overlayOpacity ?? 0.5, brushSettings.showFalloff ?? true);
+      activeBrush.hover(activeBrush.cursor, paintBrushSettings);
     }
-  }, [activeBrush, brushSettings, surface]);
+  }, [activeBrush, brushSettings, surface, paintSelection, selectingPaint]);
+  useEffect(() => {
+    if (activeBrush && field) activeBrush.setGuides(field, project,
+      [brushSettings.mask, activePaintLayer?.mask], paintSelection, brushSettings.showMask ?? true);
+  }, [activeBrush, field, project.worldSize, project.heightScale, project.seed,
+    brushSettings.mask, brushSettings.showMask, activePaintLayer?.mask, paintSelection, effectiveLayerId]);
+  const commitPaint = (strokes: MaterialStroke[]) => {
+    if (paintDisabledReason) { onPaintNotice(paintDisabledReason); return false; }
+    return onPaint(strokes, effectiveLayerId);
+  };
+  const selectMaterialAt = (point: PaintPoint) => {
+    const maps = pickerMaps.current;
+    if (!maps) { onPaintNotice('The material map is still preparing. Try sampling again in a moment.'); return; }
+    const layer = samplePaintMaterial(maps.splat, maps.resolution, point);
+    setBrushSettings(current => ({ ...current, layer, mode: 'paint', presetId: 'custom' }));
+    setPickingMaterial(false);
+    onPaintNotice(`Sampled ${layer}.`);
+  };
+  const paintAction = (point: PaintPoint) => {
+    if (pickingMaterial) { selectMaterialAt(point); return true; }
+    if (selectingPaint) {
+      setPaintSelection(current => ({ points: [...(current?.points ?? []).slice(0, 255), { ...point }] }));
+      return true;
+    }
+    if (connectedFill) {
+      const maps = pickerMaps.current;
+      if (!maps) { onPaintNotice('Wait for the material to finish before using connected fill.'); return true; }
+      const selection = floodPaintSelection(maps.splat, maps.resolution, point);
+      if (paintSelection?.points.length) selection.points = paintSelection.points;
+      const stroke: MaterialStroke = { ...strokeSettings(paintBrushSettings), fullTile: true, selection,
+        points: [{ ...point }], seed: project.seed };
+      if (commitPaint([stroke])) { setConnectedFill(false); setPaintSelection(selection); }
+      return true;
+    }
+    return false;
+  };
+  const fillPaint = (kind: 'selection' | 'connected' | 'replace') => {
+    if (paintDisabledReason) { onPaintNotice(paintDisabledReason); return; }
+    if (kind === 'connected') {
+      setConnectedFill(true); setPickingMaterial(false); setSelectingPaint(false);
+      onPaintNotice('Click a material region to fill it. Escape cancels.');
+      return;
+    }
+    commitPaint([{ ...strokeSettings(paintBrushSettings), fullTile: true,
+      mode: kind === 'replace' ? 'replace' : brushSettings.mode ?? 'paint',
+      source: brushSettings.source ?? 'rock', points: [{ u: 0.5, v: 0.5 }], seed: project.seed }]);
+  };
+  const changeTool = (next: ViewportTool) => {
+    if (next === 'paint' && tool !== 'paint') {
+      paintFocusBefore.current = focusMode;
+      onFocusModeChange(true);
+      onSettingsChange({ ...settings, material: 'pbr', autoRotate: false });
+      onChannelChange('basecolor');
+    } else if (tool === 'paint' && next !== 'paint') {
+      brushFeedback.clear();
+      onFocusModeChange(paintFocusBefore.current);
+      setPaintBefore(false); setPickingMaterial(false); setSelectingPaint(false); setConnectedFill(false);
+    }
+    setTool(next); setInspectionPoints([]); setHoverPoint(null);
+    setShowSettings(false); setShowLayers(false);
+  };
+  const paintCommands = useRef({ tool, changeTool, selectingPaint, pickingMaterial, connectedFill,
+    brushSettings, brushFeedback, setBrushSettings });
+  paintCommands.current = { tool, changeTool, selectingPaint, pickingMaterial, connectedFill,
+    brushSettings, brushFeedback, setBrushSettings };
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
+        document.querySelector('dialog[open]') || (target instanceof HTMLElement &&
+        (target.matches('input,textarea,select') || target.isContentEditable))) return;
+      if (event.key === 'Escape' && target instanceof HTMLElement &&
+        target.closest('.nh-paint-compact #nh-paint-inspector')) return;
+      const current = paintCommands.current;
+      if (current.brushFeedback.drawing) return;
+      const letter = event.key.toLowerCase();
+      if (letter === 'b') {
+        event.preventDefault(); event.stopImmediatePropagation(); current.changeTool('paint'); return;
+      }
+      if (current.tool !== 'paint') return;
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (current.selectingPaint || current.pickingMaterial || current.connectedFill) {
+          if (current.selectingPaint) setPaintSelection(null);
+          setSelectingPaint(false); setPickingMaterial(false); setConnectedFill(false);
+        } else current.changeTool('navigate');
+      } else if (current.selectingPaint && event.key === 'Enter') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        setSelectingPaint(false);
+        setPaintSelection(selection => selection && selection.points.length >= 3 ? selection : null);
+      } else if (current.selectingPaint && (event.key === 'Backspace' || event.key === 'Delete')) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        setPaintSelection(selection => selection ? { ...selection, points: selection.points.slice(0, -1) } : null);
+      } else if (letter === 'e') {
+        event.preventDefault();
+        if (event.repeat) return;
+        current.setBrushSettings(value => ({ ...value, layer: value.layer === 'erase' ? previousLayer.current : 'erase' }));
+      } else if (['1', '2', '3', '4'].includes(event.key)) {
+        event.preventDefault();
+        current.setBrushSettings(value => ({ ...value, layer: SPLAT_LAYERS[Number(event.key) - 1], mode: 'paint' }));
+      } else if (event.code === 'BracketLeft' || event.code === 'BracketRight' || ['[', ']', '{', '}'].includes(event.key)) {
+        event.preventDefault();
+        const grow = event.code === 'BracketRight' || [']', '}'].includes(event.key);
+        current.setBrushSettings(value => event.shiftKey
+          ? { ...value, hardness: Math.max(0, Math.min(1, value.hardness + (grow ? 0.05 : -0.05))), presetId: 'custom' }
+          : value.radiusUnit === 'screen'
+            ? { ...value, radiusPixels: Math.max(2, Math.min(512, (value.radiusPixels ?? 48) * (grow ? 1.15 : 1 / 1.15))) }
+            : { ...value, radius: Math.max(0.0001, Math.min(0.5, value.radius * (grow ? 1.15 : 1 / 1.15))) });
+      }
+    };
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, []);
   const activePoint = hoverPoint ?? inspectionPoints.at(-1) ?? null;
   const comparisonDelta = useMemo(() => {
     if (!field || !baseline || !activePoint || effectiveMode !== 'compare' ||
@@ -1204,9 +1462,9 @@ export function TerrainViewport({
   }, [attempt]);
 
   useEffect(() => {
-    if (field) sceneRef.current?.update(field, project, settings);
+    if (field) sceneRef.current?.update(field, renderProject, settings);
     else sceneRef.current?.applySettings(settings);
-  }, [field, project, settings, attempt]);
+  }, [field, renderProject, settings, attempt]);
 
   const sceneBrush = effectiveMode === '3d' || effectiveMode === 'split' ? activeBrush : null;
   useEffect(() => {
@@ -1214,7 +1472,13 @@ export function TerrainViewport({
     return () => sceneRef.current?.setMaterialBrush(null);
   }, [sceneBrush, attempt]);
   useBrushInput(() => hostRef.current?.querySelector('canvas') ?? null, sceneBrush ? {
-    feedback: sceneBrush, settings: brushSettings, commit: onPaint,
+    feedback: sceneBrush, settings: paintBrushSettings, commit: commitPaint,
+    sample: selectMaterialAt, pickAction: paintAction, onLimit: onPaintNotice,
+    remainingPoints: capacity.maxPoints - capacity.points,
+    remainingStrokes: capacity.maxStrokes - capacity.strokes,
+    radiusAt: brushSettings.radiusUnit === 'screen'
+      ? (_point, x, y) => sceneRef.current?.brushRadiusAt(x, y, brushSettings.radiusPixels ?? 48) ?? brushSettings.radius
+      : undefined,
     pick: (x, y) => sceneRef.current?.pickPoint(x, y) ?? null,
   } : null, field, project, attempt);
 
@@ -1369,22 +1633,13 @@ export function TerrainViewport({
         <div className="nh-viewport-toolset" role="group" aria-label="Viewport tool">
           {VIEWPORT_TOOLS.map(({ value, label, Icon }) => (
             <button key={value} type="button" aria-label={label + ' terrain'}
-              title={label + (value === 'measure' || value === 'profile' ? ' · select two points' : '')}
+              title={value === 'paint' && (!field || splineEditing || busy || stale || effectiveMode === 'compare')
+                ? paintDisabledReason : label + (value === 'measure' || value === 'profile' ? ' · select two points' : value === 'paint' ? ' · B' : '')}
               aria-pressed={tool === value}
               disabled={value !== 'navigate' && (!field || splineEditing ||
                 (value === 'paint' && (effectiveMode === 'compare' || busy || stale)))}
               className={tool === value ? 'active' : ''}
-              onClick={() => {
-                setTool(value);
-                setInspectionPoints([]);
-                setHoverPoint(null);
-                if (value === 'paint') {
-                  change({ material: 'pbr', autoRotate: false });
-                  onChannelChange('basecolor');
-                  setShowSettings(false);
-                  setShowLayers(false);
-                }
-              }}>
+              onClick={() => changeTool(value)}>
               <Icon size={15} /><span>{label}</span>
             </button>
           ))}
@@ -1405,10 +1660,6 @@ export function TerrainViewport({
                 value={channel}
                 onChange={(event) => {
                   const next = event.target.value as MapChannel;
-                  if (tool === 'paint' && !['basecolor', 'materialNormal', 'detailNormal', 'relief', 'roughness', 'splat', 'orm',
-                    'rockWeight', 'soilWeight', 'vegetationWeight', 'snowWeight'].includes(next)) {
-                    setTool('navigate');
-                  }
                   onChannelChange(next);
                 }}
               >
@@ -1462,8 +1713,25 @@ export function TerrainViewport({
           )}
         </div>
       </div>
-      {activeBrush && <MaterialBrushControls value={brushSettings} previousLayer={previousLayer.current} worldSize={project.worldSize}
-        surface={surface} onLayerColor={onLayerColor} onChange={setBrushSettings}/>}
+      <PaintWorkspace active={tool === 'paint'} settings={brushSettings} previousLayer={previousLayer.current}
+        worldSize={project.worldSize} resolution={field?.resolution ?? project.resolution}
+        elevationRange={paintElevationRange}
+        surface={surface} onSettingsChange={setBrushSettings} onLayerColor={onLayerColor}
+        layers={paintLayers} activeLayerId={effectiveLayerId}
+        onSelectLayer={setActiveLayerId} onLayersChange={onPaintLayersChange}
+        before={paintBefore} onBeforeChange={setPaintBefore}
+        disabledReason={paintDisabledReason}
+        status={connectedFill ? 'Click a connected material region · Esc cancels' : selectingPaint
+          ? 'Click polygon vertices · Enter to finish · Backspace removes a point' : pickingMaterial
+            ? 'Click the terrain to sample a material · Esc cancels' : paintStatus}
+        picking={pickingMaterial} onPickingChange={picking => {
+          setPickingMaterial(picking); setSelectingPaint(false); setConnectedFill(false);
+        }} selecting={selectingPaint} onSelectingChange={selecting => {
+          setSelectingPaint(selecting); setPickingMaterial(false); setConnectedFill(false);
+          if (selecting) setPaintSelection({ points: [] });
+          else setPaintSelection(selection => selection && (selection.points.length >= 3 || selection.region) ? selection : null);
+        }} selection={paintSelection} onSelectionChange={setPaintSelection} onFill={fillPaint}
+        onUndo={onUndo} onRedo={onRedo} canUndo={canUndo} canRedo={canRedo}>
       <div className={`nh-preview-surface nh-mode-${effectiveMode}${activeBrush ? ' nh-painting' : ''}`}>
         <div
           className="nh-three-pane"
@@ -1565,7 +1833,7 @@ export function TerrainViewport({
                 </div>
               )}
               <div className="nh-view-hint">
-                {activeBrush ? <>Drag to paint<span>·</span>Esc to cancel stroke</>
+                {activeBrush ? <>Drag to paint<span>·</span>Space-drag to orbit<span>·</span>Alt-click to sample</>
                   : <>Drag to orbit<span>·</span>Double-click to focus</>}
                 <span>·</span>Right-drag to pan<span>·</span>Scroll to zoom
               </div>
@@ -1608,8 +1876,10 @@ export function TerrainViewport({
         {effectiveMode !== '3d' && (
           <div className="nh-map-pane">
             <MapCanvas field={field} channel={effectiveMode === 'compare' ? 'terrain' : channel}
-              project={project} spline={spline} splineEditing={splineEditing}
-              onSplinePath={onSplinePath} brushFeedback={activeBrush} brushSettings={brushSettings} onPaint={onPaint}
+              project={renderProject} spline={spline} splineEditing={splineEditing}
+              onSplinePath={onSplinePath} brushFeedback={activeBrush} brushSettings={paintBrushSettings} onPaint={commitPaint}
+              onSampleMaterial={selectMaterialAt} onPaintAction={paintAction} paintSelection={tool === 'paint' ? paintSelection : null}
+              onPaintNotice={onPaintNotice}
               initialFraming={mapFraming.current}
               onFramingChange={next => { mapFraming.current = next; }}
               tool={tool} hoverPoint={hoverPoint} inspectionPoints={inspectionPoints}
@@ -1829,7 +2099,7 @@ export function TerrainViewport({
                   type="button"
                   aria-pressed={settings.material === material}
                   className={settings.material === material ? 'active' : ''}
-                  onClick={() => { if (material !== 'pbr' && tool === 'paint') setTool('navigate'); change({ material }); }}
+                  onClick={() => change({ material })}
                 >
                   <span className={`nh-material-swatch nh-swatch-${material}`} />
                   <span>
@@ -2023,6 +2293,7 @@ export function TerrainViewport({
           </div>
         )}
       </div>
+      </PaintWorkspace>
     </section>
   );
 }

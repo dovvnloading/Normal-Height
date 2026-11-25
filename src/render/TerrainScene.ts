@@ -23,7 +23,8 @@ import { updatePreviewTexture } from './pbrTexture';
 import { applyPackedPBRMaterial } from './pbrMaterial';
 import { createTerrainPicker } from './terrainPicking';
 import { MaterialBrushOverlay } from './materialBrushOverlay';
-import type { BrushFeedback } from './brushFeedback';
+import type { BrushFeedback, LiveBrushPreview } from './brushFeedback';
+import { getPaintStrokes } from '../materials/paintLayers';
 import { geometryBufferBytes } from './meshDiagnostics';
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
@@ -164,6 +165,9 @@ export class TerrainScene {
   private readonly onContextLost: (event: Event) => void;
   private brush: BrushFeedback | null = null;
   private brushOverlay: MaterialBrushOverlay | null = null;
+  private brushUnsubscribe: (() => void) | null = null;
+  private releaseBrushConsumer: (() => void) | null = null;
+  private brushPreview: LiveBrushPreview | null = null;
   private pickSurface: ReturnType<typeof createTerrainPicker> | null = null;
   private readonly inverseTerrain = new THREE.Matrix4();
   private readonly localRay = new THREE.Ray();
@@ -203,6 +207,12 @@ export class TerrainScene {
   }
 
   setMaterialBrush(feedback: BrushFeedback | null) {
+    this.brushUnsubscribe?.();
+    this.releaseBrushConsumer?.();
+    this.brushUnsubscribe = null;
+    this.releaseBrushConsumer = null;
+    if (this.brushPreview) this.applySurfaceMaterial();
+    this.brushPreview = null;
     this.brush = feedback;
     this.brushOverlay?.dispose();
     this.brushOverlay = null;
@@ -212,7 +222,34 @@ export class TerrainScene {
       });
       this.terrain.add(this.brushOverlay.mesh);
     }
+    if (feedback) {
+      this.releaseBrushConsumer = feedback.registerConsumer('scene');
+      this.brushUnsubscribe = feedback.subscribe(() => {
+        const preview = feedback.liveFor('scene');
+        if (preview === this.brushPreview) return;
+        this.brushPreview = preview;
+        this.applySurfaceMaterial(preview ?? undefined);
+        this.renderer.domElement.dataset.brushPreviewStatus = preview ? 'live' : 'idle';
+        this.renderer.domElement.dataset.brushPreviewResolution = String(preview?.field.resolution ?? 0);
+        this.needsRender = true;
+      });
+    }
+    this.renderer.domElement.setAttribute('aria-label', feedback
+      ? 'Interactive 3D terrain. Drag to paint. Hold Space to orbit, Alt-click to sample a material. Right-drag to pan, scroll to zoom.'
+      : 'Interactive 3D terrain. Drag to orbit, right-drag to pan, scroll to zoom.');
     this.needsRender = true;
+  }
+
+  /** Convert a screen-sized radius to the tile plane at the actual cursor hit. */
+  brushRadiusAt(clientX: number, clientY: number, pixels: number): number {
+    const center = this.pickPoint(clientX, clientY);
+    if (center) {
+      for (const [dx, dy] of [[pixels, 0], [-pixels, 0], [0, pixels], [0, -pixels]]) {
+        const edge = this.pickPoint(clientX + dx, clientY + dy);
+        if (edge) return Math.max(0.0001, Math.min(0.5, Math.hypot(edge.u - center.u, edge.v - center.v)));
+      }
+    }
+    return Math.max(0.0001, Math.min(0.5, pixels / Math.max(1, this.renderer.domElement.clientWidth)));
   }
 
   /** Height on the displayed triangles in scene units, including exaggeration. */
@@ -1170,6 +1207,7 @@ export class TerrainScene {
       // both the signed relief and the weights for the new surface.
       if (this.field === field && this.project &&
           this.project.materialPaint === project.materialPaint &&
+          this.project.paintLayers === project.paintLayers &&
           displacementSettings(this.project) === displacementSettings(project)) {
         this.project = project;
         this.surfaceMaps = maps;
@@ -1187,11 +1225,12 @@ export class TerrainScene {
   }
 
   private finishSurface() {
+    this.brushPreview = null;
     this.applySurfaceMaterial();
     const monitor = this.renderer.domElement.dataset;
     monitor.displacementStatus = 'ready';
     monitor.materialStatus = this.settings.material === 'pbr' ? 'ready' : 'inactive';
-    this.brush?.baked(this.project!.materialPaint);
+    this.brush?.baked(getPaintStrokes(this.project!), 'scene');
     this.needsRender = true;
   }
 
@@ -1207,8 +1246,10 @@ export class TerrainScene {
   }
 
   /** Upload textures only for PBR. Other palettes share the displaced geometry. */
-  private applySurfaceMaterial() {
-    const field = this.field, project = this.project, maps = this.surfaceMaps;
+  private applySurfaceMaterial(previewOverride?: LiveBrushPreview) {
+    const field = previewOverride?.field ?? this.field,
+      project = previewOverride?.project ?? this.project,
+      maps = previewOverride?.maps ?? this.surfaceMaps;
     if (!field || !project || !maps) return;
     const monitor = this.renderer.domElement.dataset;
     if (this.settings.material !== 'pbr') {
@@ -1412,6 +1453,8 @@ export class TerrainScene {
   }
 
   dispose() {
+    this.brushUnsubscribe?.();
+    this.releaseBrushConsumer?.();
     this.disposed = true;
     this.pendingMesh = null;
     if (this.meshBenchmark) delete (window as BenchmarkWindow).__nhMeshBenchmark;

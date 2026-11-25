@@ -5,6 +5,7 @@ import type { PBRChannel } from '../materials/pbr';
 import type { HeightField, TerrainProject } from '../model/types';
 import { slug } from '../model/project';
 import { isSinglePBRExportFormat } from './budget';
+import { getPaintLayers, getPaintStrokes } from '../materials/paintLayers';
 
 const encoder = new TextEncoder();
 function crc32(data: Uint8Array) {
@@ -144,7 +145,8 @@ export function makeExport(
         minMeters: reliefRange.min, maxMeters: reliefRange.max,
         decoding: 'vertical relief in meters = minMeters + sample/65535 * (maxMeters-minMeters)',
       },
-      paintedStrokes: project.materialPaint?.length ?? 0,
+      paintedStrokes: getPaintStrokes(project).length,
+      paintLayers: getPaintLayers(project).map(({ id, name, visible, opacity }) => ({ id, name, visible, opacity })),
       terrainAnalysis: {
         slope: 'Physical gradient in meters per meter; slope exposed in degrees',
         landform: 'Signed plane-corrected multi-radius height residual: positive valley / negative crest',

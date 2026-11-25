@@ -1,4 +1,5 @@
 import { parseMaterialPaint } from '../materials/materialPaint';
+import { parsePaintLayers } from '../materials/paintLayers';
 import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
 import { resolveSurface, SPLAT_LAYERS, SURFACE_LIMITS } from '../materials/pbr';
 import { NODE_DEFINITIONS, createNode } from './registry';
@@ -194,6 +195,7 @@ export function parseProject(raw: unknown): TerrainProject {
     ...(p.materialPaint !== undefined
       ? { materialPaint: parseMaterialPaint(p.materialPaint) }
       : {}),
+    ...(p.paintLayers !== undefined ? { paintLayers: parsePaintLayers(p.paintLayers) } : {}),
     graph: { nodes, edges },
   };
 }

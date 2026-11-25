@@ -5,6 +5,7 @@ import type { PBRMaps } from './pbr';
 import { paintChangeBounds, rectArea, type TexelRect } from './materialRegion';
 import type { MaterialRanges } from './layerSynthesis';
 import type { MaterialStroke } from './materialPaint';
+import { getPaintStrokes, paintLayerSignature, paintStackKey } from './paintLayers';
 import {
   assemblePreview,
   type PreviewSnapshot,
@@ -39,26 +40,17 @@ export function packedPreview(maps: PBRMaps): PackedPreview | null {
   return previews.get(maps) ?? null;
 }
 
-// Immutable stroke lists are shared by undo/redo snapshots. Use identity to
-// avoid serializing thousands of coordinates on each camera or project update.
-const paintIds = new WeakMap<NonNullable<TerrainProject['materialPaint']>, number>();
-let nextPaintId = 0;
 function surfaceKey(project: TerrainProject) {
   return JSON.stringify([
     project.seed,
     project.worldSize,
     project.heightScale,
     resolveSurface(project.surface),
+    paintStackKey(project),
   ]);
 }
 export function pbrVariantKey(project: TerrainProject): string {
-  const history = project.materialPaint;
-  let paintId = 0;
-  if (history?.length) {
-    paintId = paintIds.get(history) ?? ++nextPaintId;
-    paintIds.set(history, paintId);
-  }
-  return `${surfaceKey(project)}|${paintId}`;
+  return `${surfaceKey(project)}|${paintLayerSignature(project)}`;
 }
 
 function incrementalBase(
@@ -116,7 +108,7 @@ export function requestPBR(
     // structured-cloned because terrain/3D callers still own their originals.
     const worker = new Worker(new URL('./pbr.worker.ts', import.meta.url), { type: 'module' });
     const surface = surfaceKey(project),
-      strokes = project.materialPaint ?? [];
+      strokes = getPaintStrokes(project);
     const base = incrementalBase(variants, surface, strokes, field.resolution);
     job = { worker, promise, reject, surface, strokes, users: 0, finished: false };
     const running = job;

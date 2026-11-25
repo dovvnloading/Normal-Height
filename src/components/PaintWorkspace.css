@@ -1,0 +1,1366 @@
+/* Painting studio: compact essentials above an uninterrupted canvas, with a
+   scrollable inspector that becomes an intentional drawer on smaller panes. */
+.nh-paint-workspace {
+  --paint-accent-soft: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  --paint-accent-strong: color-mix(in srgb, var(--accent) 78%, var(--text));
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  container-type: inline-size;
+}
+.nh-paint-workspace-inactive,
+.nh-paint-workspace-inactive > .nh-paint-workspace-body,
+.nh-paint-workspace-inactive > .nh-paint-workspace-body > .nh-paint-canvas-shell {
+  display: contents;
+  container-type: normal;
+}
+.nh-paint-workspace button,
+.nh-paint-workspace select,
+.nh-paint-workspace input {
+  font-family: inherit;
+}
+.nh-paint-workspace button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 6px 9px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.nh-paint-workspace button:hover:not(:disabled) {
+  background: var(--paint-accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.nh-paint-workspace button[aria-pressed='true'],
+.nh-paint-workspace button.active {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
+  background: var(--paint-accent-soft);
+  color: var(--text);
+}
+.nh-paint-workspace button:disabled,
+.nh-paint-workspace fieldset:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.nh-paint-workspace :is(button, input, select, summary):focus-visible {
+  outline: 2px solid var(--paint-accent-strong);
+  outline-offset: 2px;
+}
+.nh-paint-workspace kbd {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font: 9px var(--mono);
+  background: color-mix(in srgb, var(--raised) 70%, transparent);
+  white-space: nowrap;
+}
+.nh-paint-studio-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  min-height: 42px;
+  gap: 6px;
+  padding: 3px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.nh-paint-studio-title,
+.nh-paint-studio-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.nh-paint-studio-title {
+  flex: 1 1 auto;
+}
+.nh-paint-studio-title > svg {
+  color: var(--paint-accent-strong);
+  flex: 0 0 auto;
+}
+.nh-paint-studio-title strong {
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.nh-paint-active-layer {
+  color: var(--muted);
+  min-width: 0;
+  max-width: 240px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+}
+.nh-paint-active-layer > span {
+  padding: 0 8px 0 3px;
+  opacity: 0.6;
+}
+.nh-paint-studio-actions {
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.nh-paint-studio-actions > button {
+  min-width: 34px;
+}
+.nh-paint-studio-actions .nh-paint-before {
+  border-color: var(--line);
+  margin-left: 3px;
+  min-width: 85px;
+}
+.nh-paint-workspace .nh-paint-essentials {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  padding: 9px 12px;
+  background: var(--raised);
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+}
+.nh-paint-material-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.nh-paint-workspace .nh-brush-layer-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 3px;
+}
+.nh-paint-workspace .nh-brush-layer-list button {
+  min-height: 42px;
+  gap: 6px;
+  padding: 4px 7px;
+  font-size: 11px;
+  border-color: transparent;
+}
+.nh-paint-workspace .nh-brush-layer-list button[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+.nh-paint-workspace .nh-brush-layer-list button kbd {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin-left: 1px;
+  font-size: 8px;
+}
+.nh-paint-workspace .nh-brush-layer-list .nh-paint-swatch {
+  width: 27px;
+  height: 27px;
+}
+.nh-paint-workspace .nh-brush-layer-list .nh-paint-erase {
+  border-left-color: var(--line);
+  margin-left: 3px;
+  padding-left: 10px;
+}
+.nh-paint-workspace .nh-brush-layer-list .nh-paint-eyedropper {
+  width: 36px;
+  padding: 0;
+}
+.nh-paint-workspace .nh-brush-albedo {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.nh-paint-workspace .nh-brush-albedo > span {
+  max-width: 32px;
+}
+.nh-paint-workspace .nh-brush-albedo input {
+  width: 30px;
+  height: 32px;
+  min-width: 30px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+  background: var(--panel);
+}
+.nh-paint-workspace .nh-brush-properties {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 16px;
+  flex: 1 1 355px;
+  align-items: flex-start;
+  min-width: 270px;
+  max-width: 590px;
+}
+.nh-paint-number-control {
+  min-width: 0;
+  flex: 1 1 0;
+  margin: 0;
+}
+.nh-paint-number-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 27px;
+  font-size: 10px;
+}
+.nh-paint-number-heading > span:first-child {
+  white-space: nowrap;
+  color: var(--muted);
+}
+.nh-paint-workspace .number-field {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 3px;
+  padding: 0 5px;
+  height: 26px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font: 10px var(--mono);
+}
+.nh-paint-workspace .number-field input {
+  width: 43px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  outline-offset: 1px;
+  background: transparent;
+  color: var(--text);
+  text-align: right;
+  font: 10px var(--mono);
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.nh-paint-workspace .number-field input::-webkit-inner-spin-button,
+.nh-paint-workspace .number-field input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.nh-paint-workspace .nh-paint-number-control > input[type='range'] {
+  display: block;
+  width: 100%;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.nh-paint-radius-control {
+  flex: 1.25 1 0;
+  min-width: 0;
+  position: relative;
+}
+.nh-paint-radius-control .nh-paint-number-heading {
+  padding-right: 0;
+}
+.nh-paint-workspace select {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--raised);
+  color: var(--text);
+  font-size: 11px;
+  padding: 5px 7px;
+}
+.nh-paint-workspace .nh-paint-radius-unit {
+  display: block;
+  margin-top: 3px;
+  min-height: 22px;
+  height: 22px;
+  padding: 0 4px;
+  width: 100%;
+  font-size: 9px;
+}
+.nh-paint-workspace-body {
+  display: flex;
+  flex: 1 1 0;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.nh-paint-canvas {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.nh-paint-canvas > .nh-preview-surface {
+  flex: 1 1 0;
+}
+.nh-paint-canvas-notice {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--raised) 94%, transparent);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  box-shadow: 0 4px 18px #00000014;
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+.nh-paint-canvas-notice > svg {
+  flex: 0 0 auto;
+}
+.nh-paint-canvas-notice button {
+  pointer-events: auto;
+  border-color: var(--line);
+  min-height: 28px;
+  padding: 4px 8px;
+}
+.nh-paint-notice-warning {
+  border-color: color-mix(in srgb, #bd915c 50%, var(--line));
+}
+.nh-paint-inspector {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 276px;
+  min-width: 0;
+  min-height: 0;
+  width: 276px;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  overflow: hidden;
+  z-index: 8;
+}
+.nh-paint-inspector-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.nh-paint-drawer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 3px 9px 3px 13px;
+  border-bottom: 1px solid var(--line);
+}
+.nh-paint-drawer-heading strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+.nh-paint-drawer-heading button {
+  min-height: 30px;
+  width: 30px;
+  padding: 3px;
+}
+.nh-paint-inspector-tabs button {
+  flex: 1 1 0;
+  padding: 5px 4px;
+  gap: 4px;
+  font-size: 10px;
+  min-height: 36px;
+}
+.nh-paint-inspector-tabs button[aria-selected='true'] {
+  background: var(--paint-accent-soft);
+  border-color: var(--line);
+}
+.nh-paint-inspector-tabs small {
+  font: 9px var(--mono);
+  color: var(--muted);
+}
+.nh-paint-inspector-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  scrollbar-width: thin;
+}
+.nh-paint-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0 10px;
+  font-size: 10px;
+  font-weight: 650;
+}
+.nh-paint-section-heading > small {
+  font-size: 9px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.nh-paint-section-heading > button {
+  width: 32px;
+  min-height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+}
+.nh-paint-help {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+  margin: 8px 0 12px;
+}
+.nh-paint-help b {
+  color: var(--text);
+  font-weight: 500;
+}
+.nh-paint-material-library {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.nh-paint-material-library > button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  border-color: var(--line);
+  background: var(--raised);
+  padding: 5px;
+  overflow: hidden;
+  gap: 7px;
+}
+.nh-paint-material-library > button > .nh-paint-swatch {
+  width: 100%;
+  height: 64px;
+  border-radius: 4px;
+}
+.nh-paint-material-library > button > span:not(.nh-paint-swatch) {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 3px 5px;
+}
+.nh-paint-material-library strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+.nh-paint-material-library small {
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.nh-paint-material-library > button > svg {
+  position: absolute;
+  right: 9px;
+  top: 77px;
+}
+.nh-paint-swatch {
+  display: inline-block;
+  position: relative;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: 5px;
+  border: 1px solid #0002;
+  background-color: var(--swatch-color);
+  box-shadow:
+    inset 0 1px 3px #ffffff22,
+    inset 0 -1px 5px #00000025;
+}
+.nh-paint-swatch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.65;
+  background: repeating-conic-gradient(#0002 0% 25%, #fff1 0% 50%) 50% / 3px 3px;
+}
+.nh-paint-swatch-rock {
+  background-image:
+    repeating-linear-gradient(
+      156deg,
+      transparent 0 9px,
+      #0005 10px 11px,
+      #fff3 12px,
+      transparent 13px 23px
+    ),
+    repeating-linear-gradient(63deg, #fff2 0 5px, #0002 7px 13px, transparent 14px 27px),
+    radial-gradient(ellipse at 80% 20%, #fff5, transparent 75%);
+}
+.nh-paint-swatch-soil {
+  background-image:
+    radial-gradient(ellipse at 30% 35%, #fff5 0 4%, transparent 5%),
+    radial-gradient(ellipse at 75% 75%, #0005 0 7%, transparent 9%),
+    repeating-linear-gradient(22deg, #0001 0 1px, #ffffff08 2px 6px);
+  background-size:
+    21px 17px,
+    29px 23px,
+    100% 100%;
+}
+.nh-paint-swatch-vegetation {
+  background-image:
+    radial-gradient(ellipse at 35% 30%, #c4d4848c 0 8%, #152e1555 36%, transparent 65%),
+    radial-gradient(ellipse at 80% 80%, #10281185, transparent 70%);
+  background-size:
+    14px 18px,
+    23px 15px;
+}
+.nh-paint-swatch-snow {
+  background-image:
+    radial-gradient(ellipse at 70% 30%, #fff9, transparent 70%),
+    repeating-linear-gradient(152deg, transparent 0 10px, #607c9733 13px, transparent 16px 25px);
+}
+.nh-paint-workspace .nh-paint-wide-button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  border-color: var(--line);
+  background: var(--raised);
+  margin: 5px 0;
+  min-height: 36px;
+}
+.nh-paint-wide-button > kbd {
+  margin-left: auto;
+}
+.nh-paint-tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+.nh-paint-tool-grid button {
+  border-color: var(--line);
+  background: var(--raised);
+  padding: 9px 5px;
+  flex-direction: column;
+  min-height: 59px;
+  font-size: 10px;
+}
+.nh-paint-selection-state {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+  font-size: 10px;
+}
+.nh-paint-selection-state > div {
+  display: flex;
+  gap: 5px;
+  margin-top: 4px;
+}
+.nh-paint-selection-state button {
+  border-color: var(--line);
+  min-height: 28px;
+  padding: 3px 9px;
+  font-size: 10px;
+}
+.nh-paint-brush-intro {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 17px;
+}
+.nh-paint-brush-intro > div:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.nh-paint-brush-intro strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.nh-paint-brush-intro span {
+  font: 9px var(--mono);
+  color: var(--muted);
+}
+.nh-paint-brush-intro small {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+.nh-paint-brush-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 70px;
+  height: 70px;
+  flex: 0 0 70px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: repeating-conic-gradient(var(--raised) 0% 25%, var(--panel) 0% 50%) 50%/14px 14px;
+  overflow: hidden;
+}
+.nh-paint-brush-footprint {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    var(--brush-pigment) 0 var(--brush-hardness),
+    transparent 72%
+  );
+}
+.nh-paint-tip-grain {
+  mask-image: repeating-conic-gradient(#000 0% 25%, #0008 0% 50%);
+  mask-size: 3px 3px;
+}
+.nh-paint-tip-scatter {
+  mask-image: radial-gradient(circle, #000 0 40%, transparent 70%);
+  mask-size: 9px 12px;
+}
+.nh-paint-brush-preview > span {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  display: flex;
+  padding: 3px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color: var(--muted);
+}
+.nh-paint-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.nh-paint-presets button {
+  display: flex;
+  flex-direction: column;
+  border-color: var(--line);
+  padding: 8px 3px 6px;
+  font-size: 9px;
+  min-height: 59px;
+  background: var(--raised);
+  gap: 5px;
+}
+.nh-paint-preset-tip {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent), transparent 72%);
+}
+.nh-paint-preset-hard .nh-paint-preset-tip {
+  background: var(--accent);
+}
+.nh-paint-preset-tip.nh-paint-preset-hard {
+  background: var(--accent);
+}
+.nh-paint-preset-tip.nh-paint-preset-rock {
+  background: repeating-linear-gradient(25deg, var(--accent) 0 2px, transparent 3px 5px);
+}
+.nh-paint-preset-tip.nh-paint-preset-vegetation {
+  background: radial-gradient(circle, var(--accent) 0 40%, transparent 60%) 0 0/8px 9px;
+}
+.nh-paint-saved-brushes ul {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+}
+.nh-paint-saved-brushes li {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 4px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--raised);
+}
+.nh-paint-saved-brushes li > button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  font-size: 10px;
+}
+.nh-paint-saved-brushes li > button:first-child > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.nh-paint-saved-brushes li > button:last-child {
+  flex: 0 0 28px;
+  width: 28px;
+  padding: 3px;
+}
+.nh-paint-saved-brushes form > label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.nh-paint-saved-brushes form > div {
+  display: flex;
+  gap: 5px;
+}
+.nh-paint-saved-brushes form input {
+  min-width: 0;
+  width: 100%;
+  flex: 1 1 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: var(--text);
+  background: var(--raised);
+  font-size: 10px;
+}
+.nh-paint-saved-brushes form button {
+  border-color: var(--line);
+  background: var(--paint-accent-soft);
+  min-height: 32px;
+}
+.nh-paint-preset-message {
+  padding: 6px 8px;
+  background: var(--paint-accent-soft);
+  border-radius: 4px;
+  margin: 7px 0 0;
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.nh-paint-rule {
+  height: 1px;
+  background: var(--line);
+  margin: 15px 0;
+}
+.nh-paint-select-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 13px 0;
+  font-size: 10px;
+}
+.nh-paint-select-control > span {
+  color: var(--muted);
+}
+.nh-paint-select-control select {
+  width: 100%;
+}
+.nh-paint-inspector-scroll .nh-paint-number-control {
+  margin: 13px 0;
+}
+.nh-paint-disclosure {
+  margin: 12px -2px 0;
+  padding: 11px 2px 0;
+  border-top: 1px solid var(--line);
+}
+.nh-paint-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 550;
+  cursor: pointer;
+  list-style: none;
+  min-height: 26px;
+  margin-bottom: 8px;
+}
+.nh-paint-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.nh-paint-disclosure > summary > small {
+  margin-left: auto;
+  color: var(--muted);
+  font: 9px var(--mono);
+}
+.nh-paint-disclosure > summary > svg:last-child {
+  color: var(--muted);
+}
+.nh-paint-disclosure:not([open]) > summary > svg:last-child {
+  transform: rotate(-90deg);
+}
+.nh-paint-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--text);
+  font-size: 10px;
+  cursor: pointer;
+  min-height: 30px;
+}
+.nh-paint-check input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+  margin: 0;
+}
+.nh-paint-segmented {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 2px;
+  gap: 2px;
+  background: var(--raised);
+  margin: 7px 0;
+}
+.nh-paint-segmented button {
+  flex: 1 1 0;
+  font-size: 10px;
+  min-height: 29px;
+  padding: 3px 5px;
+}
+.nh-paint-fieldset {
+  border: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+}
+.nh-paint-mask-rule {
+  padding: 4px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+.nh-paint-range-pair {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0 3px 22px;
+}
+.nh-paint-range-pair .number-field {
+  flex: 1 1 0;
+  max-width: 95px;
+}
+.nh-paint-range-pair .number-field input {
+  width: 100%;
+}
+.nh-paint-range-pair > span:not(.number-field) {
+  color: var(--muted);
+  font-size: 9px;
+}
+.nh-paint-mask-rule > .nh-paint-help {
+  margin: 4px 0 7px 22px;
+  font-size: 9px;
+}
+.nh-paint-workspace .nh-paint-text-button {
+  color: var(--muted);
+  padding: 4px 0;
+  min-height: 30px;
+  font-size: 10px;
+  margin-top: 7px;
+}
+.nh-paint-layer-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 17px;
+}
+.nh-paint-layer-item {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 1px;
+}
+.nh-paint-layer-item.active {
+  border-color: var(--accent);
+  background: var(--paint-accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.nh-paint-layer-item.hidden .nh-paint-layer-select {
+  opacity: 0.5;
+}
+.nh-paint-workspace .nh-paint-layer-item > button {
+  min-height: 38px;
+  border: 0;
+  padding: 5px;
+  background: transparent;
+}
+.nh-paint-layer-visible,
+.nh-paint-layer-lock {
+  flex: 0 0 28px;
+  color: var(--muted) !important;
+}
+.nh-paint-layer-select {
+  flex: 1 1 0;
+  justify-content: flex-start !important;
+  min-width: 0;
+  text-align: left;
+  gap: 7px !important;
+}
+.nh-paint-layer-select > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nh-paint-layer-select strong {
+  font-size: 10px;
+  font-weight: 550;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.nh-paint-layer-select small {
+  font-size: 8px;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.nh-paint-layer-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 30px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--raised));
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.nh-paint-procedural-layer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 6px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.nh-paint-procedural-layer small {
+  margin-left: auto;
+  font-size: 8px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.nh-paint-layer-name {
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--text);
+  border-radius: 5px;
+  font-size: 11px;
+}
+.nh-paint-layer-actions {
+  display: flex;
+  gap: 5px;
+  margin: 7px 0 12px;
+}
+.nh-paint-layer-actions button {
+  flex: 1 1 0;
+  border-color: var(--line);
+  background: var(--raised);
+}
+.nh-paint-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+}
+.nh-paint-empty p {
+  font-size: 10px;
+}
+.nh-paint-stroke-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nh-paint-stroke-history li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--line);
+  gap: 6px;
+  font-size: 10px;
+}
+.nh-paint-stroke-history li > span {
+  display: grid;
+  grid-template-columns: 19px 1fr;
+  gap: 3px 7px;
+  align-items: center;
+}
+.nh-paint-stroke-history b {
+  color: var(--muted);
+  font: 9px var(--mono);
+}
+.nh-paint-stroke-history small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 9px;
+}
+.nh-paint-stroke-history button {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: var(--muted);
+}
+.nh-paint-capacity {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.nh-paint-capacity > div {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+}
+.nh-paint-capacity output {
+  font: 9px var(--mono);
+}
+.nh-paint-capacity meter {
+  display: block;
+  width: 100%;
+  height: 10px;
+  margin: 6px 0;
+  accent-color: var(--accent);
+}
+.nh-paint-capacity meter::-webkit-meter-bar {
+  background: var(--line);
+  border: none;
+}
+.nh-paint-capacity meter::-webkit-meter-optimum-value {
+  background: var(--accent);
+}
+.nh-paint-capacity small {
+  color: var(--muted);
+  font: 8px var(--mono);
+  line-height: 1.6;
+}
+.nh-paint-capacity-warning p {
+  color: var(--clay, #986f56);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.nh-paint-statusbar {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 9px;
+}
+.nh-paint-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.nh-paint-status > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nh-paint-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #6d9970;
+}
+.nh-paint-status-dot.paused {
+  background: #b88b54;
+}
+.nh-paint-footer-actions {
+  display: flex;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.nh-paint-footer-actions button {
+  font-size: 9px;
+  color: var(--muted);
+  padding: 4px 5px;
+  min-height: 28px;
+  gap: 5px;
+}
+.nh-paint-shortcuts {
+  position: absolute;
+  z-index: 15;
+  bottom: calc(100% + 7px);
+  right: 8px;
+  width: min(330px, calc(100cqw - 16px));
+  max-height: calc(100cqh - 70px);
+  overflow: auto;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 12px;
+  box-shadow: 0 8px 30px #0002;
+  color: var(--text);
+}
+.nh-paint-shortcuts > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nh-paint-shortcuts strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+.nh-paint-shortcuts > div > button {
+  min-height: 26px;
+  width: 26px;
+  padding: 0;
+}
+.nh-paint-shortcuts dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 13px;
+  align-items: center;
+  font-size: 10px;
+  margin: 12px 0;
+}
+.nh-paint-shortcuts dt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+.nh-paint-shortcuts dd {
+  margin: 0;
+}
+.nh-paint-shortcuts p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  border-top: 1px solid var(--line);
+  margin: 0;
+  padding-top: 9px;
+  font-size: 9px;
+}
+.nh-paint-cursor-label {
+  paint-order: stroke;
+  stroke: #15211d;
+  stroke-width: 2px;
+  stroke-linejoin: round;
+  font-family: var(--mono);
+}
+.nh-paint-compact .nh-paint-inspector {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  bottom: 8px;
+  width: min(300px, calc(100% - 16px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 35px #0003;
+}
+.nh-paint-workspace .nh-paint-drawer-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #17251b22;
+  cursor: default;
+}
+.nh-paint-workspace .nh-paint-drawer-scrim:hover {
+  background: #17251b22;
+  border: 0;
+}
+@container (max-width: 1080px) {
+  .nh-paint-workspace .nh-paint-essentials {
+    gap: 7px 14px;
+  }
+  .nh-paint-workspace .nh-brush-properties {
+    max-width: none;
+    flex-basis: 300px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list button kbd {
+    display: none;
+  }
+  .nh-paint-workspace .nh-brush-layer-list button {
+    padding: 4px;
+    gap: 5px;
+  }
+}
+@container (max-width: 730px) {
+  .nh-paint-workspace .nh-paint-essentials {
+    padding: 6px 10px;
+    gap: 5px;
+  }
+  .nh-paint-material-tools {
+    flex: 1 1 100%;
+    justify-content: space-between;
+    gap: 5px;
+  }
+  .nh-paint-workspace .nh-brush-properties {
+    flex: 1 1 100%;
+    min-width: 0;
+    gap: 15px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list {
+    gap: 2px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list button {
+    padding: 4px 5px;
+  }
+  .nh-paint-workspace .nh-brush-albedo > span {
+    display: none;
+  }
+  .nh-paint-active-layer {
+    max-width: 130px;
+  }
+}
+@container (max-width: 480px) {
+  .nh-paint-studio-heading {
+    padding: 2px 7px;
+    min-height: 38px;
+  }
+  .nh-paint-studio-title {
+    gap: 5px;
+  }
+  .nh-paint-studio-title strong {
+    font-size: 10px;
+  }
+  .nh-paint-active-layer,
+  .nh-paint-inspector-button-text {
+    display: none;
+  }
+  .nh-paint-studio-actions .nh-paint-before {
+    min-width: 68px;
+    padding: 4px 5px;
+    gap: 4px;
+    font-size: 10px;
+  }
+  .nh-paint-studio-actions > button {
+    min-width: 28px;
+    min-height: 30px;
+    padding: 3px 5px;
+  }
+  .nh-paint-workspace .nh-paint-essentials {
+    padding: 5px 7px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list {
+    flex: 1 1 0;
+    justify-content: space-between;
+    gap: 1px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list button {
+    flex-direction: column;
+    font-size: 8px;
+    padding: 3px 4px;
+    min-height: 46px;
+    min-width: 37px;
+    gap: 3px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list .nh-paint-swatch {
+    width: 24px;
+    height: 24px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list .nh-paint-erase {
+    padding-left: 5px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list .nh-paint-eyedropper {
+    min-width: 30px;
+    width: 30px;
+  }
+  .nh-paint-workspace .nh-brush-albedo input {
+    width: 25px;
+    height: 32px;
+    min-width: 25px;
+  }
+  .nh-paint-workspace .nh-brush-properties {
+    gap: 8px;
+  }
+  .nh-paint-number-heading {
+    font-size: 9px;
+    gap: 2px;
+  }
+  .nh-paint-workspace .number-field {
+    padding: 0 3px;
+    font-size: 9px;
+    height: 24px;
+    gap: 2px;
+  }
+  .nh-paint-workspace .number-field input {
+    width: 34px;
+    font-size: 9px;
+  }
+  .nh-paint-workspace .nh-brush-properties .nh-paint-number-heading > .number-field > span {
+    display: none;
+  }
+  .nh-paint-statusbar {
+    padding: 0 7px;
+  }
+  .nh-paint-footer-actions button > span {
+    display: none;
+  }
+  .nh-paint-shortcuts dl {
+    gap: 8px;
+    font-size: 9px;
+  }
+}
+@media (pointer: coarse) {
+  .nh-paint-workspace button {
+    min-height: 44px;
+  }
+  .nh-paint-workspace input[type='range'] {
+    min-height: 28px;
+  }
+  .nh-paint-workspace .nh-brush-layer-list button {
+    min-width: 42px;
+    min-height: 44px;
+  }
+  .nh-paint-workspace .nh-paint-inspector-tabs button {
+    min-height: 44px;
+  }
+  .nh-paint-workspace .number-field {
+    min-height: 32px;
+  }
+  .nh-paint-workspace .nh-paint-layer-item > button {
+    min-height: 44px;
+  }
+  .nh-paint-workspace .nh-paint-layer-visible,
+  .nh-paint-workspace .nh-paint-layer-lock {
+    flex-basis: 36px;
+  }
+  .nh-paint-workspace .nh-paint-radius-unit {
+    display: block;
+    min-height: 30px;
+  }
+  .nh-paint-workspace .nh-paint-check {
+    min-height: 40px;
+  }
+  .nh-paint-workspace .nh-paint-check input {
+    width: 18px;
+    height: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nh-paint-workspace *,
+  .nh-paint-workspace *::before,
+  .nh-paint-workspace *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

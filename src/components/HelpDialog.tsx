@@ -33,12 +33,12 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
             [
               Paintbrush,
               '04 · Paint',
-              'Select Paint above the viewport. Drag on the terrain or map to place a material. Erase reveals the procedural surface. Each stroke can be undone.',
+              'Press B or choose Paint to open the painting studio. Choose a substrate or brush preset, then paint in 3D or 2D. Organize strokes in layers; terrain rules and polygon selections restrict coverage. Erase reveals the layers underneath. Each gesture can be undone.',
             ],
             [
               Download,
               '05 · Take it with you',
-              'Save a project to preserve the graph. Export reruns the graph at your chosen grid size and writes a precise heightmap.',
+              'Save a project to preserve the graph, paint layers, masks and strokes. Export reruns the graph at your chosen grid size. A complete PBR set includes material color, roughness, normals and coverage.',
             ],
           ].map(([Icon, title, copy]) => {
             const Component = Icon as typeof BookOpen;
@@ -71,6 +71,13 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
             ['3D orbit / pan', 'Left / right drag'],
             ['Focus viewport', 'F (over preview)'],
             ['Zoom', 'Scroll wheel'],
+            ['Paint / erase', 'B / E'],
+            ['Choose paint material', '1 · 2 · 3 · 4'],
+            ['Brush radius / hardness', '[ ] / Shift [ ]'],
+            ['Navigate while painting', 'Space + drag'],
+            ['Sample material / blend', 'Alt + click / Shift + drag'],
+            ['Cancel paint gesture', 'Esc'],
+            ['2D paint cursor / dab', 'Arrow keys / Enter'],
           ].map(([action, key]) => (
             <div key={action}>
               <span>{action}</span>
@@ -78,6 +85,11 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
             </div>
           ))}
         </div>
+        <p className="help-note">
+          While painting, one finger paints and two fingers navigate. Pen pressure can control radius,
+          strength, or both in the Brush panel. The live material preview refines after release.
+          Global color edits the selected substrate everywhere; layer opacity edits only that paint layer.
+        </p>
         <p className="help-note">
           Each session opens a fresh landscape. Your work autosaves in this browser; use Restore
           last session to reopen it, or download a project file to keep a portable copy.

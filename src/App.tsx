@@ -38,9 +38,11 @@ import { createNode } from './model/registry';
 import { STUDIO_KERNELS } from './model/noiseStudio';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject, STORAGE_KEY } from './model/project';
+import { readSessionBackup, writeSessionBackup } from './model/sessionBackup';
 import { loadViewSettings, saveViewSettings } from './model/viewSettings';
 import { resolveSurface } from './materials/pbr';
-import { canAppendMaterialStroke, type MaterialStroke } from './materials/materialPaint';
+import type { MaterialStroke } from './materials/materialPaint';
+import { applyPaintStrokes, paintCapacity, type PaintLayer } from './materials/paintLayers';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
@@ -56,6 +58,7 @@ import type {
 
 type ThemeMode = 'light' | 'dark';
 const THEME_STORAGE_KEY = 'normal-height.theme.v1';
+const SAVE_TIME_KEY = 'normal-height.project-saved-at.v1';
 function savedTheme(): ThemeMode | null {
   try {
     const choice = localStorage.getItem(THEME_STORAGE_KEY);
@@ -92,6 +95,7 @@ export default function App() {
   );
   const [previewNodeId, setPreviewNodeId] = useState<string | undefined>();
   const [editingSplineId, setEditingSplineId] = useState<string | null>(null);
+  const [paintSession, setPaintSession] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [channel, setChannel] = useState<MapChannel>('height');
   const [settings, setSettings] = useState<ViewSettings>(loadViewSettings);
@@ -141,6 +145,16 @@ export default function App() {
   const [toast, setToast] = useState(initial.message);
   // The previous session's autosave, until the user restores it or edits.
   const [lastSession, setLastSession] = useState(initial.lastSession);
+  useEffect(() => {
+    let active = true;
+    readSessionBackup().then(backup => {
+      if (!active || !backup || projectRef.current !== initial.project) return;
+      let localTime = 0;
+      try { localTime = Number(localStorage.getItem(SAVE_TIME_KEY)) || 0; } catch { /* optional */ }
+      if (!initial.lastSession || backup.savedAt >= localTime) setLastSession(backup.project);
+    }).catch(() => { /* The localStorage session remains available when IndexedDB is blocked. */ });
+    return () => { active = false; };
+  }, [initial]);
   const [saved, setSaved] = useState(true);
   const [storageError, setStorageError] = useState(false);
   const [historyTick, setHistoryTick] = useState(0);
@@ -213,7 +227,8 @@ export default function App() {
   }, [toast]);
   const apply = useCallback((next: TerrainProject, group = '', record = true) => {
     const previous = projectRef.current;
-    const changed = JSON.stringify(next) !== JSON.stringify(previous);
+    const paintChanged = next.materialPaint !== previous.materialPaint || next.paintLayers !== previous.paintLayers;
+    const changed = paintChanged || JSON.stringify(next) !== JSON.stringify(previous);
     if (!changed && !pendingMove.current) return;
     if (!record) {
       pendingMove.current ??= previous;
@@ -261,14 +276,20 @@ export default function App() {
     if (project === initial.project) return;
     setLastSession(null);
     setSaved(false);
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
+      const savedAt = Date.now();
+      let localSaved = false;
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-        setSaved(true);
-        setStorageError(false);
-      } catch {
-        setStorageError(true);
-      }
+        localSaved = true;
+        localStorage.setItem(SAVE_TIME_KEY, String(savedAt));
+      } catch { /* Large paint projects use the IndexedDB backup below. */ }
+      let backupSaved = false;
+      try { await writeSessionBackup(project, savedAt); backupSaved = true; }
+      catch { /* Either storage backend can independently preserve the session. */ }
+      if (projectRef.current !== project) return;
+      setSaved(localSaved || backupSaved);
+      setStorageError(!localSaved && !backupSaved);
     }, 600);
     return () => clearTimeout(timer);
   }, [project, initial.project]);
@@ -292,23 +313,32 @@ export default function App() {
     [apply],
   );
   const paintMaterial = useCallback(
-    (strokes: MaterialStroke[]) => {
-      const current = projectRef.current;
-      const next = [...(current.materialPaint ?? [])];
-      for (const stroke of strokes) {
-        if (!canAppendMaterialStroke(next, stroke)) {
-          notify(
-            'This stroke exceeds the project paint limit. Undo a stroke or use a shorter drag.',
-          );
-          return false;
-        }
-        next.push(stroke);
+    (strokes: MaterialStroke[], activeLayerId: string) => {
+      try {
+        apply(applyPaintStrokes(projectRef.current, strokes, activeLayerId));
+        return true;
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'This stroke could not be saved.');
+        return false;
       }
-      apply({ ...current, materialPaint: next });
-      return true;
     },
     [apply, notify],
   );
+  const changePaintLayers = useCallback((layers: PaintLayer[]) => {
+    const capacity = paintCapacity({ paintLayers: layers });
+    if (capacity.layers > capacity.maxLayers || capacity.strokes > capacity.maxStrokes || capacity.points > capacity.maxPoints) {
+      notify('That layer change exceeds paint storage. Remove an unused layer or shorten its stroke history first.');
+      return;
+    }
+    const previous = projectRef.current;
+    const old = previous.paintLayers;
+    const opacityEdit = old && old.length === layers.length && layers.every((layer, index) =>
+      layer.id === old[index].id && layer.strokes === old[index].strokes &&
+      layer.name === old[index].name && layer.visible === old[index].visible &&
+      layer.locked === old[index].locked && layer.mask === old[index].mask);
+    apply({ ...previous, materialPaint: undefined, paintLayers: layers },
+      opacityEdit ? 'paint-layer-opacity' : '');
+  }, [apply, notify]);
   const updateNode = useCallback(
     (patch: Partial<NonNullable<typeof selected>>, group = '') => {
       if (!selectedId) return;
@@ -464,6 +494,7 @@ export default function App() {
   const restoreLastSession = useCallback(() => {
     if (!lastSession) return;
     apply(lastSession);
+    setPaintSession(value => value + 1);
     setEditingSplineId(null);
     setPreviewNodeId(undefined);
     setSelectedId(
@@ -477,6 +508,7 @@ export default function App() {
     (id: string) => {
       const next = createProject(id);
       apply(next);
+      setPaintSession(value => value + 1);
       const designer = next.graph.nodes.find((node) => node.kind === 'spline');
       setSelectedId(
         designer?.id ??
@@ -506,14 +538,15 @@ export default function App() {
   );
   const save = useCallback(() => {
     saveProject(projectRef.current);
-    notify('Project downloaded. Your graph, parameters, and seeds are included.');
+    notify('Project downloaded with your graph, paint layers, masks, and material settings.');
   }, [notify]);
   const openFile = async (file: File) => {
     try {
-      if (file.size > 3_000_000)
-        throw new Error('This project is too large. The maximum file size is 3 MB.');
+      if (file.size > 24_000_000)
+        throw new Error('This project is too large. The maximum file size is 24 MB.');
       const loaded = parseProject(JSON.parse(await file.text()));
       apply(loaded);
+      setPaintSession(value => value + 1);
       setEditingSplineId(null);
       setPreviewNodeId(undefined);
       setSelectedId(
@@ -569,7 +602,8 @@ export default function App() {
       ) {
         event.preventDefault();
         setViewportFocus((v) => !v);
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId &&
+        !(event.target instanceof HTMLElement && event.target.closest('.nh-viewport'))) {
         event.preventDefault();
         remove();
       } else if (event.key === 'Escape') {
@@ -799,10 +833,17 @@ export default function App() {
         <main className="work-area" ref={centerRef} aria-label="Terrain workspace">
           <section className="preview-area">
             <TerrainViewport
+              paintSession={paintSession}
               spline={selectedSpline}
               splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
               onSplinePath={changeSplinePath}
               onPaint={paintMaterial}
+              onPaintLayersChange={changePaintLayers}
+              onPaintNotice={notify}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={past.current.length > 0}
+              canRedo={future.current.length > 0}
               onLayerColor={(layer, color) => {
                 const surface = resolveSurface(projectRef.current.surface);
                 updateProject({

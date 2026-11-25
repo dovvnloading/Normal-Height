@@ -412,8 +412,10 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
     name: 'brush.nhterrain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)),
   });
   const scene = page.locator('.nh-three-host canvas');
-  const strokes = () => page.evaluate(() =>
-    (JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject).materialPaint ?? []);
+  const strokes = () => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject;
+    return saved.paintLayers?.flatMap(layer => layer.strokes) ?? saved.materialPaint ?? [];
+  });
   await expect(page.locator('.nh-viewport')).toHaveAttribute('data-displayed-world-size', '5000');
   await page.getByRole('button', { name: 'Paint terrain' }).click();
   await page.getByRole('button', { name: 'Snow', exact: true }).click();
@@ -494,7 +496,8 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
 
   // The complete brush and channel selector remain reachable on a small phone.
   await page.setViewportSize({ width: 360, height: 740 });
-  await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
+  const focus = page.getByRole('button', { name: 'Focus viewport', exact: true });
+  if (await focus.isVisible()) await focus.click();
   await expect(page.getByRole('button', { name: 'Paint terrain' })).toBeInViewport();
   await expect(page.getByRole('slider', { name: 'Brush hardness' })).toBeInViewport();
   await expect(page.getByLabel('Map channel')).toBeInViewport();

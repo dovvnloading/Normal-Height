@@ -1676,3 +1676,14 @@
   .nh-brush-layer-list > svg { display: none; }
   .nh-brush-layer-list button { font-size: 10px; padding: 4px; }
 }
+
+/* Selection guides remain aligned with the map through zoom and pan. */
+.nh-paint-selection {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 4;
+  filter: drop-shadow(0 1px 1px #142b22);
+}
+.nh-painting canvas[data-brush-navigating='true'] { cursor: grab; }
+.nh-painting canvas[data-brush-navigating='true']:active { cursor: grabbing; }
