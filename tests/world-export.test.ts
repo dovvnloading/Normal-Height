@@ -12,7 +12,7 @@ import {
   streamWorldExport,
   worldCRC32,
 } from '../src/export/worldExport';
-import type { WorldExportOptions } from '../src/export/worldExport';
+import type { WorldExportOptions, WorldExportProgress } from '../src/export/worldExport';
 
 function options(): WorldExportOptions {
   const noise = createNode('noise', { x: 0, y: 0 }, 'source');
@@ -148,6 +148,43 @@ function png(bytes: Uint8Array) {
 }
 
 describe('World export contracts', () => {
+  it('reports actual tile completions separately for range, encoding and authored masks', async () => {
+    const value = options();
+    const mask = createNode('mask', { x: 200, y: 200 }, 'progress-mask');
+    value.project.graph.nodes.push(mask);
+    value.project.graph.edges.push({
+      id: 'mask-edge',
+      source: value.project.graph.nodes[0].id,
+      target: mask.id,
+      sourceHandle: 'height',
+      targetHandle: 'in',
+    });
+    value.masks = [{ nodeId: mask.id, name: 'Coverage' }];
+    const reports: WorldExportProgress[] = [];
+    const manifest = await streamWorldExport(
+      value,
+      () => {},
+      (_progress, _stage, detail) => {
+        if (detail) reports.push(detail);
+      },
+    );
+    const count = manifest.tiles.length;
+    for (const phase of ['range', 'encode', 'masks'] as const) {
+      const completed = reports.filter((report) => report.phase === phase);
+      expect(completed.map((report) => report.completed)).toEqual(
+        Array.from({ length: count + 1 }, (_, i) => i),
+      );
+      expect(completed.every((report) => report.total === count && report.unit === 'tiles')).toBe(
+        true,
+      );
+    }
+    expect(
+      reports
+        .filter((report) => report.phase === 'prepare')
+        .every((report) => report.total === undefined),
+    ).toBe(true);
+    expect(reports.at(-1)).toEqual({ phase: 'archive', completed: 1, total: 1 });
+  });
   it('reassembles partial rectangular RAW tiles exactly with common canonical samples and checksums', async () => {
     const value = options(),
       { files, manifest } = await collect(value);

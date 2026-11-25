@@ -10,6 +10,7 @@ on:
       - 'src/hooks/**'
       - 'src/components/World*'
       - 'src/components/world*'
+      - 'src/components/world/**'
       - 'src/components/ComputePanel*'
       - 'src/App.tsx'
       - 'tests/world*'
