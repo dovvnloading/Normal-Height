@@ -8,11 +8,29 @@ async function connect(page: Page, source: string, target: string) {
   const from = page.getByLabel(source, { exact: true });
   const to = page.getByLabel(target, { exact: true });
   await from.hover();
-  const end = await to.boundingBox();
+  // Chromium can scroll React Flow's wrapper during locator.hover(). React
+  // Flow then restores its native scroll position, leaving the mouse beside
+  // the small port. Read fresh coordinates after that reset before dragging.
+  await expect.poll(() => page.getByTestId('rf__wrapper').evaluate((element) =>
+    [element.scrollLeft, element.scrollTop])).toEqual([0, 0]);
+  const [start, end] = await Promise.all([from.boundingBox(), to.boundingBox()]);
+  expect(start).not.toBeNull();
   expect(end).not.toBeNull();
+  const sourcePoint = { x: start!.x + start!.width / 2, y: start!.y + start!.height / 2 };
+  const targetPoint = { x: end!.x + end!.width / 2, y: end!.y + end!.height / 2 };
+  const nodePosition = await from.evaluate((element) =>
+    element.closest<HTMLElement>('.react-flow__node')!.style.transform);
+  await page.mouse.move(sourcePoint.x, sourcePoint.y);
+  expect(await from.evaluate((element, point) =>
+    document.elementFromPoint(point.x, point.y) === element, sourcePoint)).toBe(true);
+  expect(await to.evaluate((element, point) =>
+    document.elementFromPoint(point.x, point.y) === element, targetPoint)).toBe(true);
   await page.mouse.down();
-  await page.mouse.move(end!.x + end!.width / 2, end!.y + end!.height / 2, { steps: 16 });
+  await page.mouse.move(targetPoint.x, targetPoint.y, { steps: 16 });
   await page.mouse.up();
+  // A successful port gesture must not accidentally move its source node.
+  await expect.poll(() => from.evaluate((element) =>
+    element.closest<HTMLElement>('.react-flow__node')!.style.transform)).toBe(nodePosition);
 }
 
 /** Read the bytes handed to the browser's download manager while the Blob URL is live. */

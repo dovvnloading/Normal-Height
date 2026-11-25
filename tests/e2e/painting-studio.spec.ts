@@ -80,7 +80,7 @@ async function mapPixel(page: Page, u = 0.5, v = 0.5) {
 // These exercise the actual browser input path, persisted projects and workers.
 // They use a small graph so painting regressions do not require an erosion benchmark.
 test.describe('painting studio', () => {
-  test('composites named layers, opacity, visibility and order; locking cannot append paint', async ({ page }) => {
+  test('composites named layers, opacity, visibility and order; locking cannot append paint', async ({ page }, info) => {
     await openStudio(page);
     await setNumber(page, 'Brush strength value', 100);
     await setNumber(page, 'Brush hardness value', 100);
@@ -135,6 +135,11 @@ test.describe('painting studio', () => {
     await expect.poll(async () => (await storedProject(page)).paintLayers?.length).toBe(2);
     await page.getByRole('button', { name: 'Undo painting change' }).click();
     await expect.poll(async () => (await storedProject(page)).paintLayers?.length).toBe(3);
+    await page.getByLabel('Map channel', { exact: true }).selectOption('basecolor');
+    await expect(page.locator('.nh-map-update')).toHaveCount(0);
+    await info.attach('Painting studio desktop layers', {
+      body: await captureViewport(page), contentType: 'image/png',
+    });
   });
 
   test('numeric controls and presets persist, while canvas shortcuts do not hijack typing', async ({ page }, info) => {
@@ -186,6 +191,9 @@ test.describe('painting studio', () => {
     await expect(page.getByLabel('Brush strength value')).toBeInViewport();
     await expect(page.getByRole('slider', { name: 'Brush hardness', exact: true })).toBeInViewport();
     await expect(page.getByRole('button', { name: 'Open paint inspector', exact: true })).toBeInViewport();
+    const terrain = page.locator('.nh-three-host canvas');
+    await expect(terrain).toHaveAttribute('data-displacement-status', 'ready', { timeout: 60_000 });
+    await expect(terrain).toHaveAttribute('data-material-status', 'ready');
     await info.attach('Painting studio at 360 pixels', { body: await captureViewport(page), contentType: 'image/png' });
     await page.getByRole('button', { name: 'Open paint inspector', exact: true }).click();
     await expect(page.getByRole('complementary', { name: 'Paint inspector' })).toBeInViewport();
@@ -260,6 +268,9 @@ test.describe('painting studio', () => {
   });
 
   test('renders a live PBR draft before release and commits exactly one undoable gesture', async ({ page }, info) => {
+    // Match the existing close-range shader fixture's SwiftShader pixel budget.
+    // Desktop-wide layout evidence is captured by the 2D layers journey above.
+    await page.setViewportSize({ width: 960, height: 660 });
     await openStudio(page, '3d');
     await page.getByRole('button', { name: 'Snow', exact: true }).click();
     await setNumber(page, 'Brush strength value', 100);
@@ -284,6 +295,7 @@ test.describe('painting studio', () => {
     await expect.poll(() => strokeCount(page)).toBe(0);
     await page.getByRole('button', { name: 'Redo painting change' }).click();
     await expect.poll(() => strokeCount(page)).toBe(1);
+    await expect(terrain).toHaveAttribute('data-material-status', 'ready');
     await info.attach('Painting studio', { body: await captureViewport(page), contentType: 'image/png' });
   });
 
