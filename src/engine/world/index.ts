@@ -155,6 +155,11 @@ export function describeWorldGraph(
   if (requiresGlobal && d.boundary === 'periodic')
     reason =
       'Global transport/legacy solvers do not implement periodic boundary conditions. Use an open or closed domain, or disable global stages.';
+  const unsupported = stages.find((stage) =>
+    stage.kind === 'heightImport' || stage.kind === 'coast' || stage.kind === 'maskOutput',
+  );
+  if (unsupported)
+    reason = `“${unsupported.label}” is available in the single-domain Terrain workspace. World tiles do not yet implement imported rasters, coastal shelf shaping or named-mask output nodes.`;
   if (requiresGlobal)
     warnings.push(
       'Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion.',
@@ -184,8 +189,8 @@ export function describeWorldGraph(
     stages,
     capability: {
       supported: !reason,
-      native: !requiresGlobal,
-      fullGraph: true,
+      native: !requiresGlobal && !unsupported,
+      fullGraph: !unsupported,
       requiresGlobal,
       warnings,
       reason,

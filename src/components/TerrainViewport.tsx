@@ -6,6 +6,7 @@ import {
   CloudSun,
   Sprout,
   Wind,
+  Waves,
   Check,
   ChevronDown,
   Columns2,
@@ -43,6 +44,7 @@ import type {
   ViewSettings,
 } from '../model/types';
 import { TerrainScene } from '../render/TerrainScene';
+import { resolveWaterLevelMeters, WATER_PALETTES, waterHeightRange } from '../render/water';
 import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
 import { DEFAULT_MAP_FRAMING, sampleGrid, sampleTerrain, terrainProfile, formatMeters } from '../model/viewportUX';
 import type { DifferenceMapResult, DifferenceStatistics } from '../render/compareMap';
@@ -68,6 +70,7 @@ type Baseline = { field: HeightField; project: TerrainProject; label: string };
 
 interface TerrainViewportProps {
   paintSession: number;
+  maskPreview: boolean;
   spline: TerrainNode | null;
   splineEditing: boolean;
   onSplinePath: (path: SplinePoint[]) => void;
@@ -163,6 +166,39 @@ const CHANNEL_GROUPS = [
     'vegetationWeight', 'snowWeight'] },
 ] as const;
 
+const WATER_MOODS = [
+  {
+    id: 'tropical',
+    label: 'Tropical noon',
+    settings: {
+      waterPalette: 'lagoon', waterHorizon: true, skyEnabled: true,
+      sunAzimuth: 250, sunElevation: 63, skyTurbidity: 2.3,
+      skyRayleigh: 2.3, skyExposure: 1.03, cloudCoverage: 0.12,
+      waterWaveHeight: 1.1, waterSpeed: 0.7, waterClarity: 0.84, waterFoam: 0.72,
+    },
+  },
+  {
+    id: 'golden',
+    label: 'Golden coast',
+    settings: {
+      waterPalette: 'dusk', waterHorizon: true, skyEnabled: true,
+      sunAzimuth: 252, sunElevation: 11, skyTurbidity: 5.5,
+      skyRayleigh: 2.9, skyExposure: 1.04, cloudCoverage: 0.28,
+      waterWaveHeight: 1.0, waterSpeed: 0.55, waterClarity: 0.7, waterFoam: 0.78,
+    },
+  },
+  {
+    id: 'storm',
+    label: 'Storm surf',
+    settings: {
+      waterPalette: 'ocean', waterHorizon: true, skyEnabled: true,
+      sunAzimuth: 315, sunElevation: 24, skyTurbidity: 9,
+      skyRayleigh: 1.8, skyExposure: 0.90, cloudCoverage: 0.90,
+      waterWaveHeight: 3.4, waterSpeed: 1.4, waterClarity: 0.40, waterFoam: 0.96,
+    },
+  },
+] as const;
+
 const VIEWPORT_TOOLS = [
   { value: 'navigate', label: 'Navigate', Icon: MousePointer2 },
   { value: 'paint', label: 'Paint', Icon: Paintbrush },
@@ -207,6 +243,7 @@ function rememberRaster(field: HeightField, key: string, raster: HTMLCanvasEleme
 }
 
 function MapCanvas({
+  maskWeights,
   field,
   channel,
   project,
@@ -229,6 +266,7 @@ function MapCanvas({
   cameraFocus,
   cameraBearing,
 }: {
+  maskWeights: boolean;
   field: HeightField | null;
   channel: MapChannel;
   project: TerrainProject;
@@ -282,9 +320,10 @@ function MapCanvas({
   const [sample, setSample] = useState<{
     x: number;
     y: number;
-    elevation: number;
+    height: number;
     value: string;
   } | null>(null);
+  useEffect(() => setSample(null), [field, channel]);
   const [dimensions, setDimensions] = useState({ width: 100, height: 100 });
   const drag = useRef<{ x: number; y: number; startX: number; startY: number } | null>(null);
   const clickStart = useRef<{ x: number; y: number } | null>(null);
@@ -680,14 +719,14 @@ function MapCanvas({
       value = `${CHANNELS.find(c => c.value === channel)?.label}: ${(
         materialMapsRef.current.splat[index * 4 + weightChannel] / 255 * 100
       ).toFixed(1)}%`;
-    setSample({ x, y, elevation: field.height[index] * project.heightScale, value });
+    setSample({ x, y, height: field.height[index], value });
   }
 
   return (
     <div className="nh-map" ref={hostRef}>
       <canvas
         ref={canvasRef}
-        aria-label={`${CHANNELS.find((c) => c.value === channel)?.label} map. ${tool === 'navigate'
+        aria-label={`${maskWeights ? 'Mask weight' : CHANNELS.find((c) => c.value === channel)?.label} map. ${tool === 'navigate'
           ? 'Drag to pan' : tool === 'paint' ? 'Drag to paint, arrows to move, Enter to dab' : 'Click to sample, right or middle drag to pan'}, scroll to zoom.
           Press Home to fit. In inspection tools, use arrow keys to move the cursor and Enter to pin a point.`}
         role="img"
@@ -1020,7 +1059,7 @@ function MapCanvas({
             <span>
               {sample.x}, {sample.y}
             </span>
-            <b>{sample.elevation.toFixed(1)} m</b>
+            <b>{maskWeights ? `${(sample.height * 100).toFixed(1)}% weight` : `${(sample.height * project.heightScale).toFixed(1)} m`}</b>
             {sample.value && <span>{sample.value}</span>}
           </>
         ) : (
@@ -1033,16 +1072,19 @@ function MapCanvas({
 }
 
 function MapLegend({
+  maskWeights,
   field,
   channel,
   project,
 }: {
+  maskWeights: boolean;
   field: HeightField | null;
   channel: MapChannel;
   project: TerrainProject;
 }) {
   const legend = useMemo(() => {
     if (!field) return null;
+    if (maskWeights) return { label: 'Mask weight', start: '0%', end: '100%', empty: false };
     if (channel === 'relief')
       return { label: 'Signed material relief · gray at zero', start: 'Recessed', end: 'Raised', empty: false };
     if (channel === 'normal' || channel === 'materialNormal' || channel === 'detailNormal')
@@ -1102,7 +1144,7 @@ function MapLegend({
       end: max.toPrecision(3),
       empty: max === 0,
     };
-  }, [field, channel, project.heightScale]);
+  }, [field, channel, project.heightScale, maskWeights]);
   if (!legend) return null;
   return (
     <div className={`nh-map-legend nh-map-legend-${channel}`}>
@@ -1122,6 +1164,7 @@ function MapLegend({
 
 export function TerrainViewport({
   paintSession,
+  maskPreview,
   spline,
   splineEditing,
   onSplinePath,
@@ -1187,6 +1230,15 @@ export function TerrainViewport({
     selection: paintSelection && !selectingPaint && (paintSelection.points.length >= 3 || paintSelection.region)
       ? paintSelection : undefined };
   const surface = useMemo(() => resolveSurface(project.surface), [project.surface]);
+  const waterRange = useMemo(() => waterHeightRange(field, project), [field, project.heightScale]);
+  const autoWaterLevel = useMemo(() => resolveWaterLevelMeters(project, {
+    ...settings, waterLevelMode: 'coast',
+  }, field), [field, project.graph, project.heightScale]);
+  const displayedWaterLevel = settings.waterLevelMode === 'manual'
+    ? settings.waterLevel : autoWaterLevel;
+  const waterSpan = Math.max(25, waterRange.max - waterRange.min);
+  const waterSliderMin = Math.floor((waterRange.min - waterSpan * 0.1) / 10) * 10;
+  const waterSliderMax = Math.ceil((waterRange.max + waterSpan * 0.1) / 10) * 10;
   const previousLayer = useRef<MaterialLayer>('rock');
   if (brushSettings.layer !== 'erase') previousLayer.current = brushSettings.layer;
   const brushFeedback = useMemo(() => new BrushFeedback(), []);
@@ -1200,13 +1252,13 @@ export function TerrainViewport({
   useEffect(() => brushFeedback.subscribe(() => setPaintStatus(current =>
     current === brushFeedback.status ? current : brushFeedback.status)), [brushFeedback]);
   useEffect(() => {
-    if (tool !== 'paint' || !field) { pickerMaps.current = null; return; }
+    if (tool !== 'paint' || !field || maskPreview) { pickerMaps.current = null; return; }
     pickerMaps.current = null;
     let active = true;
     const request = requestPBR(field, project);
     request.promise.then(maps => { if (active) pickerMaps.current = maps; }).catch(() => {});
     return () => { active = false; request.release(); };
-  }, [field, project, tool]);
+  }, [field, project, tool, maskPreview]);
   // Spline handles own the 2D pointer surface while editing. Suppress
   // competing inspection tools instead of allowing inert tool selections.
   useEffect(() => {
@@ -1266,6 +1318,7 @@ export function TerrainViewport({
   settingsRef.current = settings;
   // A WebGL failure disables only modes that require 3D. Compare is an
   // entirely 2D analysis mode and must remain usable on software-only devices.
+  const weightMap = maskPreview && channel === 'height';
   const effectiveMode = sceneError && (viewMode === '3d' || viewMode === 'split')
     ? '2d' : viewMode;
   useEffect(() => {
@@ -1276,6 +1329,7 @@ export function TerrainViewport({
     setShowLayers(false);
   }, [effectiveMode]);
   const paintDisabledReason = !field ? 'Build terrain to start painting.'
+    : maskPreview ? 'Return to Terrain output to resume painting.'
     : splineEditing ? 'Finish editing the spline to resume painting.'
     : busy ? 'Painting paused while terrain builds. Your brush will resume automatically.'
     : stale ? 'Build the updated terrain to resume painting.'
@@ -1346,6 +1400,10 @@ export function TerrainViewport({
       source: brushSettings.source ?? 'rock', points: [{ u: 0.5, v: 0.5 }], seed: project.seed }]);
   };
   const changeTool = (next: ViewportTool) => {
+    if (next === 'paint' && maskPreview) {
+      onPaintNotice('Return to Terrain output to resume painting.');
+      return;
+    }
     if (next === 'paint' && tool !== 'paint') {
       paintFocusBefore.current = focusMode;
       onFocusModeChange(true);
@@ -1637,11 +1695,11 @@ export function TerrainViewport({
         <div className="nh-viewport-toolset" role="group" aria-label="Viewport tool">
           {VIEWPORT_TOOLS.map(({ value, label, Icon }) => (
             <button key={value} type="button" aria-label={label + ' terrain'}
-              title={value === 'paint' && (!field || splineEditing || busy || stale || effectiveMode === 'compare')
+              title={value === 'paint' && (!field || maskPreview || splineEditing || busy || stale || effectiveMode === 'compare')
                 ? paintDisabledReason : label + (value === 'measure' || value === 'profile' ? ' · select two points' : value === 'paint' ? ' · B' : '')}
               aria-pressed={tool === value}
               disabled={value !== 'navigate' && (!field || splineEditing ||
-                (value === 'paint' && (effectiveMode === 'compare' || busy || stale)))}
+                (value === 'paint' && (maskPreview || effectiveMode === 'compare' || busy || stale)))}
               className={tool === value ? 'active' : ''}
               onClick={() => changeTool(value)}>
               <Icon size={15} /><span>{label}</span>
@@ -1649,7 +1707,7 @@ export function TerrainViewport({
           ))}
         </div>
         <div className="nh-viewport-toolbar-right">
-          {effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+          {!weightMap && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
             <button type="button" className={`nh-viewport-tool ${showLayers ? 'active' : ''}`}
               title="Map overlays" aria-label="Map overlays" aria-expanded={showLayers}
               onClick={() => setShowLayers(v => !v)}>
@@ -1670,7 +1728,7 @@ export function TerrainViewport({
                 {CHANNEL_GROUPS.map(group => (
                   <optgroup key={group.label} label={group.label}>
                     {CHANNELS.filter(c => (group.values as readonly string[]).includes(c.value))
-                      .map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                      .map(c => <option key={c.value} value={c.value}>{maskPreview && c.value === 'height' ? 'Mask weight' : c.label}</option>)}
                   </optgroup>
                 ))}
               </select>
@@ -1700,6 +1758,17 @@ export function TerrainViewport({
             {focusMode ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             <span>{focusMode ? 'Restore' : 'Focus'}</span>
           </button>
+          {(effectiveMode === '3d' || effectiveMode === 'split') && (
+            <button type="button"
+              className={`nh-viewport-tool nh-water-toggle ${settings.waterEnabled ? 'active' : ''}`}
+              title={settings.waterEnabled ? 'Hide cinematic water' : 'Show cinematic water'}
+              aria-label="Toggle water rendering"
+              aria-pressed={settings.waterEnabled}
+              onClick={() => change({ waterEnabled: !settings.waterEnabled })}>
+              <Waves size={16} />
+              <span>Water</span>
+            </button>
+          )}
           {(effectiveMode === '3d' || effectiveMode === 'split') && (
             <button
               ref={displayTrigger}
@@ -1841,6 +1910,12 @@ export function TerrainViewport({
                   : <>Drag to orbit<span>·</span>Double-click to focus</>}
                 <span>·</span>Right-drag to pan<span>·</span>Scroll to zoom
               </div>
+              {settings.waterEnabled && (
+                <div className="nh-water-readout" role="status">
+                  <Waves size={13} />
+                  <span>{WATER_PALETTES[settings.waterPalette].label} · {Math.round(displayedWaterLevel).toLocaleString()} m</span>
+                </div>
+              )}
               <div
                 className="nh-scene-resolution"
                 title="Adaptive triangle count from the current camera view. Original heightfields and exports remain at their full source resolution."
@@ -1879,7 +1954,7 @@ export function TerrainViewport({
         )}
         {effectiveMode !== '3d' && (
           <div className="nh-map-pane">
-            <MapCanvas field={field} channel={effectiveMode === 'compare' ? 'terrain' : channel}
+            <MapCanvas maskWeights={weightMap && effectiveMode !== 'compare'} field={field} channel={effectiveMode === 'compare' ? 'terrain' : channel}
               project={renderProject} spline={spline} splineEditing={splineEditing}
               onSplinePath={onSplinePath} brushFeedback={activeBrush} brushSettings={paintBrushSettings} onPaint={commitPaint}
               onSampleMaterial={selectMaterialAt} onPaintAction={paintAction} paintSelection={tool === 'paint' ? paintSelection : null}
@@ -1891,14 +1966,14 @@ export function TerrainViewport({
               baseline={effectiveMode === 'compare' && baseline?.project.worldSize === project.worldSize
                 ? baseline : null}
               compareKind={compareKind} wipe={wipe}
-              overlayChannel={effectiveMode === 'compare' ? null : overlayChannel}
+              overlayChannel={weightMap || effectiveMode === 'compare' ? null : overlayChannel}
               overlayOpacity={overlayOpacity}
               cameraFocus={effectiveMode === 'split' ? cameraFocus : null}
               cameraBearing={cameraHeading} />
-            {effectiveMode !== 'compare' && <MapLegend field={field} channel={channel} project={project} />}
+            {effectiveMode !== 'compare' && <MapLegend maskWeights={weightMap} field={field} channel={channel} project={project} />}
           </div>
         )}
-        {showLayers && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
+        {showLayers && !weightMap && effectiveMode !== '3d' && effectiveMode !== 'compare' && (
           <div className="nh-overlay-panel" role="region" aria-label="Map overlays">
             <div className="nh-overlay-heading">
               <strong>Map overlay</strong>
@@ -2116,6 +2191,97 @@ export function TerrainViewport({
                 </button>
               ))}
             </div>
+            <div className="nh-display-divider" />
+            <div className="nh-display-section-heading"><Waves size={13} /> Water & coastline</div>
+            <label className="nh-display-check">
+              <input type="checkbox" aria-label="Enable water rendering"
+                checked={settings.waterEnabled}
+                onChange={e => change({ waterEnabled: e.target.checked })} />
+              <span>Render cinematic water</span>
+            </label>
+            {settings.waterEnabled && (
+              <div className="nh-water-settings">
+                <div className="nh-water-moods" role="group" aria-label="Cinematic water scenes">
+                  {WATER_MOODS.map(mood => (
+                    <button key={mood.id} type="button"
+                      aria-label={`Apply ${mood.label} scene`}
+                      title={`Set water, sun, sky and clouds for ${mood.label.toLowerCase()}`}
+                      onClick={() => change({ ...mood.settings, waterEnabled: true })}>
+                      <span className={`nh-water-mood-swatch nh-water-mood-${mood.id}`}
+                        aria-hidden="true" />
+                      <span>{mood.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="nh-water-palettes" role="group" aria-label="Water appearance">
+                  {(Object.keys(WATER_PALETTES) as ViewSettings['waterPalette'][]).map(id => (
+                    <button key={id} type="button" title={WATER_PALETTES[id].label}
+                      aria-label={WATER_PALETTES[id].label}
+                      aria-pressed={settings.waterPalette === id}
+                      className={settings.waterPalette === id ? 'active' : ''}
+                      onClick={() => change({ waterPalette: id })}>
+                      <span className="nh-water-swatch"
+                        style={{ background: `linear-gradient(145deg, ${WATER_PALETTES[id].shallow}, ${WATER_PALETTES[id].deep})` }} />
+                      <span>{id === 'lagoon' ? 'Lagoon' : id === 'ocean' ? 'Ocean' :
+                        id === 'dusk' ? 'Dusk' : 'Alpine'}</span>
+                    </button>
+                  ))}
+                </div>
+                <label className="nh-display-check">
+                  <input type="checkbox" aria-label="Extend ocean horizon"
+                    checked={settings.waterHorizon}
+                    onChange={e => change({ waterHorizon: e.target.checked })} />
+                  <span>Open ocean beyond the tile</span>
+                </label>
+                <div className="nh-water-level-mode" role="group" aria-label="Water level source">
+                  <button type="button" aria-pressed={settings.waterLevelMode === 'coast'}
+                    className={settings.waterLevelMode === 'coast' ? 'active' : ''}
+                    onClick={() => change({ waterLevelMode: 'coast' })}>Follow coastline</button>
+                  <button type="button" aria-pressed={settings.waterLevelMode === 'manual'}
+                    className={settings.waterLevelMode === 'manual' ? 'active' : ''}
+                    onClick={() => change({ waterLevelMode: 'manual', waterLevel: displayedWaterLevel })}>
+                    Custom</button>
+                </div>
+                <label className="nh-display-range">
+                  <span>Water elevation<b>{Math.round(displayedWaterLevel).toLocaleString()} m</b></span>
+                  <input type="range" aria-label="Water level"
+                    min={waterSliderMin} max={waterSliderMax}
+                    step={Math.max(0.5, Math.round(waterSpan / 600 * 2) / 2)}
+                    value={Math.min(waterSliderMax, Math.max(waterSliderMin, displayedWaterLevel))}
+                    onChange={e => change({ waterLevelMode: 'manual', waterLevel: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Wave height<b>{settings.waterWaveHeight.toFixed(1)} m</b></span>
+                  <input type="range" aria-label="Water wave height" min="0" max="5" step="0.1"
+                    value={settings.waterWaveHeight}
+                    onChange={e => change({ waterWaveHeight: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Wave motion<b>{settings.waterSpeed.toFixed(2)}×</b></span>
+                  <input type="range" aria-label="Water wave speed" min="0" max="2" step="0.05"
+                    value={settings.waterSpeed}
+                    onChange={e => change({ waterSpeed: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Water clarity<b>{Math.round(settings.waterClarity * 100)}%</b></span>
+                  <input type="range" aria-label="Water clarity" min="0" max="1" step="0.02"
+                    value={settings.waterClarity}
+                    onChange={e => change({ waterClarity: Number(e.target.value) })} />
+                </label>
+                <label className="nh-display-range">
+                  <span>Shoreline foam<b>{Math.round(settings.waterFoam * 100)}%</b></span>
+                  <input type="range" aria-label="Shoreline foam" min="0" max="1" step="0.02"
+                    value={settings.waterFoam}
+                    onChange={e => change({ waterFoam: Number(e.target.value) })} />
+                </label>
+                <p className="nh-display-help">
+                  Moving swells, Fresnel reflections, shallow color and terrain-following foam.
+                  A connected Coastal shelf opens the surrounding sea. Follow coastline uses
+                  the Coast waterline in meters. Slide the waterline
+                  to override it. These effects never change terrain or exported maps.
+                </p>
+              </div>
+            )}
             <div className="nh-display-divider" />
             <div className="nh-display-section-heading"><CloudSun size={13} /> Atmosphere & lighting</div>
             <div className="nh-sky-presets" role="group" aria-label="Sky lighting presets">

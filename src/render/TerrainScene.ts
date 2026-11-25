@@ -19,6 +19,8 @@ import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { Atmosphere, skyLighting } from './Atmosphere';
 import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
+import { WaterSurface } from './WaterSurface';
+import { resolveWaterLevelMeters } from './water';
 import { updatePreviewTexture } from './pbrTexture';
 import { applyPackedPBRMaterial } from './pbrMaterial';
 import { createTerrainPicker } from './terrainPicking';
@@ -88,6 +90,9 @@ export class TerrainScene {
   // Software WebGL and 2D-only sessions should pay no GPU setup cost.
   private atmosphere: Atmosphere | null = null;
   private groundExtension: GroundExtension | null = null;
+  private water: WaterSurface | null = null;
+  private lastWaterFrame = 0;
+  private waterFrameInterval = 1 / 30;
   private theme: 'light' | 'dark' = 'light';
   private readonly floor: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
   private readonly grid: THREE.GridHelper;
@@ -348,6 +353,7 @@ export class TerrainScene {
     this.renderer.domElement.dataset.projection = 'perspective';
     this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
+    this.renderer.domElement.dataset.waterStatus = 'inactive';
     if (this.meshBenchmark) {
       const gl = this.renderer.getContext();
       this.gpuTimer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
@@ -633,8 +639,11 @@ export class TerrainScene {
     // software devices. User actions are never throttled.
     const weatherFrame = weatherMoves &&
       seconds - this.lastWeatherFrame >= this.weatherInterval;
-    if (this.needsRender || this.controls.autoRotate || weatherFrame) {
+    const waterFrame = !!this.water && this.settings.waterSpeed > 0 &&
+      seconds - this.lastWaterFrame >= this.waterFrameInterval;
+    if (this.needsRender || this.controls.autoRotate || weatherFrame || waterFrame) {
       const started = performance.now();
+      this.water?.setTime(seconds, this.settings.waterSpeed);
       const gl = this.meshBenchmark && this.gpuTimer
         ? this.renderer.getContext() as WebGL2RenderingContext : null;
       let gpuQuery: WebGLQuery | null = null;
@@ -664,6 +673,14 @@ export class TerrainScene {
         this.renderer.domElement.dataset.pbrFirstRenderMs =
           (performance.now() - started).toFixed(2);
         this.measurePBRFirstRender = false;
+      }
+      if (waterFrame) {
+        this.lastWaterFrame = seconds;
+        this.waterFrameInterval = THREE.MathUtils.lerp(
+          this.waterFrameInterval,
+          THREE.MathUtils.clamp((performance.now() - started) / 1000 * 4.3, 1 / 30, 1 / 10),
+          0.20,
+        );
       }
       if (weatherFrame) {
         const finished = performance.now();
@@ -800,6 +817,25 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
+  /** Lazily allocate water only when enabled and a completed field is available. */
+  private syncWater() {
+    const monitor = this.renderer.domElement.dataset;
+    if (!this.settings.waterEnabled || !this.field || !this.project) {
+      this.water?.dispose();
+      this.water = null;
+      monitor.waterStatus = 'inactive';
+      delete monitor.waterLevelMeters;
+      return;
+    }
+    this.water ??= new WaterSurface(this.scene);
+    this.water.update(this.field, this.project, this.settings);
+    monitor.waterStatus = 'ready';
+    monitor.waterLevelMeters = resolveWaterLevelMeters(
+      this.project, this.settings, this.field,
+    ).toFixed(2);
+    this.needsRender = true;
+  }
+
   applySettings(settings: ViewSettings) {
     const paletteChanged = this.settings.material !== settings.material;
     const scaleChanged = this.settings.exaggeration !== settings.exaggeration;
@@ -834,6 +870,7 @@ export class TerrainScene {
     if (this.terrain) this.terrain.scale.y = settings.exaggeration;
     if (this.skirt) this.skirt.scale.y = settings.exaggeration;
     this.updateSupport();
+    this.syncWater();
     if (settings.expandGround) {
       this.groundExtension ??= new GroundExtension(this.scene, this.renderer);
       this.groundExtension.update(this.field, this.project, settings, this.minimumElevation, this.terrain);
@@ -1102,6 +1139,7 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
+    this.syncWater();
     this.setInspection(this.hoverPoint, this.pinnedPoints);
     this.rebuildSplineGuide();
     this.groundExtension?.update(
@@ -1477,6 +1515,8 @@ export class TerrainScene {
     this.controls.dispose();
     this.atmosphere?.dispose();
     this.groundExtension?.dispose();
+    this.water?.dispose();
+    this.water = null;
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost);
     this.renderer.domElement.removeEventListener('dblclick', this.onFocusTerrain);
     this.scene.traverse((object) => {

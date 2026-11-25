@@ -18,7 +18,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
             [
               MousePointer2,
               '01 · Shape',
-              'Start with a landscape, or add a Mountain range or Procedural noise node. Select a node to adjust its parameters.',
+              'Start with a landscape, generate a mountain range, or use Heightmap import to bring in a PNG or RAW elevation grid.',
             ],
             [
               GitBranch,
@@ -38,7 +38,7 @@ export function HelpDialog({ onClose }: { onClose: () => void }) {
             [
               Download,
               '05 · Take it with you',
-              'Save a project to preserve the graph, paint layers, masks and strokes. Export reruns the graph at your chosen grid size. A complete PBR set includes material color, roughness, normals and coverage.',
+              'Save a project to preserve its graph, source samples, paint layers, masks and strokes. Export reruns the graph at your chosen grid size. Choose Terrain height, a named Mask output, or a complete PBR set with material color, roughness, normals and coverage.',
             ],
           ].map(([Icon, title, copy]) => {
             const Component = Icon as typeof BookOpen;

@@ -149,7 +149,10 @@ export function requestPBR(
     worker.onerror = (event) => fail(event.message || 'PBR material worker failed.');
     variants.set(key, running);
     try {
-      worker.postMessage({ field, project, dirty: base?.dirty, ranges: ranges.get(field) });
+      // The evaluated field already contains the source terrain. In particular,
+      // avoid cloning embedded heightmaps for every paint or material update.
+      const materialProject = { ...project, graph: { nodes: [], edges: [] } };
+      worker.postMessage({ field, project: materialProject, dirty: base?.dirty, ranges: ranges.get(field) });
     } catch (error) {
       fail(error instanceof Error ? error.message : 'Could not send terrain to material worker.');
     }

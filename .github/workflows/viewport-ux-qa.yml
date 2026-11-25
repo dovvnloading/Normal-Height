@@ -14,6 +14,9 @@ on:
       - 'src/render/brushFeedback*'
       - 'src/render/materialBrushOverlay.ts'
       - 'src/render/TerrainScene.ts'
+      - 'src/render/WaterSurface.ts'
+      - 'src/render/water.ts'
+      - 'tests/e2e/water.spec.ts'
       - 'src/render/terrainMesh.ts'
       - 'src/render/terrainDisplacement.ts'
       - 'src/render/compare.worker.ts'
@@ -44,7 +47,7 @@ jobs:
         include:
           - suite: viewport
             name: Browser interaction and layout
-            specs: tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts
+            specs: tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts tests/e2e/water.spec.ts
           - suite: painting
             name: Painting studio acceptance
             specs: tests/e2e/painting-studio.spec.ts

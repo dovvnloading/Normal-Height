@@ -3,8 +3,9 @@ import { BrushFeedback } from './brushFeedback';
 import { requestPBR } from '../materials/pbrClient';
 import type { PBRMaps } from '../materials/pbr';
 import type { MaterialStroke } from '../materials/materialPaint';
-import { getPaintStrokes } from '../materials/paintLayers';
+import { createPaintLayer, getPaintStrokes } from '../materials/paintLayers';
 import { createProject } from '../model/presets';
+import { createNode } from '../model/registry';
 import type { HeightField, TerrainProject } from '../model/types';
 
 vi.mock('../materials/pbrClient', async (importOriginal) => ({
@@ -271,6 +272,43 @@ describe('live brush preview lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0);
     expect(feedback.hasMarks).toBe(false);
     expect(jobs).toHaveLength(1);
+  });
+
+  it('omits imported rasters and paint history from guides while keeping physical mask settings', () => {
+    const dem = field(),
+      feedback = brush(dem),
+      source = createNode('heightImport');
+    source.raster = {
+      name: 'Imported terrain',
+      width: 2,
+      height: 2,
+      format: 'u16le',
+      data: 'AAAAAP////8=',
+    };
+    const imported: TerrainProject = {
+      ...project,
+      worldSize: 1600,
+      heightScale: 800,
+      seed: 47,
+      graph: { nodes: [source], edges: [] },
+      materialPaint: [snow],
+      paintLayers: [{ ...createPaintLayer('Snow', 'paint-base'), strokes: [snow] }],
+    };
+    feedback.configure(dem, imported, 'paint-base');
+    const mask = { elevation: [100, 400] as [number, number], breakup: 0.4, scale: 24 };
+    feedback.setGuides(dem, imported, [mask], null, true);
+    const payload = workers[0].postMessage.mock.calls[0][0];
+    expect(payload.project).toMatchObject({
+      worldSize: 1600,
+      heightScale: 800,
+      seed: 47,
+      graph: { nodes: [], edges: [] },
+    });
+    expect(payload.project.materialPaint).toBeUndefined();
+    expect(payload.project.paintLayers).toBeUndefined();
+    expect(payload.masks).toEqual([mask]);
+    expect(imported.graph.nodes[0].raster).toBe(source.raster);
+    expect(imported.paintLayers![0].strokes).toEqual([snow]);
   });
 
   it('does not let a late guide-worker error disconnect a newer guide request', () => {

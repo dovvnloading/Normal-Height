@@ -1,3 +1,4 @@
+import type { HeightRaster } from './heightRaster';
 import type { MaterialStroke } from '../materials/materialPaint';
 import type { PaintLayer } from '../materials/paintLayers';
 import type { SplinePoint } from './splines';
@@ -8,15 +9,18 @@ import type { WorldDefinition } from './world';
 
 export type NodeKind =
   | 'mountain'
+  | 'heightImport'
   | 'noise'
   | 'warp'
   | 'spline'
+  | 'coast'
   | 'hydraulic'
   | 'thermal'
   | 'terrace'
   | 'remap'
   | 'blend'
   | 'mask'
+  | 'maskOutput'
   | 'output'
   | 'note'
   | 'group';
@@ -28,6 +32,7 @@ export interface TerrainNode {
   params: Record<string, ParamValue>;
   /** Geometry lives in the project, not a render-only overlay. */
   path?: SplinePoint[];
+  raster?: HeightRaster;
   position: { x: number; y: number };
   bypassed?: boolean;
   parentId?: string;
@@ -149,6 +154,19 @@ export interface ViewSettings {
   cloudShadowStrength: number;
   expandGround: boolean;
   groundReach: number;
+  /** Optional preview-only water; never changes the graph, PBR maps or exported data. */
+  waterEnabled: boolean;
+  /** Extend a connected coast into a panoramic ocean beyond the square tile. */
+  waterHorizon: boolean;
+  waterLevelMode: 'coast' | 'manual';
+  /** Manual waterline in physical meters, independent of vertical exaggeration. */
+  waterLevel: number;
+  waterPalette: 'lagoon' | 'alpine' | 'ocean' | 'dusk';
+  /** Wave amplitude in meters. */
+  waterWaveHeight: number;
+  waterSpeed: number;
+  waterClarity: number;
+  waterFoam: number;
 }
 export interface ParamDefinition {
   key: string;

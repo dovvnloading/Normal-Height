@@ -237,7 +237,14 @@ export class BrushFeedback {
     };
     worker.postMessage({
       field: interactiveField(field),
-      project: { ...project, materialPaint: undefined, paintLayers: undefined },
+      // Guides sample the completed field. Embedded source rasters and paint
+      // history are unrelated to mask eligibility and can be large to clone.
+      project: {
+        ...project,
+        graph: { nodes: [], edges: [] },
+        materialPaint: undefined,
+        paintLayers: undefined,
+      },
       masks,
       selection: selected,
       showMask: !!hasRules,

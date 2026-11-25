@@ -31,6 +31,7 @@ import {
   Workflow,
 } from 'lucide-react';
 import { TerrainIcon, NODE_ICON_NAMES } from './TerrainIcon';
+import { assertRasterBudget } from '../model/heightRaster';
 import { createNode, NODE_DEFINITIONS } from '../model/registry';
 import type { TerrainGraph, TerrainNode } from '../model/types';
 import '@xyflow/react/dist/style.css';
@@ -75,6 +76,12 @@ function nodeSummary(node: TerrainNode) {
           .find((param) => param.key === 'mode')
           ?.options?.find((option) => option.value === p.mode)?.label ?? 'Fractal noise'
       );
+    case 'heightImport':
+      return node.raster ? `${node.raster.width} × ${node.raster.height} · ${node.raster.name}` : 'Choose a heightmap';
+    case 'coast':
+      return `${p.beachWidth} m beach · ${p.shelfWidth} m shelf`;
+    case 'maskOutput':
+      return 'Linear 16-bit mask';
     case 'spline':
       return `${node.params.mode === 'ridge' ? 'Mountain ridge' : 'River valley'} · ${node.path?.length ?? 0} points`;
     case 'hydraulic':
@@ -101,7 +108,9 @@ function nodeSummary(node: TerrainNode) {
 const Thumbnail = memo(function Thumbnail({
   values,
   label,
+  mask,
 }: {
+  mask: boolean;
   values?: Float32Array;
   label: string;
 }) {
@@ -112,12 +121,16 @@ const Thumbnail = memo(function Thumbnail({
     context.clearRect(0, 0, 48, 48);
     if (!values?.length) return;
     const side = Math.round(Math.sqrt(values.length));
-    let minimum = Infinity;
-    let maximum = -Infinity;
-    for (const value of values) {
-      if (Number.isFinite(value)) {
-        minimum = Math.min(minimum, value);
-        maximum = Math.max(maximum, value);
+    let minimum = 0;
+    let maximum = 1;
+    if (!mask) {
+      minimum = Infinity;
+      maximum = -Infinity;
+      for (const value of values) {
+        if (Number.isFinite(value)) {
+          minimum = Math.min(minimum, value);
+          maximum = Math.max(maximum, value);
+        }
       }
     }
     const span = Math.max(maximum - minimum, 0.00001);
@@ -129,17 +142,17 @@ const Thumbnail = memo(function Thumbnail({
         const value = (values[sy * side + sx] - minimum) / span;
         const light = Math.max(0, Math.min(1, value));
         const i = (y * 48 + x) * 4;
-        pixels.data[i] = 25 + light * 202;
-        pixels.data[i + 1] = 31 + light * 200;
-        pixels.data[i + 2] = 29 + light * 186;
+        pixels.data[i] = mask ? light * 255 : 25 + light * 202;
+        pixels.data[i + 1] = mask ? light * 255 : 31 + light * 200;
+        pixels.data[i + 2] = mask ? light * 255 : 29 + light * 186;
         pixels.data[i + 3] = 255;
       }
     }
     context.putImageData(pixels, 0, 0);
-  }, [values]);
+  }, [values, mask]);
   return (
     <div className={`ng-thumbnail ${values?.length ? '' : 'ng-thumbnail-empty'}`}>
-      <canvas ref={canvas} width={48} height={48} aria-label={`${label} height preview`} />
+      <canvas ref={canvas} width={48} height={48} aria-label={`${label} ${mask ? 'mask' : 'height'} preview`} />
       {!values?.length && <Mountain size={20} aria-hidden="true" />}
     </div>
   );
@@ -181,14 +194,14 @@ const TerrainGraphNode = memo(function TerrainGraphNode({
         </button>
       </div>
       <div className="ng-node-content">
-        <Thumbnail values={data.thumbnail} label={model.label} />
+        <Thumbnail values={data.thumbnail} label={model.label} mask={model.kind === 'maskOutput'} />
         <div className="ng-node-detail">
           <span className="ng-node-type">{definition.category}</span>
           <span className="ng-node-summary" title={nodeSummary(model)}>
             {nodeSummary(model)}
           </span>
           <div className="ng-node-meta">
-            {model.kind === 'output' ? (
+            {definition.outputs.length === 0 ? (
               <span className="ng-output-pill">OUTPUT</span>
             ) : model.bypassed ? (
               <span className="ng-bypass-label">Bypassed</span>
@@ -199,7 +212,7 @@ const TerrainGraphNode = memo(function TerrainGraphNode({
                   : `${timing < 10 ? timing.toFixed(1) : Math.round(timing)} ms`}
               </span>
             )}
-            {definition.inputs.length > 0 && model.kind !== 'output' && (
+            {definition.inputs.length > 0 && definition.outputs.length > 0 && (
               <button
                 type="button"
                 className="ng-node-action nodrag nopan"
@@ -863,9 +876,14 @@ function GraphCanvas(props: NodeGraphProps) {
             ? { ...node.position }
             : { x: node.position.x + 32, y: node.position.y + 32 },
       }));
+    const nextNodes = [...current.nodes, ...clones];
+    try { assertRasterBudget(nextNodes); } catch (error) {
+      props.onError((error as Error).message);
+      return;
+    }
     latest.current.onChange(
       {
-        nodes: [...current.nodes, ...clones],
+        nodes: nextNodes,
         edges: [
           ...current.edges,
           ...current.edges
@@ -1079,7 +1097,7 @@ function GraphCanvas(props: NodeGraphProps) {
           <div className="ng-empty">
             <Workflow size={26} />
             <strong>Start with a source</strong>
-            <span>Add a mountain range or noise, then connect it to an output.</span>
+            <span>Generate or import a heightfield, then connect it to an output.</span>
             <button type="button" className="ng-tool ng-add" onClick={props.onAdd}>
               <Plus size={14} />
               Add your first node

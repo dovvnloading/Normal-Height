@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { strFromU8, unzlibSync, unzipSync } from 'fflate';
 import { encodeHeightPNG, encodeRawHeight, makeExport } from '../src/export/heightmap';
+import { listMaskOutputs } from '../src/export/maskOutputs';
+import { createNode } from '../src/model/registry';
+import { evaluateGraph } from '../src/engine';
 import type { HeightField, TerrainProject } from '../src/model/types';
 
 const field = (values: number[], resolution = Math.sqrt(values.length)): HeightField => ({
@@ -127,6 +130,67 @@ describe('heightmap interchange', () => {
     const metadata = JSON.parse(strFromU8(files['alpine-test-metadata.json']));
     expect(metadata.elevationMinMeters).toBe(600);
     expect(metadata.elevationMaxMeters).toBe(600);
+  });
+
+  it('keeps authored mask weights on a fixed linear scale, including saturated and low-bit values', () => {
+    const project = fixtureProject();
+    const mask = createNode('maskOutput', undefined, 'named-mask');
+    mask.label = 'Rock / Soil';
+    project.graph.nodes.push(mask);
+    project.graph.edges.push({ id: 'branch', source: 'range', target: mask.id });
+    const result = makeExport(field([-0.5, 0.25, 1 / 65535, 1.2]), project, 'mask16', false, mask.id);
+    expect(result.filename).toBe('alpine-test-2-rock-soil-mask16.png');
+    const png = readPNG(result.bytes);
+    expect([png.bitDepth, png.colorType]).toEqual([16, 0]);
+    expect([...png.scanlines]).toEqual([0, 0, 0, 64, 0, 0, 0, 1, 255, 255]);
+  });
+
+  it('exports a named branch at target resolution even when Terrain output is disconnected', () => {
+    const project = fixtureProject();
+    const source = createNode('noise', undefined, 'quarter');
+    source.params.amplitude = 0;
+    source.params.offset = 0.25;
+    const mask = createNode('maskOutput', undefined, 'weight');
+    mask.label = 'Grass coverage';
+    project.graph.nodes = [source, mask, createNode('output', undefined, 'out')];
+    project.graph.edges = [{ id: 'branch', source: source.id, target: mask.id }];
+    const result = evaluateGraph(project, { resolution: 64, previewNodeId: mask.id });
+    const exported = makeExport(result.field, project, 'mask16', true, result.outputNodeId);
+    const files = unzipSync(exported.bytes);
+    const prefix = 'alpine-test-64-grass-coverage-mask16';
+    expect(exported.filename).toBe(prefix + '.zip');
+    const png = readPNG(files[prefix + '.png']);
+    expect([png.width, png.height]).toEqual([64, 64]);
+    const samples = new DataView(png.scanlines.buffer, png.scanlines.byteOffset, png.scanlines.byteLength);
+    for (let y = 0; y < 64; y++)
+      for (let x = 0; x < 64; x++)
+        expect(samples.getUint16(y * 129 + 1 + 2 * x)).toBe(16384);
+    const metadata = JSON.parse(strFromU8(files[prefix + '-metadata.json']));
+    expect(metadata).toMatchObject({
+      outputNodeId: 'weight', outputName: 'Grass coverage', sourceNodeId: 'quarter',
+      sourceHandle: 'height', colorSpace: 'linear-non-color', resolution: [64, 64],
+    });
+    expect(metadata.maskEncoding).toContain('65535');
+    expect(JSON.parse(strFromU8(files['alpine-test.nhterrain.json']))).toEqual({ ...project, resolution: 64 });
+  });
+
+  it('keeps colliding mask names distinct and rejects a disconnected or missing target', () => {
+    const project = fixtureProject();
+    for (const [id, label] of [['a', 'Rock'], ['b', 'rock-2'], ['c', 'Rock!']]) {
+      const mask = createNode('maskOutput', undefined, id);
+      mask.label = label;
+      project.graph.nodes.push(mask);
+    }
+    project.graph.edges.push({ id: 'wear', source: 'rain', sourceHandle: 'wear', target: 'c' });
+    const list = listMaskOutputs(project.graph);
+    expect(list.map((m) => m.stem)).toEqual(['rock', 'rock-2', 'rock-3']);
+    const values = field([0, 0, 1, 1]);
+    const result = makeExport(values, project, 'mask16', true, 'c');
+    expect(result.filename).toBe('alpine-test-2-rock-3-mask16.zip');
+    const files = unzipSync(result.bytes);
+    expect(JSON.parse(strFromU8(files['alpine-test-2-rock-3-mask16-metadata.json'])).sourceHandle).toBe('wear');
+    for (const target of [undefined, 'out', 'a'])
+      expect(() => makeExport(values, project, 'mask16', false, target)).toThrow('connected Mask output');
   });
 
   it('writes headerless IEEE Float32 little-endian elevations in meters', () => {

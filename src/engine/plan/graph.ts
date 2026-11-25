@@ -1,21 +1,8 @@
 import type { TerrainEdge, TerrainGraph, TerrainNode, TerrainProject } from '../../model/types';
 import { validSplinePoint, MAX_SPLINE_POINTS } from '../../model/splines';
+import { NODE_DEFINITIONS } from '../../model/registry';
+import { rasterIdentity } from '../../model/heightRaster';
 
-const kinds = new Set([
-  'mountain',
-  'noise',
-  'warp',
-  'spline',
-  'hydraulic',
-  'thermal',
-  'terrace',
-  'remap',
-  'blend',
-  'mask',
-  'output',
-  'note',
-  'group',
-]);
 export const metadata = (node: TerrainNode) => node.kind === 'note' || node.kind === 'group';
 export const inputHandle = (edge: TerrainEdge, node: TerrainNode) =>
   edge.targetHandle || (node.kind === 'blend' ? 'a' : 'in');
@@ -32,7 +19,7 @@ export function validateGraph(graph: TerrainGraph): string | null {
   const nodes = new Map<string, TerrainNode>();
   for (const node of graph.nodes) {
     if (!node.id || nodes.has(node.id)) return 'Each node must have a unique identifier.';
-    if (!kinds.has(node.kind)) return `Unknown node type: ${String(node.kind)}.`;
+    if (!Object.hasOwn(NODE_DEFINITIONS, node.kind)) return `Unknown node type: ${String(node.kind)}.`;
     if (!node.params || typeof node.params !== 'object')
       return `“${node.label || node.id}” has invalid parameters.`;
     if (
@@ -57,17 +44,14 @@ export function validateGraph(graph: TerrainGraph): string | null {
     if (metadata(source) || metadata(target)) return 'Notes and groups cannot carry terrain data.';
     if (source.id === target.id) return 'A node cannot connect to itself.';
     const handle = inputHandle(edge, target);
-    const inputs =
-      target.kind === 'blend'
-        ? ['a', 'b', 'mask']
-        : target.kind === 'hydraulic'
-          ? ['in', 'mask']
-          : ['mountain', 'noise'].includes(target.kind)
-            ? []
-            : ['in'];
-    if (!inputs.includes(handle)) return `“${target.label}” does not have a “${handle}” input.`;
-    if (!['height', 'flow', 'wear', 'deposition'].includes(edge.sourceHandle || 'height'))
-      return 'A connection uses an unknown output channel.';
+    if (!NODE_DEFINITIONS[target.kind].inputs.some((port) => port.id === handle))
+      return `“${target.label}” does not have a “${handle}” input.`;
+    const sourceHandle = edge.sourceHandle || 'height';
+    // Preserve legacy diagnostic routes while requiring declared new ports.
+    const outputs = NODE_DEFINITIONS[source.kind].outputs;
+    const legacyDiagnostic = outputs.length > 0 && ['flow', 'wear', 'deposition'].includes(sourceHandle);
+    if (!legacyDiagnostic && !outputs.some((port) => port.id === sourceHandle))
+      return `“${source.label}” does not have a “${sourceHandle}” output.`;
     const port = `${target.id}:${handle}`;
     if (ports.has(port))
       return `“${target.label}” already has a connection on its “${handle}” input.`;
@@ -146,7 +130,7 @@ export function compileGraph(project: TerrainProject, previewNodeId?: string): G
         ? 'pointwise'
         : node.kind === 'hydraulic' || node.kind === 'thermal'
           ? 'iterative'
-          : node.kind === 'mountain'
+          : node.kind === 'mountain' || node.kind === 'coast'
             ? 'global'
             : node.kind === 'warp' || node.kind === 'spline'
               ? 'global'
@@ -189,6 +173,7 @@ export function semanticProjectSignature(project: TerrainProject, previewNodeId?
       params: node.params,
       bypassed: !!node.bypassed,
       path: node.path,
+      raster: node.raster && rasterIdentity(node.raster),
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
   const byId = new Map(project.graph.nodes.map((node) => [node.id, node]));
