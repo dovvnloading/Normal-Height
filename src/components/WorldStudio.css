@@ -1107,6 +1107,8 @@
   font-size: 10px;
 }
 .we-viewport-container {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   position: relative;
