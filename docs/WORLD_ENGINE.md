@@ -262,7 +262,11 @@ field ownership/transfer, cache eviction, stale epochs, rectangular/odd/partial
 tiles, order-independent borders, ROI/halo equivalence, global reconstruction,
 independent PNG decoding, masks, cancellation, conservation and project
 round trips. Browser acceptance exercises production workers, downloads and
-real IndexedDB reopen/corruption paths.
+real IndexedDB reopen/corruption paths. File-export acceptance controls the
+picker and writable-stream boundary while retaining the production worker:
+it checks preflight rejection, duplicate requests, cancellation/unmount,
+write acknowledgments and an independently decoded RAW archive with checksums.
+This lifecycle coverage does not qualify native operating-system file pickers.
 
 ### Reproduce
 

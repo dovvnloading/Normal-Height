@@ -79,7 +79,7 @@ npm test            # Engine, export, and rendering-math tests
 npm run test:e2e    # Optional full browser suite; run npm run build first
 ```
 
-**Fast terrain checks run `npm test` and `npm run build`.** Pull requests that touch viewport, noise, PBR export, or World Engine code also run their targeted browser acceptance workflows. The World workflow captures the actual app and updates repository media after successful same-repository checks. Extended browser QA and mesh benchmarks remain available through **GitHub Actions → Extended terrain QA (manual only) → Run workflow**. Locally, build first, install Chromium with `npx playwright install chromium`, then run `npm run test:e2e`. Hardware benchmarking instructions are in [docs/MESH_PERFORMANCE.md](docs/MESH_PERFORMANCE.md).
+**Fast terrain checks run `npm test` and `npm run build`.** Pull requests that touch viewport, noise, PBR export, or World Engine code also run their targeted browser acceptance workflows. World correctness checks verify the selected commit without changing the branch. **GitHub Actions → World Studio media (manual) → Run workflow** captures the actual app as downloadable artifacts; publishing changed captures to the selected branch requires its explicit `publish` option. Extended browser QA and mesh benchmarks remain available through **GitHub Actions → Extended terrain QA (manual only) → Run workflow**. Locally, build first, install Chromium with `npx playwright install chromium`, then run `npm run test:e2e`. Hardware benchmarking instructions are in [docs/MESH_PERFORMANCE.md](docs/MESH_PERFORMANCE.md).
 
 ## What the studio does
 

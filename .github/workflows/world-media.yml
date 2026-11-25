@@ -1,0 +1,122 @@
+name: World Studio media (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Commit changed captures to the selected branch after acceptance'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+# Manual captures never interrupt correctness checks or one another. The
+# publication job also rejects a branch that moved since this run was requested.
+concurrency:
+  group: world-media-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Verify the production World workflow before capture
+        run: npx playwright test tests/e2e/world*.spec.ts --workers=1
+      - name: Capture the running studio and world workflow
+        shell: bash
+        run: |
+          python -m pip install Pillow
+          npm run preview -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/normal-height-preview.log 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID" || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:4173/ > /dev/null; then break; fi
+            sleep 1
+          done
+          NH_MEDIA_SOFTWARE=1 node scripts/readme-media.mjs
+      - name: Preserve verified live captures
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-studio-media-${{ github.sha }}
+          path: |
+            docs/images/studio-3d.png
+            docs/images/studio-flow.png
+            docs/images/compute-cache.png
+            docs/images/world-studio.png
+            docs/images/world-stage-report.png
+            docs/images/world-export.png
+            docs/images/landscape-tour.gif
+            docs/images/world-workflow.gif
+            docs/images/capture-provenance.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-studio-media-browser-${{ github.sha }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: world-studio-media-${{ github.sha }}
+          path: docs/images
+      - name: Publish changed media without replacing newer work
+        env:
+          MEDIA_BRANCH: ${{ github.ref_name }}
+          MEDIA_REF_TYPE: ${{ github.ref_type }}
+          MEDIA_SOURCE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          if [ "$MEDIA_REF_TYPE" != branch ]; then
+            echo '::error::Publishing requires a branch. Tag captures remain available as artifacts.'
+            exit 1
+          fi
+          git check-ref-format "refs/heads/$MEDIA_BRANCH"
+          current_sha=$(git ls-remote --refs origin "refs/heads/$MEDIA_BRANCH" | cut -f1)
+          if [ "$current_sha" != "$MEDIA_SOURCE_SHA" ]; then
+            echo '::error::The selected branch changed during capture. Start a new capture for its current revision.'
+            exit 1
+          fi
+          git add -- docs/images/studio-3d.png docs/images/studio-flow.png \
+            docs/images/compute-cache.png docs/images/world-studio.png \
+            docs/images/world-stage-report.png docs/images/world-export.png \
+            docs/images/landscape-tour.gif docs/images/world-workflow.gif
+          # A timestamp or provenance revision alone must not manufacture a
+          # new commit when every captured visual is already unchanged.
+          if git diff --cached --quiet; then
+            echo 'All captured visuals are unchanged; retaining their original provenance.'
+            exit 0
+          fi
+          git add -- docs/images/capture-provenance.json
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Refresh actual studio screenshots and workflow GIFs'
+          git push origin "HEAD:refs/heads/$MEDIA_BRANCH"

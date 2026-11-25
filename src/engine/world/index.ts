@@ -404,6 +404,7 @@ export async function prepareWorldEvaluation(
         await tick();
       }
     }
+    check(signal);
     return field;
   }
   const interpolate = (values: Float32Array, x: number, z: number) =>
@@ -780,6 +781,8 @@ export async function prepareWorldEvaluation(
     for (const id of gpuEligible)
       if (backend.capability.backend === 'webgpu') stageById.get(id)!.backend = 'webgpu';
 
+    // The final preparation/render yield can deliver cancellation too.
+    check();
     return {
       stages: description.stages,
       capability: {

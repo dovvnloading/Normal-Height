@@ -44,14 +44,12 @@ function project(extra: TerrainNode[] = []): TerrainProject {
     presetId: 'test',
     graph: {
       nodes,
-      edges: nodes
-        .slice(1)
-        .map((n, i) => ({
-          id: `e${i}`,
-          source: nodes[i].id,
-          target: n.id,
-          targetHandle: n.kind === 'blend' ? 'a' : 'in',
-        })),
+      edges: nodes.slice(1).map((n, i) => ({
+        id: `e${i}`,
+        source: nodes[i].id,
+        target: n.id,
+        targetHandle: n.kind === 'blend' ? 'a' : 'in',
+      })),
     },
   };
 }
@@ -331,6 +329,19 @@ describe('native World sampling', () => {
     } finally {
       evaluation.dispose();
     }
+  });
+  it('rejects cancellation at the final preparation barrier', async () => {
+    const scene = project(),
+      world = definition(scene),
+      controller = new AbortController();
+    await expect(
+      prepareWorldEvaluation(scene, world, {
+        signal: controller.signal,
+        onProgress: (progress) => {
+          if (progress === 1) controller.abort();
+        },
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
 

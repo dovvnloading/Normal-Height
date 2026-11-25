@@ -152,6 +152,7 @@ export function WorldStudio({
   const epoch = useRef(0);
   const exportEpoch = useRef(0);
   const building = useRef(false);
+  const exportPending = useRef(false);
   const dragStart = useRef<{ x: number; z: number } | null>(null);
   const signature = JSON.stringify(world);
   const validation = validateWorldDefinition(world);
@@ -184,6 +185,7 @@ export function WorldStudio({
   };
   const cancelExport = () => {
     ++exportEpoch.current;
+    exportPending.current = false;
     encoder.current?.terminate();
     encoder.current = null;
     void writer.current?.abort().catch(() => {});
@@ -195,6 +197,7 @@ export function WorldStudio({
     () => () => {
       ++epoch.current;
       ++exportEpoch.current;
+      exportPending.current = false;
       worker.current?.terminate();
       encoder.current?.terminate();
       void writer.current?.abort().catch(() => {});
@@ -341,6 +344,7 @@ export function WorldStudio({
     }
   }, [exportOptions]);
   const runExport = async (toFile: boolean) => {
+    if (exportPending.current) return;
     if (validation) {
       setError(validation);
       return;
@@ -348,11 +352,26 @@ export function WorldStudio({
     const id = ++exportEpoch.current;
     let output: FileWriter | null = null;
     try {
+      const options = { ...exportOptions, sink: toFile ? 'file' : 'memory' } as WorldExportOptions;
+      const budget = checkWorldExportBudget(options);
+      if (!toFile && budget.archiveBytes > 192 * 1048576)
+        throw new Error(
+          'Use Save directly to file for archives above the 192 MiB download budget.',
+        );
+      // Reserve the request before opening the asynchronous picker. Cancellation
+      // or closing the dialog must also invalidate this preparation phase.
+      exportPending.current = true;
+      setExporting(true);
+      setError('');
+      setSuccess('');
+      setProgress(0);
+      setStage(toFile ? 'Choose a file for the world package' : 'Planning world package');
       if (toFile) {
         const handle = await (window as PickerWindow).showSaveFilePicker!({
           suggestedName: `${slug(project.name)}-world-${samples}.zip`,
           types: [{ description: 'World package', accept: { 'application/zip': ['.zip'] } }],
         });
+        if (id !== exportEpoch.current) return;
         output = await handle.createWritable();
         if (id !== exportEpoch.current) {
           await output.abort();
@@ -360,22 +379,17 @@ export function WorldStudio({
         }
         writer.current = output;
       }
-      const options = { ...exportOptions, sink: toFile ? 'file' : 'memory' } as WorldExportOptions;
-      checkWorldExportBudget(options);
       const active = new Worker(new URL('../export/worldExport.worker.ts', import.meta.url), {
         type: 'module',
       });
       encoder.current = active;
       const chunks: ArrayBuffer[] = [];
       let bytes = 0;
-      setExporting(true);
-      setError('');
-      setSuccess('');
-      setProgress(0);
       setStage('Planning world package');
       const fail = (message: string) => {
         if (id !== exportEpoch.current) return;
         ++exportEpoch.current;
+        exportPending.current = false;
         active.terminate();
         encoder.current = null;
         void output?.abort().catch(() => {});
@@ -412,6 +426,8 @@ export function WorldStudio({
               if (id !== exportEpoch.current) return;
             } else downloadBlob(new Blob(chunks, { type: 'application/zip' }), message.filename);
             writer.current = null;
+            exportPending.current = false;
+            ++exportEpoch.current;
             chunks.length = 0;
             active.terminate();
             encoder.current = null;
@@ -429,10 +445,17 @@ export function WorldStudio({
     } catch (e) {
       void output?.abort().catch(() => {});
       if (id !== exportEpoch.current) return;
+      ++exportEpoch.current;
+      encoder.current?.terminate();
+      encoder.current = null;
       writer.current = null;
-      if (e instanceof DOMException && e.name === 'AbortError') return;
-      setError(e instanceof Error ? e.message : 'Could not start world export.');
+      exportPending.current = false;
       setExporting(false);
+      if (e instanceof DOMException && e.name === 'AbortError') {
+        setStage('Export cancelled');
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Could not start world export.');
     }
   };
 

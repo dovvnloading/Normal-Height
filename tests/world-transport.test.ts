@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_WORLD_TRANSPORT, createWorldDefinition } from '../src/model/world';
 import { routeWorldDrainage, simulateWorldTransport } from '../src/engine/world/hydrology';
 import type { TransportGrid } from '../src/engine/world/hydrology';
-import { generateWorldRegion } from '../src/engine/world';
+import { generateWorldRegion, prepareWorldEvaluation } from '../src/engine/world';
 import type { TerrainProject } from '../src/model/types';
 
 const grid: TransportGrid = {
@@ -218,6 +218,29 @@ describe('transport in World graph builds', () => {
     expect(after.heights).toEqual(before.heights);
     world.domain.boundary = 'periodic';
     await expect(generateWorldRegion(scene, world, region)).rejects.toThrow(/periodic/);
+  });
+  it('rejects cancellation at the final reconstruction barrier and remains reusable', async () => {
+    const world = createWorldDefinition(scene);
+    world.globalResolution = 64;
+    world.transport = { ...DEFAULT_WORLD_TRANSPORT, enabled: true, iterations: 1 };
+    const evaluation = await prepareWorldEvaluation(scene, world),
+      controller = new AbortController(),
+      region = { startX: 0, startZ: 0, cellsX: 1024, cellsZ: 1024, samplesX: 17, samplesZ: 17 };
+    try {
+      await expect(
+        evaluation.sampleRegion(region, {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            if (progress === 1) controller.abort();
+          },
+        }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      const recovered = await evaluation.sampleRegion(region);
+      expect(recovered.heights).toHaveLength(region.samplesX * region.samplesZ);
+      expect(recovered.heights.every(Number.isFinite)).toBe(true);
+    } finally {
+      evaluation.dispose();
+    }
   });
   it('leaves scalar/intermediate previews before the post-graph transport stage', async () => {
     const world = createWorldDefinition(scene);

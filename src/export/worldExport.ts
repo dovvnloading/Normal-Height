@@ -339,6 +339,11 @@ function tileList(options: WorldExportOptions, intervals: number): WorldExportTi
     }
   return out;
 }
+/** Use the same integer numerator as world sampling, including for halo bounds. */
+function exportGridIndex(options: WorldExportOptions, axis: 'X' | 'Z', sample: number): number {
+  const r = regions(options);
+  return r[`start${axis}`] + (sample / (options[`samples${axis}`] - 1)) * r[`cells${axis}`];
+}
 function gridFor(
   options: WorldExportOptions,
   x: number,
@@ -350,8 +355,8 @@ function gridFor(
     stepX = r.cellsX / (options.samplesX - 1),
     stepZ = r.cellsZ / (options.samplesZ - 1);
   return {
-    startX: r.startX + x * stepX,
-    startZ: r.startZ + z * stepZ,
+    startX: exportGridIndex(options, 'X', x),
+    startZ: exportGridIndex(options, 'Z', z),
     cellsX: (width - 1) * stepX,
     cellsZ: (height - 1) * stepZ,
     samplesX: width,
@@ -397,6 +402,12 @@ export async function streamWorldExport(
   const memory = checkWorldExportBudget(options),
     tiles = tileList(options, memory.tileIntervals),
     maps = mapsFor(options);
+  const exportStages = (stages: WorldStageReport[]) =>
+    stages.map((stage) =>
+      stage.mode === 'native'
+        ? { ...stage, samplesX: options.samplesX, samplesZ: options.samplesZ }
+        : { ...stage },
+    );
   assertNotAborted(signal);
   report(0, 'Compiling world graph');
   const prepared = await prepareWorldEvaluation(options.project, options.world, {
@@ -544,11 +555,7 @@ export async function streamWorldExport(
           gridFor(options, ...tile.sampleOffset, ...tile.samples),
           { signal },
         );
-      lastStages = result.stages.map((stage) =>
-        stage.mode === 'native'
-          ? { ...stage, samplesX: options.samplesX, samplesZ: options.samplesZ }
-          : stage,
-      );
+      lastStages = exportStages(result.stages);
       backend = result.backend;
       for (const map of maps) {
         if (map === 'normalGL' || map === 'slope' || map === 'flow') continue;
@@ -650,12 +657,10 @@ export async function streamWorldExport(
         [x0, z0] = tile.sampleOffset,
         [width, height] = tile.samples;
       const needHalo = maps.includes('normalGL') || maps.includes('slope');
-      const stepX = r.cellsX / (options.samplesX - 1),
-        stepZ = r.cellsZ / (options.samplesZ - 1);
-      const left = needHalo && r.startX + (x0 - 1) * stepX >= 0 ? 1 : 0;
-      const north = needHalo && r.startZ + (z0 - 1) * stepZ >= 0 ? 1 : 0;
-      const right = needHalo && r.startX + (x0 + width) * stepX <= d.cellsX ? 1 : 0;
-      const south = needHalo && r.startZ + (z0 + height) * stepZ <= d.cellsZ ? 1 : 0;
+      const left = needHalo && exportGridIndex(options, 'X', x0 - 1) >= 0 ? 1 : 0;
+      const north = needHalo && exportGridIndex(options, 'Z', z0 - 1) >= 0 ? 1 : 0;
+      const right = needHalo && exportGridIndex(options, 'X', x0 + width) <= d.cellsX ? 1 : 0;
+      const south = needHalo && exportGridIndex(options, 'Z', z0 + height) <= d.cellsZ ? 1 : 0;
       const samplingGrid = gridFor(
         options,
         x0 - left,
@@ -800,7 +805,7 @@ export async function streamWorldExport(
             [0, 1],
           );
           tile.files.push(file.record(`mask:${name}`, 'png16'));
-          manifest.maskStages[name] = result.stages;
+          manifest.maskStages[name] = exportStages(result.stages);
         }
       } finally {
         maskEngine.dispose();

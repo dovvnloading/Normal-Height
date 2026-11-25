@@ -296,6 +296,34 @@ describe('World export contracts', () => {
       region: { startX: 0, startZ: 10, cellsX: 40, cellsZ: 20 },
     });
   });
+  it('keeps the final partial-tile normals and slopes seamless on a nonbinary export grid', async () => {
+    const value = {
+      ...options(),
+      samplesX: 98,
+      samplesZ: 17,
+      tileIntervals: 32,
+      normals: true,
+      diagnostics: true,
+    };
+    value.world.domain.cellsX = 101;
+    value.project.graph.nodes[0].params.scale = 18;
+    const { files, manifest } = await collect(value);
+    const before = manifest.tiles.find((tile) => tile.x === 2 && tile.z === 0)!;
+    const edge = manifest.tiles.find((tile) => tile.x === 3 && tile.z === 0)!;
+    expect(edge.samples[0]).toBe(2);
+    for (const map of ['normalGL', 'slope']) {
+      const west = png(files[before.files.find((file) => file.map === map)!.path]);
+      const east = png(files[edge.files.find((file) => file.map === map)!.path]);
+      const bpp = west.bytesPerPixel;
+      for (let row = 0; row < west.height; row++)
+        expect(
+          west.pixels.slice(
+            (row * west.width + west.width - 1) * bpp,
+            (row + 1) * west.width * bpp,
+          ),
+        ).toEqual(east.pixels.slice(row * east.width * bpp, (row * east.width + 1) * bpp));
+    }
+  });
   it('exports selected graph masks with fixed weights and explicit provenance', async () => {
     const value = options(),
       mask = createNode('mask', { x: 4, y: 0 }, 'selection');
@@ -312,6 +340,12 @@ describe('World export contracts', () => {
     value.masks = [{ nodeId: mask.id, name: mask.label }];
     const { files, manifest } = await collect(value);
     expect(manifest.maskStages['high-slopes'].at(-1)?.nodeId).toBe('selection');
+    for (const stage of manifest.maskStages['high-slopes']) {
+      if (stage.mode === 'native') {
+        expect(stage.samplesX).toBe(value.samplesX);
+        expect(stage.samplesZ).toBe(value.samplesZ);
+      }
+    }
     for (const tile of manifest.tiles) {
       const entry = tile.files.find((file) => file.map === 'mask:high-slopes')!;
       expect(entry).toBeDefined();

@@ -54,14 +54,30 @@ the platform ANGLE backend; the software profile uses Playwright Chromium.
 
 ## Repository workflow
 
-**World Engine correctness and live media** builds the source, runs unit and
-browser acceptance, probes WebGPU/software fallback and captures the running
-studio. Screenshots, GIFs, provenance and browser traces are uploaded as the
-`world-engine-evidence` artifact. After successful same-repository acceptance,
-the workflow commits the newly captured media to the implementation branch.
-It never merges the PR or deploys the application. The media commit is made by the workflow token and does not create a recursive
-chain of capture runs.
+**World Engine correctness** builds the pinned pull-request commit, runs unit
+and browser acceptance, and probes WebGPU/software fallback. Numerical reports
+and browser traces are uploaded as the `world-engine-evidence` artifact. This
+workflow has read-only repository permission, keeps no checkout credentials,
+and never commits generated files. Rerunning it verifies the same revision
+without moving the branch or regenerating media.
 
-The job uses a normal fast-forward push. If another author advances the branch
-during capture, that push fails safely; the artifact still contains the
-captures for inspection. A new source run can regenerate current media.
+**World Studio media (manual)** captures the production application at the
+revision selected when the workflow is dispatched. It first passes unit,
+build and World browser acceptance. Screenshots, GIFs and their exact source
+provenance are uploaded as `world-studio-media-<source revision>`; browser
+acceptance evidence has a separate artifact. Its default is artifact-only.
+
+To update committed media, explicitly enable **publish** on that manual run.
+A separate publication job receives write permission and downloads only that
+run's verified media. It refuses to publish if the selected branch has changed,
+uses a normal fast-forward push, and leaves captures available as artifacts
+on failure. Concurrent captures for a branch are serialized. If all visuals
+are unchanged, it retains their original provenance rather than creating a
+commit solely for a new capture timestamp or source revision.
+
+A published media commit uses `GITHUB_TOKEN`. GitHub creates approval-required
+CI runs for pull-request updates made with that token; a collaborator with
+write access must select **Approve workflows to run** on the PR. This is
+[GitHub's documented behavior](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs).
+The approved correctness run cannot publish another media commit, so acceptance
+can finish on a stable HEAD. Neither workflow merges the PR or deploys the app.

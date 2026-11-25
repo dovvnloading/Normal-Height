@@ -1,4 +1,4 @@
-name: World Engine correctness and live media
+name: World Engine correctness
 
 on:
   pull_request:
@@ -14,8 +14,11 @@ on:
       - 'src/App.tsx'
       - 'tests/world*'
       - 'tests/e2e/world*'
-      - 'scripts/readme-media.mjs'
       - 'scripts/world-gpu-qualify.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'playwright.config.ts'
+      - 'vite.config.ts'
       - '.github/workflows/world-engine-qa.yml'
   workflow_dispatch:
 
@@ -30,12 +33,12 @@ jobs:
   world:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          # A rerun verifies its original commit, even if the branch advances.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -57,38 +60,13 @@ jobs:
           NH_WORLD_URL=http://127.0.0.1:4180 NH_GPU_SOFTWARE=1 node scripts/world-gpu-qualify.mjs docs/benchmarks/world-gpu-software.json
       - name: Verify world workflow through real production workers
         run: npx playwright test tests/e2e/world*.spec.ts --workers=1
-      - name: Capture the running studio and world workflow
-        id: capture
-        if: ${{ !cancelled() }}
-        shell: bash
-        run: |
-          python -m pip install Pillow
-          npm run preview -- --host 127.0.0.1 --port 4173 --strictPort > /tmp/normal-height-preview.log 2>&1 &
-          PREVIEW_PID=$!
-          trap 'kill "$PREVIEW_PID" || true' EXIT
-          for attempt in {1..30}; do
-            if curl -fsS http://127.0.0.1:4173/ > /dev/null; then break; fi
-            sleep 1
-          done
-          NH_MEDIA_SOFTWARE=1 node scripts/readme-media.mjs
-      - name: Preserve browser evidence and actual app captures
+      - name: Preserve numerical and browser evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: world-engine-evidence
           path: |
-            docs/images/
             docs/benchmarks/world-gpu-software.json
             test-results/
             playwright-report/
           retention-days: 14
-      - name: Update repository images from verified live captures
-        if: ${{ success() && steps.capture.outcome == 'success' && (github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        env:
-          MEDIA_BRANCH: ${{ github.head_ref || github.ref_name }}
-        shell: bash
-        run: |
-          git add docs/images/
-          if git diff --cached --quiet; then exit 0; fi
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Refresh actual studio screenshots and workflow GIFs'
-          git push origin "HEAD:$MEDIA_BRANCH"
