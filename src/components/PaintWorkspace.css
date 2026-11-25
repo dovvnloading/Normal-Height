@@ -15,18 +15,19 @@
   font-size: 11px;
   container-type: inline-size;
 }
+.nh-paint-workspace-inactive { font: inherit; color: inherit; }
 .nh-paint-workspace-inactive,
 .nh-paint-workspace-inactive > .nh-paint-workspace-body,
 .nh-paint-workspace-inactive > .nh-paint-workspace-body > .nh-paint-canvas-shell {
   display: contents;
   container-type: normal;
 }
-.nh-paint-workspace button,
-.nh-paint-workspace select,
-.nh-paint-workspace input {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) button,
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) select,
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) input {
   font-family: inherit;
 }
-.nh-paint-workspace button {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -42,26 +43,26 @@
   line-height: 1.3;
   cursor: pointer;
 }
-.nh-paint-workspace button:hover:not(:disabled) {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) button:hover:not(:disabled) {
   background: var(--paint-accent-soft);
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
-.nh-paint-workspace button[aria-pressed='true'],
-.nh-paint-workspace button.active {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) button[aria-pressed='true'],
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) button.active {
   border-color: color-mix(in srgb, var(--accent) 65%, var(--line));
   background: var(--paint-accent-soft);
   color: var(--text);
 }
-.nh-paint-workspace button:disabled,
-.nh-paint-workspace fieldset:disabled {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) button:disabled,
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) fieldset:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
-.nh-paint-workspace :is(button, input, select, summary):focus-visible {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) :is(button, input, select, summary):focus-visible {
   outline: 2px solid var(--paint-accent-strong);
   outline-offset: 2px;
 }
-.nh-paint-workspace kbd {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) kbd {
   color: var(--muted);
   border: 1px solid var(--line);
   border-radius: 3px;
@@ -275,7 +276,7 @@
 .nh-paint-radius-control .nh-paint-number-heading {
   padding-right: 0;
 }
-.nh-paint-workspace select {
+.nh-paint-workspace:not(.nh-paint-workspace-inactive) select {
   min-height: 32px;
   border: 1px solid var(--line);
   border-radius: 5px;
@@ -1321,10 +1322,10 @@
   }
 }
 @media (pointer: coarse) {
-  .nh-paint-workspace button {
+  .nh-paint-workspace:not(.nh-paint-workspace-inactive) button {
     min-height: 44px;
   }
-  .nh-paint-workspace input[type='range'] {
+  .nh-paint-workspace:not(.nh-paint-workspace-inactive) input[type='range'] {
     min-height: 28px;
   }
   .nh-paint-workspace .nh-brush-layer-list button {

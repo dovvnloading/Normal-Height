@@ -1100,6 +1100,16 @@
   font-size: 10px;
 }
 .nh-map-update.error { border-color: #ad6d61; color: #833f34; }
+.nh-map-update.error button {
+  margin-left: 10px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 5px 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 .nh-inspection-readout {
   position: absolute;
   z-index: 6;

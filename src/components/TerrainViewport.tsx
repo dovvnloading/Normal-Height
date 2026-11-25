@@ -277,6 +277,7 @@ function MapCanvas({
   const navigationRef = useRef(false);
   const paintBudget = useMemo(() => paintCapacity(project), [project.paintLayers, project.materialPaint]);
   const [mapError, setMapError] = useState(false);
+  const [mapAttempt, setMapAttempt] = useState(0);
   useEffect(() => onFramingChange({ zoom, offset }), [zoom, offset]);
   const [sample, setSample] = useState<{
     x: number;
@@ -482,7 +483,7 @@ function MapCanvas({
     feedbackRef.current?.baked(getPaintStrokes(project), 'map');
     return () => { active = false; };
   }, [field, channel, project.worldSize, project.heightScale, project.surface, project.seed, project.materialPaint, project.paintLayers,
-    baseline, compareKind]);
+    baseline, compareKind, mapAttempt]);
 
   useEffect(() => {
     if (!brushFeedback) return;
@@ -862,7 +863,10 @@ function MapCanvas({
           </div>
           <small>Estimated from a display-resolution grid, not the sediment budget.</small>
         </div>}
-      {mapError && <div className="nh-map-update error" role="alert">Could not generate this material map.</div>}
+      {mapError && <div className="nh-map-update error" role="alert">
+        Could not generate this map.
+        <button type="button" onClick={() => setMapAttempt(value => value + 1)}>Retry map</button>
+      </div>}
       {spline && (
         <div
           ref={layerRef}

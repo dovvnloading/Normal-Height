@@ -4,6 +4,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import type { TerrainProject } from '../../src/model/types';
 import { resolveSurface } from '../../src/materials/pbr';
 import { parseProject } from '../../src/model/project';
+import { captureViewport } from './helpers/viewport-screenshot';
 
 const fixture: TerrainProject = {
   version: 1, name: 'Painting studio acceptance', presetId: 'custom', resolution: 128,
@@ -62,18 +63,18 @@ async function dab(page: Page, u = 0.5, v = 0.5) {
   await page.mouse.click(point.x, point.y);
 }
 async function mapPixel(page: Page, u = 0.5, v = 0.5) {
-  const rect = await page.locator('.nh-map-brush-preview').boundingBox();
-  // The paint ring is intentionally absent while a layer is locked or before is shown.
-  const map = page.locator('.nh-map > canvas');
-  const bounds = (await map.boundingBox())!;
-  const size = rect?.width ?? Math.max(1, Math.min(bounds.width - 84, bounds.height - 82));
-  const x = (rect?.x ?? bounds.x + (bounds.width - size) / 2) + u * size;
-  const y = (rect?.y ?? bounds.y + (bounds.height - size) / 2) + v * size;
-  return map.evaluate((canvas: HTMLCanvasElement, point) => {
-    const b = canvas.getBoundingClientRect();
-    return canvas.getContext('2d')!.getImageData(Math.floor((point.x - b.x) * canvas.width / b.width),
-      Math.floor((point.y - b.y) * canvas.height / b.height), 1, 1).data[0];
-  }, { x, y });
+  // Original/locked/hidden states intentionally unmount the brush overlay.
+  // Resolve it synchronously inside the attached canvas to avoid waiting for a
+  // locator that must stay absent during these material assertions.
+  return page.locator('.nh-map > canvas').evaluate((canvas: HTMLCanvasElement, point) => {
+    const bounds = canvas.getBoundingClientRect();
+    const footprint = canvas.parentElement?.querySelector('.nh-map-brush-preview')?.getBoundingClientRect();
+    const size = footprint?.width ?? Math.max(1, Math.min(bounds.width - 84, bounds.height - 82));
+    const x = (footprint?.left ?? bounds.left + (bounds.width - size) / 2) + point.u * size;
+    const y = (footprint?.top ?? bounds.top + (bounds.height - size) / 2) + point.v * size;
+    return canvas.getContext('2d')!.getImageData(Math.floor((x - bounds.left) * canvas.width / bounds.width),
+      Math.floor((y - bounds.top) * canvas.height / bounds.height), 1, 1).data[0];
+  }, { u, v });
 }
 
 // These exercise the actual browser input path, persisted projects and workers.
@@ -167,7 +168,7 @@ test.describe('painting studio', () => {
     await page.getByLabel('Pen pressure', { exact: true }).selectOption('both');
     await page.getByLabel('Brush radius unit', { exact: true }).selectOption('screen');
     await setNumber(page, 'Brush radius value', 48);
-    await page.getByText('My brushes', { exact: true }).click();
+    await page.locator('.nh-paint-saved-brushes > summary').click();
     await page.getByRole('textbox', { name: 'Saved brush name' }).fill('Soft snow detail');
     await page.getByRole('button', { name: 'Save current brush preset' }).click();
     await expect(page.getByRole('button', { name: 'Use saved brush Soft snow detail' })).toBeVisible();
@@ -179,16 +180,16 @@ test.describe('painting studio', () => {
     await expect(page.getByLabel('Brush radius value')).toHaveValue('48');
     await inspectorTab(page, 'Brush');
     await expect(page.getByLabel('Pen pressure', { exact: true })).toHaveValue('both');
-    await page.getByText('My brushes', { exact: true }).click();
+    await page.locator('.nh-paint-saved-brushes > summary').click();
     await expect(page.getByRole('button', { name: 'Use saved brush Soft snow detail' })).toBeVisible();
     await page.setViewportSize({ width: 360, height: 740 });
     await expect(page.getByLabel('Brush strength value')).toBeInViewport();
     await expect(page.getByRole('slider', { name: 'Brush hardness', exact: true })).toBeInViewport();
     await expect(page.getByRole('button', { name: 'Open paint inspector', exact: true })).toBeInViewport();
-    await info.attach('Painting studio at 360 pixels', { body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png' });
+    await info.attach('Painting studio at 360 pixels', { body: await captureViewport(page), contentType: 'image/png' });
     await page.getByRole('button', { name: 'Open paint inspector', exact: true }).click();
     await expect(page.getByRole('complementary', { name: 'Paint inspector' })).toBeInViewport();
-    await info.attach('Painting tools drawer at 360 pixels', { body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png' });
+    await info.attach('Painting tools drawer at 360 pixels', { body: await captureViewport(page), contentType: 'image/png' });
   });
 
   test('Space navigation and a real two-touch pinch leave paint history unchanged', async ({ page }) => {
@@ -283,7 +284,7 @@ test.describe('painting studio', () => {
     await expect.poll(() => strokeCount(page)).toBe(0);
     await page.getByRole('button', { name: 'Redo painting change' }).click();
     await expect.poll(() => strokeCount(page)).toBe(1);
-    await info.attach('Painting studio', { body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png' });
+    await info.attach('Painting studio', { body: await captureViewport(page), contentType: 'image/png' });
   });
 
   test('saved and exported projects roundtrip layers and terrain rules', async ({ page }) => {

@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { TerrainProject } from '../../src/model/types';
 import { resolveSurface } from '../../src/materials/pbr';
+import { captureViewport } from './helpers/viewport-screenshot';
 
 test.describe('terrain viewport UX', () => {
   test.beforeEach(async ({ page }) => {
@@ -437,7 +438,7 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
   await expect(scene).toHaveAttribute('data-material-status', 'ready');
   await expect.poll(async () => Number(await scene.getAttribute('data-pbr-upload-count'))).toBeGreaterThan(beforeUpload);
   await testInfo.attach('Painted terrain', {
-    body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png',
+    body: await captureViewport(page), contentType: 'image/png',
   });
 
   await page.getByRole('button', { name: '2D map', exact: true }).click();
@@ -549,10 +550,13 @@ test('paints an alpine outcrop with the close-range material shader active', asy
     body: Buffer.from(wide.png, 'base64'), contentType: 'image/png',
   });
   await terrain.dblclick();
-  await terrain.hover();
-  await page.mouse.wheel(0, -4000);
-  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 30_000 });
   await page.getByRole('button', { name: 'Paint terrain' }).click();
+  // The painting shelves reduce the canvas height. Establish close-range
+  // framing in that final layout so the shader's physical pixel-footprint
+  // threshold is still satisfied while the two authored materials are tested.
+  await terrain.hover();
+  await page.mouse.wheel(0, -5000);
+  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 30_000 });
   await page.getByRole('slider', { name: 'Brush strength' }).focus();
   await page.keyboard.press('End');
   const paintCenter = async (layer: 'Snow' | 'Rock') => {
