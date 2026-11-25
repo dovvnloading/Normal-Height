@@ -39,6 +39,7 @@ import { STUDIO_KERNELS } from './model/noiseStudio';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject } from './model/project';
 import { readSessionBackup, writeSessionBackup } from './model/sessionBackup';
+import { projectStorageBytes, PROJECT_STORAGE_ERROR } from './model/projectStorage';
 import { autosaveProject, loadLastSession } from './model/autosave';
 import { appendUndoSnapshot } from './model/history';
 import { assertRasterBudget, MAX_PROJECT_FILE_BYTES, rasterIdentity } from './model/heightRaster';
@@ -209,11 +210,18 @@ export default function App() {
     const timer = setTimeout(() => setToast(''), 6500);
     return () => clearTimeout(timer);
   }, [toast]);
-  const apply = useCallback((next: TerrainProject, group = '', record = true) => {
+  const apply = useCallback((next: TerrainProject, group = '', record = true, recovering = false) => {
     const previous = projectRef.current;
+    const bytes = projectStorageBytes(next);
+    // Permit recovery and shrinking of older oversized sessions, but not
+    // edits that increase an already oversized project.
+    if (!recovering && bytes > MAX_PROJECT_FILE_BYTES && bytes >= projectStorageBytes(previous)) {
+      notify(PROJECT_STORAGE_ERROR);
+      return false;
+    }
     const paintChanged = next.materialPaint !== previous.materialPaint || next.paintLayers !== previous.paintLayers;
     const changed = paintChanged || projectSnapshot(next) !== projectSnapshot(previous);
-    if (!changed && !pendingMove.current) return;
+    if (!changed && !pendingMove.current) return true;
     if (!record) {
       pendingMove.current ??= previous;
     } else {
@@ -233,7 +241,8 @@ export default function App() {
     }
     projectRef.current = next;
     setProject(next);
-  }, []);
+    return true;
+  }, [notify]);
   const undo = useCallback(() => {
     const previous = past.current.pop();
     if (!previous) return;
@@ -318,8 +327,7 @@ export default function App() {
   const paintMaterial = useCallback(
     (strokes: MaterialStroke[], activeLayerId: string) => {
       try {
-        apply(applyPaintStrokes(projectRef.current, strokes, activeLayerId));
-        return true;
+        return apply(applyPaintStrokes(projectRef.current, strokes, activeLayerId));
       } catch (error) {
         notify(error instanceof Error ? error.message : 'This stroke could not be saved.');
         return false;
@@ -328,19 +336,19 @@ export default function App() {
     [apply, notify],
   );
   const changePaintLayers = useCallback((layers: PaintLayer[]) => {
-    const capacity = paintCapacity({ paintLayers: layers });
+    const previous = projectRef.current;
+    const next = { ...previous, materialPaint: undefined, paintLayers: layers };
+    const capacity = paintCapacity(next);
     if (capacity.layers > capacity.maxLayers || capacity.strokes > capacity.maxStrokes || capacity.points > capacity.maxPoints) {
       notify('That layer change exceeds paint storage. Remove an unused layer or shorten its stroke history first.');
-      return;
+      return false;
     }
-    const previous = projectRef.current;
     const old = previous.paintLayers;
     const opacityEdit = old && old.length === layers.length && layers.every((layer, index) =>
       layer.id === old[index].id && layer.strokes === old[index].strokes &&
       layer.name === old[index].name && layer.visible === old[index].visible &&
       layer.locked === old[index].locked && layer.mask === old[index].mask);
-    apply({ ...previous, materialPaint: undefined, paintLayers: layers },
-      opacityEdit ? 'paint-layer-opacity' : '');
+    return apply(next, opacityEdit ? 'paint-layer-opacity' : '');
   }, [apply, notify]);
   const updateNode = useCallback(
     (patch: Partial<NonNullable<typeof selected>>, group = '') => {
@@ -511,7 +519,7 @@ export default function App() {
   }, [selectedId, apply]);
   const restoreLastSession = useCallback(() => {
     if (!lastSession) return;
-    apply(lastSession);
+    apply(lastSession, '', true, true);
     setPaintSession(value => value + 1);
     setEditingSplineId(null);
     setPreviewNodeId(undefined);
@@ -560,15 +568,19 @@ export default function App() {
     [],
   );
   const save = useCallback(() => {
-    saveProject(projectRef.current);
-    notify('Project downloaded with your graph, paint layers, masks, and material settings.');
+    try {
+      saveProject(projectRef.current);
+      notify('Project downloaded with your graph, paint layers, masks, and material settings.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not save the project.');
+    }
   }, [notify]);
   const openFile = async (file: File) => {
     try {
       if (file.size > MAX_PROJECT_FILE_BYTES)
         throw new Error('This project is too large. The maximum file size is 32 MiB.');
       const loaded = parseProject(JSON.parse(await file.text()));
-      apply(loaded);
+      apply(loaded, '', true, true);
       setPaintSession(value => value + 1);
       setEditingSplineId(null);
       setPreviewNodeId(undefined);

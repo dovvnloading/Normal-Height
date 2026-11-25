@@ -374,6 +374,15 @@ test.describe('painting studio', () => {
     await openStudio(page);
     await page.getByRole('button', { name: 'Snow', exact: true }).click();
     await setNumber(page, 'Brush strength value', 100);
+    await page.getByLabel('Map channel', { exact: true }).selectOption('snowWeight');
+    await expect(page.locator('.nh-map-update')).toHaveCount(0);
+    // Switching area tools midway through a polygon must discard its
+    // incomplete vertices rather than saving an unreadable project.
+    await inspectorTab(page, 'Materials');
+    await page.getByRole('button', { name: 'Polygon select', exact: true }).click();
+    await dab(page, 0.25, 0.25);
+    await dab(page, 0.75, 0.25);
+    await page.getByRole('button', { name: 'Connected fill', exact: true }).click();
     await dab(page);
     await expect.poll(async () => {
       const project = (await backup())?.project;
@@ -386,6 +395,9 @@ test.describe('painting studio', () => {
     expect(saved?.savedAt).toBeGreaterThan(0);
     const savedPaint = saved!.project.paintLayers?.flatMap(layer => layer.strokes) ?? saved!.project.materialPaint!;
     expect(savedPaint[0].layer).toBe('snow');
+    expect(savedPaint[0].selection?.points).toEqual([]);
+    expect(savedPaint[0].selection?.region?.runs.length).toBeGreaterThan(0);
+    expect(parseProject(JSON.parse(JSON.stringify(saved!.project))).materialPaint).toEqual(savedPaint);
 
     await page.reload();
     const restore = page.getByRole('button', { name: 'Restore last session', exact: true });

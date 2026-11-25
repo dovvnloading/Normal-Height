@@ -388,20 +388,17 @@ export function pointInPaintSelection(
     const { resolution, runs } = selection.region;
     const x = Math.min(resolution - 1, Math.round(clampPaint(point.u) * (resolution - 1)));
     const y = Math.min(resolution - 1, Math.round(clampPaint(point.v) * (resolution - 1)));
-    // Runs are validated in row/X order. Binary-search the row, then its spans.
+    // Find the last span whose row/start is at or before the queried cell.
+    // This also bounds lookups for complex selections used as fill restrictions.
     let lo = 0,
       hi = runs.length / 3;
     while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (runs[mid * 3] < y) lo = mid + 1;
+      const mid = (lo + hi) >>> 1, k = mid * 3;
+      if (runs[k] < y || (runs[k] === y && runs[k + 1] <= x)) lo = mid + 1;
       else hi = mid;
     }
-    let selected = false;
-    for (let k = lo * 3; k < runs.length && runs[k] === y; k += 3)
-      if (x >= runs[k + 1] && x < runs[k + 2]) {
-        selected = true;
-        break;
-      }
+    const k = (lo - 1) * 3;
+    const selected = k >= 0 && runs[k] === y && x < runs[k + 2];
     inside = points.length >= 3 ? inside && selected : selected;
   }
   return selection.invert ? !inside : inside;

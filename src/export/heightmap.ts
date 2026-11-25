@@ -5,6 +5,7 @@ import { generatePBR, pbrPixels, SPLAT_LAYERS, resolveSurface, AO_RADII_METERS }
 import type { PBRChannel } from '../materials/pbr';
 import type { HeightField, TerrainProject } from '../model/types';
 import { slug } from '../model/project';
+import { serializeProjectFile } from '../model/projectStorage';
 import { listMaskOutputs } from './maskOutputs';
 import { isSinglePBRExportFormat } from './budget';
 import { getPaintLayers, getPaintStrokes } from '../materials/paintLayers';
@@ -132,7 +133,7 @@ export function makeExport(
     const files = {
       [filename]: bytes,
       [prefix + '-metadata.json']: strToU8(JSON.stringify(metadata, null, 2)),
-      [name + '.nhterrain.json']: strToU8(JSON.stringify({ ...project, resolution: field.resolution }, null, 2)),
+      [name + '.nhterrain.json']: strToU8(serializeProjectFile({ ...project, resolution: field.resolution })),
     };
     return { bytes: zipSync(files, { level: 0 }), filename: prefix + '.zip', mime: 'application/zip' };
   }
@@ -218,7 +219,7 @@ export function makeExport(
       [prefix + '-unity-hdrp-mask.png']: png('unityMask'),
       [name + '-material-metadata.json']: strToU8(JSON.stringify(metadata, null, 2)),
       [name + '.nhterrain.json']: strToU8(
-        JSON.stringify({ ...project, surface: resolveSurface(project.surface), resolution: field.resolution }, null, 2),
+        serializeProjectFile({ ...project, surface: resolveSurface(project.surface), resolution: field.resolution }),
       ),
     };
     // PNG files are already compressed: storing them in ZIP avoids a second
@@ -305,7 +306,7 @@ export function makeExport(
           [filename]: bytes,
           [`${name}-metadata.json`]: strToU8(JSON.stringify(metadata, null, 2)),
           [`${name}.nhterrain.json`]: strToU8(
-            JSON.stringify(resolvedProject, null, 2),
+            serializeProjectFile(resolvedProject),
           ),
         },
         { level: 6 },

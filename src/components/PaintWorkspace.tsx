@@ -43,7 +43,8 @@ import {
   type PaintMask,
   type PaintSelection,
 } from '../materials/materialPaint';
-import { createPaintLayer, MAX_PAINT_LAYERS, type PaintLayer } from '../materials/paintLayers';
+import { createPaintLayer, MAX_PAINT_LAYERS, paintCapacity, type PaintLayer } from '../materials/paintLayers';
+import type { TerrainProject } from '../model/types';
 import { SPLAT_LAYERS, layerColorHex, type SurfaceSettings } from '../materials/pbr';
 import { NumberField } from './Controls';
 import {
@@ -66,10 +67,11 @@ export interface PaintWorkspaceProps {
   surface: SurfaceSettings;
   onSettingsChange: (settings: BrushInputSettings) => void;
   onLayerColor: (layer: MaterialLayer, color: string) => void;
+  project: TerrainProject;
   layers: PaintLayer[];
   activeLayerId: string;
   onSelectLayer: (id: string) => void;
-  onLayersChange: (layers: PaintLayer[]) => void;
+  onLayersChange: (layers: PaintLayer[]) => boolean;
   before: boolean;
   onBeforeChange: (before: boolean) => void;
   status?: string;
@@ -404,6 +406,7 @@ export function PaintWorkspace(props: PaintWorkspaceProps) {
     worldSize,
     resolution,
     surface,
+    project,
     layers,
     activeLayerId,
     onSelectLayer,
@@ -449,18 +452,14 @@ export function PaintWorkspace(props: PaintWorkspaceProps) {
     }
   };
   const active = layers.find((layer) => layer.id === activeLayerId) ?? layers.at(-1);
-  const strokes = layers.reduce((sum, layer) => sum + layer.strokes.length, 0);
-  const points = layers.reduce(
-    (sum, layer) => sum + layer.strokes.reduce((count, stroke) => count + stroke.points.length, 0),
-    0,
-  );
-  const capacity = Math.min(1, Math.max(strokes / MAX_PAINT_STROKES, points / MAX_PAINT_POINTS));
-  const duplicateFits =
-    !!active &&
-    layers.length < MAX_PAINT_LAYERS &&
-    strokes + active.strokes.length <= MAX_PAINT_STROKES &&
-    points + active.strokes.reduce((sum, stroke) => sum + stroke.points.length, 0) <=
-      MAX_PAINT_POINTS;
+  const budget = paintCapacity(project);
+  const { strokes, points } = budget;
+  const capacity = Math.min(1, budget.ratio);
+  const duplicateFits = !!active && layers.length < MAX_PAINT_LAYERS &&
+    paintCapacity({ ...project, materialPaint: undefined, paintLayers: [...layers, {
+      ...active, id: 'paint-00000000-0000-0000-0000-000000000000',
+      name: `${active.name} copy`.slice(0, 80), locked: false,
+    }] }).ratio <= 1;
   const effectiveDisabled = before
     ? 'Original surface preview. Return to Painted to continue.'
     : disabledReason;
@@ -475,21 +474,20 @@ export function PaintWorkspace(props: PaintWorkspaceProps) {
   };
   const addLayer = () => {
     const next = createPaintLayer(`Paint ${layers.length + 1}`);
-    onLayersChange([...layers, next]);
-    onSelectLayer(next.id);
+    if (onLayersChange([...layers, next])) onSelectLayer(next.id);
   };
   const duplicateLayer = () => {
     if (!active || !duplicateFits) return;
     const next = {
       ...active,
       id: createPaintLayer().id,
-      name: `${active.name} copy`,
+      name: `${active.name} copy`.slice(0, 80),
       locked: false,
       strokes: [...active.strokes],
     };
     const index = layers.indexOf(active);
-    onLayersChange([...layers.slice(0, index + 1), next, ...layers.slice(index + 1)]);
-    onSelectLayer(next.id);
+    if (onLayersChange([...layers.slice(0, index + 1), next, ...layers.slice(index + 1)]))
+      onSelectLayer(next.id);
   };
   const moveLayer = (direction: -1 | 1) => {
     if (!active) return;
@@ -829,7 +827,7 @@ export function PaintWorkspace(props: PaintWorkspaceProps) {
                     <button
                       type="button"
                       className="nh-paint-wide-button"
-                      disabled={!selectionReady || !!effectiveDisabled || layerDisabled}
+                      disabled={selecting || !selectionReady || !!effectiveDisabled || layerDisabled}
                       onClick={() => onFill('selection')}
                     >
                       <PaintBucket size={15} />
@@ -862,7 +860,7 @@ export function PaintWorkspace(props: PaintWorkspaceProps) {
                     <button
                       type="button"
                       className="nh-paint-wide-button"
-                      disabled={!!effectiveDisabled || layerDisabled || settings.layer === 'erase'}
+                      disabled={selecting || !!effectiveDisabled || layerDisabled || settings.layer === 'erase'}
                       onClick={() => onFill('replace')}
                     >
                       <Blend size={15} />
@@ -1469,6 +1467,9 @@ export function PaintWorkspace(props: PaintWorkspaceProps) {
                     <small>
                       {strokes.toLocaleString()} / {MAX_PAINT_STROKES.toLocaleString()} strokes ·{' '}
                       {points.toLocaleString()} / {MAX_PAINT_POINTS.toLocaleString()} points
+                    </small>
+                    <small>
+                      {(budget.bytes / 1048576).toFixed(2)} / {(budget.maxBytes / 1048576).toFixed(0)} MiB project JSON
                     </small>
                     {capacity >= 0.8 && (
                       <p>

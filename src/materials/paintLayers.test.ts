@@ -17,10 +17,13 @@ import {
   getPaintLayers,
   getPaintStrokes,
   paintLayerSignature,
+  paintCapacity,
   samplePaintMaterial,
   type PaintLayer,
 } from './paintLayers';
 import { generatePBR } from './pbr';
+import { MAX_PROJECT_FILE_BYTES } from '../model/heightRaster';
+import { projectFileBytes, projectStorageBytes, serializeProjectFile } from '../model/projectStorage';
 import { pbrVariantKey } from './pbrClient';
 import { paintChangeBounds } from './materialRegion';
 
@@ -138,6 +141,57 @@ describe('authored paint layers', () => {
     expect(smoothed.reduce((a, b) => a + b)).toBeCloseTo(1);
     expect(sample([before, blend], 16, 16)).toEqual([1, 0, 0, 0]);
   });
+  it('rejects incomplete selections before committing, including legacy projects', () => {
+    const partial = { ...dab, fullTile: true, selection: {
+      points: [{ u: 0.2, v: 0.2 }, { u: 0.4, v: 0.4 }],
+      region: { resolution: 4, runs: [0, 0, 4] },
+    } };
+    expect(() => applyPaintStrokes(project, [partial])).toThrow('polygon');
+    const stacked = { ...project, paintLayers: [layer('New', [])] };
+    expect(() => applyPaintStrokes(stacked, [partial], 'New')).toThrow('polygon');
+    expect(stacked.paintLayers[0].strokes).toHaveLength(0);
+  });
+
+  it('counts every repeated selection, UTF-8 text, and embedded raster in the project file budget', () => {
+    const runs: number[] = [];
+    for (let y = 0; y < 512; y++) {
+      if (y % 2 === 0) runs.push(y, 0, 512);
+      else for (let x = 0; x < 512; x += 2) runs.push(y, x, x + 1);
+    }
+    const fill = { ...dab, fullTile: true, selection: {
+      points: [], region: { resolution: 512, runs },
+    } };
+    const raster = {
+      name: 'Height 🗻', width: 2048, height: 1536, format: 'u16le' as const,
+      data: 'A'.repeat(8388608),
+    };
+    const withRaster = { ...project, name: '雪 terrain 🏔',
+      graph: { ...project.graph, nodes: [...project.graph.nodes, {
+        id: 'imported', kind: 'heightImport' as const, label: 'Height', params: {},
+        position: { x: 0, y: 0 }, raster,
+      }] },
+    };
+    const one = { ...withRaster, materialPaint: [fill] };
+    const two = { ...withRaster, materialPaint: [fill, fill] };
+    expect(projectFileBytes(two)).toBe(new TextEncoder().encode(JSON.stringify(two)).byteLength);
+    const perStroke = projectStorageBytes(two) - projectStorageBytes(one);
+    const count = 1 + Math.floor((MAX_PROJECT_FILE_BYTES - projectStorageBytes(one)) / perStroke);
+    const near = { ...withRaster, materialPaint: Array.from({ length: count }, () => fill) };
+    expect(paintCapacity(near).bytes).toBeLessThanOrEqual(MAX_PROJECT_FILE_BYTES);
+    expect(paintCapacity(near).ratio).toBeGreaterThan(0.95);
+    expect(paintCapacity(near).points).toBe(count);
+    expect(() => applyPaintStrokes(near, [fill])).toThrow('32 MiB');
+    const stack = { ...withRaster, paintLayers: [layer('Complex', near.materialPaint)] };
+    expect(paintCapacity(stack).bytes).toBeGreaterThan(MAX_PROJECT_FILE_BYTES - perStroke);
+    const duplicated = { ...stack, paintLayers: [...stack.paintLayers, layer('Copy', near.materialPaint)] };
+    expect(paintCapacity(duplicated).ratio).toBeGreaterThan(1);
+    expect(() => serializeProjectFile(duplicated)).toThrow('32 MiB');
+    const small = { ...project, name: '雪 terrain 🏔', materialPaint: [fill] };
+    const json = serializeProjectFile(small);
+    expect(projectFileBytes(small)).toBe(new TextEncoder().encode(json).byteLength);
+    expect(parseProject(JSON.parse(json)).materialPaint).toEqual(small.materialPaint);
+  }, 20000);
+
   it('rejects duplicate layer ids and invalid optional brush state at the file boundary', () => {
     expect(() =>
       parseProject({ ...project, paintLayers: [layer('same', []), layer('same', [])] }),
@@ -242,6 +296,28 @@ describe('terrain masks and brush dynamics', () => {
     expect(jitter.left).toBeLessThan(ordinary.left);
     expect(jitter.right).toBeGreaterThan(ordinary.right);
   });
+  it('intersects connected fills with normal, inverted and existing region selections', () => {
+    const map = new Uint8ClampedArray(n * n * 4);
+    for (let i = 0; i < n * n; i++) map[i * 4] = 255;
+    const polygon = { points: [
+      { u: 0.25, v: 0.25 }, { u: 0.75, v: 0.25 },
+      { u: 0.75, v: 0.75 }, { u: 0.25, v: 0.75 },
+    ] };
+    const center = { u: 0.5, v: 0.5 }, outside = { u: 0.125, v: 0.125 };
+    const inside = floodPaintSelection(map, n, center, 0, polygon);
+    expect(pointInPaintSelection(inside, center)).toBe(true);
+    expect(pointInPaintSelection(inside, outside)).toBe(false);
+    const inverted = floodPaintSelection(map, n, outside, 0, { ...polygon, invert: true });
+    expect(pointInPaintSelection(inverted, outside)).toBe(true);
+    expect(pointInPaintSelection(inverted, center)).toBe(false);
+    const again = floodPaintSelection(map, n, outside, 0, inverted);
+    expect(again).toEqual(inverted);
+    expect(floodPaintSelection(map, n, center, 0, inverted).region?.runs).toEqual([]);
+    const restored = parseMaterialPaint([{ ...dab, fullTile: true, selection: inverted }])[0];
+    expect(pointInPaintSelection(restored.selection, center)).toBe(false);
+    expect(pointInPaintSelection(restored.selection, outside)).toBe(true);
+  });
+
   it('clips polygon and connected flood selections, including inversion and disconnected islands', () => {
     const map = new Uint8ClampedArray(n * n * 4);
     for (let y = 0; y < n; y++)

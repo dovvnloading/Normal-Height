@@ -67,6 +67,9 @@ import { getPaintLayers, getPaintStrokes, samplePaintMaterial, floodPaintSelecti
 import './TerrainViewport.css';
 
 type Baseline = { field: HeightField; project: TerrainProject; label: string };
+const completedSelection = (selection: PaintSelection | null): PaintSelection | null =>
+  selection && (selection.points.length >= 3 || (selection.points.length === 0 && selection.region))
+    ? selection : null;
 
 interface TerrainViewportProps {
   paintSession: number;
@@ -96,7 +99,7 @@ interface TerrainViewportProps {
   onClearBaseline: () => void;
   onLayerColor: (layer: MaterialLayer, color: string) => void;
   onPaint: (strokes: MaterialStroke[], activeLayerId: string) => boolean;
-  onPaintLayersChange: (layers: PaintLayer[]) => void;
+  onPaintLayersChange: (layers: PaintLayer[]) => boolean;
   onPaintNotice: (message: string) => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -313,7 +316,7 @@ function MapCanvas({
   const [mapBusy, setMapBusy] = useState(false);
   const keyboardPoint = useRef<TerrainPoint>({ u: 0.5, v: 0.5 });
   const navigationRef = useRef(false);
-  const paintBudget = useMemo(() => paintCapacity(project), [project.paintLayers, project.materialPaint]);
+  const paintBudget = useMemo(() => paintCapacity(project), [project]);
   const [mapError, setMapError] = useState(false);
   const [mapAttempt, setMapAttempt] = useState(0);
   useEffect(() => onFramingChange({ zoom, offset }), [zoom, offset]);
@@ -821,7 +824,7 @@ function MapCanvas({
                 if (onPaintAction(keyboardPoint.current, new PointerEvent('pointerdown'))) return;
                 if (brushFeedback.begin()) {
                   const stroke = [{ ...strokeSettings(brushSettings), radius: brushSettings.radiusUnit === 'screen'
-                    ? Math.min(0.5, (brushSettings.radiusPixels ?? 48) / layerSize) : brushSettings.radius,
+                    ? Math.max(0.0001, Math.min(0.5, (brushSettings.radiusPixels ?? 48) / layerSize)) : brushSettings.radius,
                     points: [{ ...keyboardPoint.current }] }];
                   brushFeedback.preview(stroke);
                   brushFeedback.finish(onPaint(stroke));
@@ -1213,7 +1216,7 @@ export function TerrainViewport({
   const [paintSelection, setPaintSelection] = useState<PaintSelection | null>(null);
   const [paintStatus, setPaintStatus] = useState('Ready to paint');
   const paintLayers = useMemo(() => getPaintLayers(project), [project.paintLayers, project.materialPaint]);
-  const capacity = useMemo(() => paintCapacity(project), [project.paintLayers, project.materialPaint]);
+  const capacity = useMemo(() => paintCapacity(project), [project]);
   const activePaintLayer = paintLayers.find(layer => layer.id === activeLayerId) ?? paintLayers.at(-1);
   const paintElevationRange = useMemo<[number, number]>(() => {
     if (!field) return [0, project.heightScale];
@@ -1227,8 +1230,7 @@ export function TerrainViewport({
   const renderProject = useMemo(() => tool === 'paint' && paintBefore
     ? { ...project, materialPaint: undefined, paintLayers: [] } : project, [project, tool, paintBefore]);
   const paintBrushSettings: BrushInputSettings = { ...brushSettings,
-    selection: paintSelection && !selectingPaint && (paintSelection.points.length >= 3 || paintSelection.region)
-      ? paintSelection : undefined };
+    selection: !selectingPaint ? completedSelection(paintSelection) ?? undefined : undefined };
   const surface = useMemo(() => resolveSurface(project.surface), [project.surface]);
   const waterRange = useMemo(() => waterHeightRange(field, project), [field, project.heightScale]);
   const autoWaterLevel = useMemo(() => resolveWaterLevelMeters(project, {
@@ -1266,6 +1268,7 @@ export function TerrainViewport({
     if (tool === 'paint') {
       brushFeedback.clear();
       onFocusModeChange(paintFocusBefore.current);
+      setPaintSelection(completedSelection);
       setPaintBefore(false); setPickingMaterial(false); setSelectingPaint(false); setConnectedFill(false);
     }
     setTool('navigate');
@@ -1379,8 +1382,12 @@ export function TerrainViewport({
     if (connectedFill) {
       const maps = pickerMaps.current;
       if (!maps) { onPaintNotice('Wait for the material to finish before using connected fill.'); return true; }
-      const selection = floodPaintSelection(maps.splat, maps.resolution, point);
-      if (paintSelection?.points.length) selection.points = paintSelection.points;
+      const selection = floodPaintSelection(maps.splat, maps.resolution, point, 0.2,
+        completedSelection(paintSelection) ?? undefined);
+      if (!selection.region?.runs.length) {
+        onPaintNotice('Choose a material region inside the current selection.');
+        return true;
+      }
       const stroke: MaterialStroke = { ...strokeSettings(paintBrushSettings), fullTile: true, selection,
         points: [{ ...point }], seed: project.seed };
       if (commitPaint([stroke])) { setConnectedFill(false); setPaintSelection(selection); }
@@ -1391,10 +1398,12 @@ export function TerrainViewport({
   const fillPaint = (kind: 'selection' | 'connected' | 'replace') => {
     if (paintDisabledReason) { onPaintNotice(paintDisabledReason); return; }
     if (kind === 'connected') {
+      setPaintSelection(completedSelection);
       setConnectedFill(true); setPickingMaterial(false); setSelectingPaint(false);
       onPaintNotice('Click a material region to fill it. Escape cancels.');
       return;
     }
+    if (selectingPaint) { onPaintNotice('Apply or clear the polygon before filling.'); return; }
     commitPaint([{ ...strokeSettings(paintBrushSettings), fullTile: true,
       mode: kind === 'replace' ? 'replace' : brushSettings.mode ?? 'paint',
       source: brushSettings.source ?? 'rock', points: [{ u: 0.5, v: 0.5 }], seed: project.seed }]);
@@ -1412,6 +1421,7 @@ export function TerrainViewport({
     } else if (tool === 'paint' && next !== 'paint') {
       brushFeedback.clear();
       onFocusModeChange(paintFocusBefore.current);
+      setPaintSelection(completedSelection);
       setPaintBefore(false); setPickingMaterial(false); setSelectingPaint(false); setConnectedFill(false);
     }
     setTool(next); setInspectionPoints([]); setHoverPoint(null);
@@ -1790,7 +1800,7 @@ export function TerrainViewport({
         worldSize={project.worldSize} resolution={field?.resolution ?? project.resolution}
         elevationRange={paintElevationRange}
         surface={surface} onSettingsChange={setBrushSettings} onLayerColor={onLayerColor}
-        layers={paintLayers} activeLayerId={effectiveLayerId}
+        project={project} layers={paintLayers} activeLayerId={effectiveLayerId}
         onSelectLayer={setActiveLayerId} onLayersChange={onPaintLayersChange}
         before={paintBefore} onBeforeChange={setPaintBefore}
         disabledReason={paintDisabledReason}
@@ -1798,11 +1808,12 @@ export function TerrainViewport({
           ? 'Click polygon vertices · Enter to finish · Backspace removes a point' : pickingMaterial
             ? 'Click the terrain to sample a material · Esc cancels' : paintStatus}
         picking={pickingMaterial} onPickingChange={picking => {
+          setPaintSelection(completedSelection);
           setPickingMaterial(picking); setSelectingPaint(false); setConnectedFill(false);
         }} selecting={selectingPaint} onSelectingChange={selecting => {
           setSelectingPaint(selecting); setPickingMaterial(false); setConnectedFill(false);
           if (selecting) setPaintSelection({ points: [] });
-          else setPaintSelection(selection => selection && (selection.points.length >= 3 || selection.region) ? selection : null);
+          else setPaintSelection(completedSelection);
         }} selection={paintSelection} onSelectionChange={setPaintSelection} onFill={fillPaint}
         onUndo={onUndo} onRedo={onRedo} canUndo={canUndo} canRedo={canRedo}>
       <div className={`nh-preview-surface nh-mode-${effectiveMode}${activeBrush ? ' nh-painting' : ''}`}>

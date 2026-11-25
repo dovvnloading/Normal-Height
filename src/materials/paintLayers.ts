@@ -1,4 +1,6 @@
 import type { HeightField, TerrainProject } from '../model/types';
+import { MAX_PROJECT_FILE_BYTES } from '../model/heightRaster';
+import { assertProjectStorageBudget, projectStorageBytes } from '../model/projectStorage';
 import {
   MAX_PAINT_POINTS,
   MAX_PAINT_STROKES,
@@ -9,6 +11,7 @@ import {
   createStrokeRaster,
   parseMaterialPaint,
   parsePaintMask,
+  pointInPaintSelection,
   paintChannel,
   type MaterialLayer,
   type MaterialStroke,
@@ -67,9 +70,10 @@ export function getPaintStrokes(
   }
   return strokes;
 }
-export function paintCapacity(project: Pick<TerrainProject, 'materialPaint' | 'paintLayers'>) {
+export function paintCapacity(project: TerrainProject) {
   const strokes = getPaintStrokes(project),
-    points = strokes.reduce((sum, stroke) => sum + stroke.points.length, 0);
+    points = strokes.reduce((sum, stroke) => sum + stroke.points.length, 0),
+    bytes = projectStorageBytes(project);
   return {
     strokes: strokes.length,
     points,
@@ -77,7 +81,9 @@ export function paintCapacity(project: Pick<TerrainProject, 'materialPaint' | 'p
     maxStrokes: MAX_PAINT_STROKES,
     maxPoints: MAX_PAINT_POINTS,
     maxLayers: MAX_PAINT_LAYERS,
-    ratio: Math.max(strokes.length / MAX_PAINT_STROKES, points / MAX_PAINT_POINTS),
+    bytes,
+    maxBytes: MAX_PROJECT_FILE_BYTES,
+    ratio: Math.max(strokes.length / MAX_PAINT_STROKES, points / MAX_PAINT_POINTS, bytes / MAX_PROJECT_FILE_BYTES),
   };
 }
 function assertCapacity(layers: readonly PaintLayer[]) {
@@ -101,6 +107,9 @@ export function applyPaintStrokes(
   activeLayerId?: string,
 ): TerrainProject {
   if (!strokes.length) return project;
+  // Validate before authoring. Keep original stroke identities for the live
+  // preview/final bake handoff; parsing here is validation, not a rewrite.
+  parseMaterialPaint(strokes);
   const layers = getPaintLayers(project);
   let index = activeLayerId
     ? layers.findIndex((layer) => layer.id === activeLayerId)
@@ -119,13 +128,14 @@ export function applyPaintStrokes(
   assertCapacity(next);
   // Legacy brush callers retain their original serialization until the first
   // explicit layer operation, so older files/tests remain compatible.
-  if (
+  const result =
     !project.paintLayers &&
     next.length === 1 &&
     (!activeLayerId || activeLayerId === LEGACY_LAYER_ID)
-  )
-    return { ...project, materialPaint: next[0].strokes };
-  return { ...project, materialPaint: undefined, paintLayers: next };
+      ? { ...project, materialPaint: next[0].strokes }
+      : { ...project, materialPaint: undefined, paintLayers: next };
+  assertProjectStorageBudget(result);
+  return result;
 }
 export function parsePaintLayers(input: unknown): PaintLayer[] {
   if (!Array.isArray(input) || input.length > MAX_PAINT_LAYERS)
@@ -210,15 +220,18 @@ export function floodPaintSelection(
   resolution: number,
   point: PaintPoint,
   tolerance = 0.2,
+  restriction?: PaintSelection,
 ): PaintSelection {
-  const n = Math.min(512, resolution),
-    count = n * n;
   if (
     !Number.isInteger(resolution) ||
     resolution < 2 ||
     splat.length !== resolution * resolution * 4
   )
     throw new Error('A material map is required for the fill tool.');
+  // Do not downsample a previously selected region merely because the current
+  // material preview is smaller. The fill grid is still bounded at 512.
+  const n = Math.max(Math.min(512, resolution), restriction?.region?.resolution ?? 0),
+    count = n * n;
   const source = (x: number, y: number) =>
     (Math.round((y / (n - 1)) * (resolution - 1)) * resolution +
       Math.round((x / (n - 1)) * (resolution - 1))) *
@@ -242,7 +255,7 @@ export function floodPaintSelection(
       p = source(x, y);
     let distance = 0;
     for (let c = 0; c < 4; c++) distance += Math.abs(splat[p + c] - target[c]);
-    if (distance > limit) continue;
+    if (distance > limit || !pointInPaintSelection(restriction, { u: x / (n - 1), v: y / (n - 1) })) continue;
     selected[i] = 1;
     const neighbours = [
       x > 0 ? i - 1 : -1,
