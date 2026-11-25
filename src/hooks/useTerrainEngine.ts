@@ -1,26 +1,10 @@
-import { rasterIdentity } from '../model/heightRaster';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { EvaluationResult, TerrainProject, WorkerResponse } from '../model/types';
+import type { EvaluationResult, TerrainProject } from '../model/types';
+import { TerrainComputeClient } from '../engine/compute/client';
+import { semanticProjectSignature } from '../engine/plan/graph';
 
 export function evaluationSignature(project: TerrainProject, previewNodeId?: string) {
-  return JSON.stringify({
-    seed: project.seed,
-    resolution: project.resolution,
-    worldSize: project.worldSize,
-    heightScale: project.heightScale,
-    previewNodeId,
-    nodes: project.graph.nodes
-      .filter((n) => n.kind !== 'note' && n.kind !== 'group')
-      .map((n) => ({
-        id: n.id,
-        kind: n.kind,
-        params: n.params,
-        bypassed: n.bypassed,
-        path: n.path,
-        raster: n.raster && rasterIdentity(n.raster),
-      })),
-    edges: project.graph.edges,
-  });
+  return semanticProjectSignature(project, previewNodeId);
 }
 export function createTerrainWorker() {
   return new Worker(new URL('../engine/terrain.worker.ts', import.meta.url), { type: 'module' });
@@ -40,8 +24,9 @@ export function useTerrainEngine(
   const [stage, setStage] = useState('Preparing terrain');
   const [error, setError] = useState<string | null>(null);
   const [completedSignature, setCompletedSignature] = useState('');
-  const workerRef = useRef<Worker | null>(null);
-  const jobRef = useRef(0);
+  const clientRef = useRef<TerrainComputeClient | null>(null);
+  if (!clientRef.current) clientRef.current = new TerrainComputeClient(createTerrainWorker);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const projectRef = useRef(project);
   projectRef.current = project;
   const previewRef = useRef(previewNodeId);
@@ -51,10 +36,8 @@ export function useTerrainEngine(
     [project, previewNodeId],
   );
   const build = useCallback(() => {
-    workerRef.current?.terminate();
-    const worker = createTerrainWorker();
-    workerRef.current = worker;
-    const id = ++jobRef.current;
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = null;
     const snapshot = projectRef.current;
     const preview = previewRef.current;
     const key = evaluationSignature(snapshot, preview);
@@ -62,45 +45,31 @@ export function useTerrainEngine(
     setProgress(0);
     setStage('Building terrain');
     setError(null);
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      const message = event.data;
-      if (message.id !== jobRef.current) return;
-      if (message.type === 'progress') {
-        setProgress(message.progress);
-        setStage(message.stage);
-      } else if (message.type === 'result') {
-        setResult(message.result);
+    clientRef.current!.generate(snapshot, preview, {
+      progress: (value, label) => {
+        setProgress(value);
+        setStage(label);
+      },
+      result: (next) => {
+        setBusy(false);
+        // A project edit can arrive during the automatic-build debounce. The
+        // old computation may populate the cache but cannot publish stale UI.
+        if (key !== evaluationSignature(projectRef.current, previewRef.current)) {
+          setStage('Settings changed — build again');
+          return;
+        }
+        setResult(next);
         setCompletedProject(snapshot);
         setCompletedPreviewNodeId(preview);
         setCompletedSignature(key);
-        setBusy(false);
         setProgress(1);
         setStage('Terrain ready');
-        worker.terminate();
-        workerRef.current = null;
-      } else {
-        setError(message.message);
+      },
+      error: (message) => {
+        setError(message);
         setBusy(false);
         setStage('Graph needs attention');
-        worker.terminate();
-        workerRef.current = null;
-      }
-    };
-    worker.onerror = (event) => {
-      if (id !== jobRef.current) return;
-      setError(
-        event.message || 'The terrain worker stopped unexpectedly. Try a lower working resolution.',
-      );
-      setBusy(false);
-      worker.terminate();
-      workerRef.current = null;
-    };
-    worker.postMessage({
-      type: 'generate',
-      id,
-      project: snapshot,
-      resolution: snapshot.resolution,
-      previewNodeId: preview,
+      },
     });
   }, []);
   const first = useRef(true);
@@ -110,21 +79,31 @@ export function useTerrainEngine(
     previousPreview.current = previewNodeId;
     if (!automatic && !first.current && !changedPreview) return;
     first.current = false;
-    const timer = setTimeout(build, 360);
-    return () => clearTimeout(timer);
+    timerRef.current = setTimeout(build, 360);
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      timerRef.current = null;
+    };
   }, [signature, automatic, build, previewNodeId]);
   useEffect(
     () => () => {
-      workerRef.current?.terminate();
+      clientRef.current?.dispose();
     },
     [],
   );
   const cancel = useCallback(() => {
-    workerRef.current?.terminate();
-    workerRef.current = null;
-    ++jobRef.current;
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    clientRef.current?.cancel();
     setBusy(false);
     setStage('Build cancelled');
+  }, []);
+  const clearCache = useCallback(() => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current);
+    timerRef.current = null;
+    clientRef.current?.clearCache();
+    setBusy(false);
+    setStage('Compute cache cleared');
   }, []);
   return {
     result,
@@ -137,5 +116,6 @@ export function useTerrainEngine(
     stale: completedSignature !== signature,
     build,
     cancel,
+    clearCache,
   };
 }

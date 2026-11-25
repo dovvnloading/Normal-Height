@@ -15,11 +15,13 @@ import {
   ArrowDownUp,
 } from 'lucide-react';
 import { NODE_DEFINITIONS, noiseParamVisible } from '../model/registry';
+import { upgradeNoiseParams } from '../model/noiseStudio';
 import { layerColorHex, resolveSurface, SPLAT_LAYERS } from '../materials/pbr';
 import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { NumberField, ParamControl } from './Controls';
 import { TerrainIcon } from './TerrainIcon';
+import { NoiseStudio } from './NoiseStudio';
 import type { TerrainNode, TerrainProject, ParamValue, ViewSettings } from '../model/types';
 
 interface Props {
@@ -31,6 +33,7 @@ interface Props {
   project: TerrainProject;
   previewNodeId?: string;
   onParam: (key: string, value: ParamValue) => void;
+  onParams: (patch: Record<string, ParamValue>) => void;
   onRename: (label: string) => void;
   onBypass: () => void;
   onPreview: (id: string) => void;
@@ -50,6 +53,7 @@ export function Inspector({
   project,
   previewNodeId,
   onParam,
+  onParams,
   onRename,
   onBypass,
   onPreview,
@@ -114,13 +118,22 @@ export function Inspector({
               {node.kind === 'heightImport' && (
                 <HeightImportControl key={node.id} raster={node.raster} onImport={onImportRaster} />
               )}
-              {node.kind === 'noise' && node.params.mode === 'wave' && node.params.noiseModel !== 'v2' && (
+              {node.kind === 'noise' && node.params.noiseModel !== 'v3' && (
+                <div className="studio-upgrade">
+                  <span>{node.params.noiseModel === 'v2' ? 'Corrected sampler · v2' : 'Original sampler · legacy'}</span>
+                  <p>Upgrade these controls to Noise Studio for new generators, seed exploration and shaping. The new sampler changes the pattern. Undo restores this version.</p>
+                  <button type="button" onClick={() => onParams(upgradeNoiseParams(node.params))}>Upgrade to Studio <ArrowUpRight size={14} /></button>
+                </div>
+              )}
+              {node.kind === 'noise' && node.params.mode === 'wave' && !['v2', 'v3'].includes(String(node.params.noiseModel)) && (
                 <p className="parameter-hint">Legacy Wave uses a fixed three-layer phase fractal. Switch to corrected sampling to edit its layers.</p>
               )}
-              {node.kind === 'noise' && node.params.mode === 'naki' && node.params.noiseModel !== 'v2' && (
+              {node.kind === 'noise' && node.params.mode === 'naki' && !['v2', 'v3'].includes(String(node.params.noiseModel)) && (
                 <p className="parameter-hint">Legacy Naki includes inherent coordinate distortion even at zero Warp amount.</p>
               )}
-              {sections.map((section) => (
+              {node.kind === 'noise' && node.params.noiseModel === 'v3' ? (
+                <NoiseStudio key={node.id} params={node.params} projectSeed={project.seed} worldSize={project.worldSize} heightScale={project.heightScale} onParam={onParam} onParams={onParams} />
+              ) : sections.map((section) => (
                 <details
                   className="parameter-section"
                   key={`${node.id}-${section}`}
@@ -138,8 +151,8 @@ export function Inspector({
                       .map((d) => (
                         <ParamControl
                           key={`${node.id}-${d.key}`}
-                          definition={d}
-                          value={node.params[d.key] ?? d.default}
+                          definition={node.kind === 'noise' && d.key === 'noiseModel' ? { ...d, options: d.options?.filter(option => option.value !== 'v3') } : d}
+                          value={node.params[d.key] ?? (node.kind === 'noise' && d.key === 'noiseModel' ? 'legacy' : d.default)}
                           onChange={(v) => onParam(d.key, v)}
                         />
                       ))}

@@ -29,6 +29,7 @@ describe('PBR issue acceptance regressions', () => {
     const expected: Record<string, string> = {
       'river-gorge': 'alpine', alpine: 'alpine', massif: 'alpine',
       badlands: 'arid', volcano: 'volcanic', 'volcanic-island': 'volcanic', highlands: 'alpine', uplands: 'alpine',
+      'studio-ridges': 'alpine', 'studio-dunes': 'arid', 'studio-craters': 'arid',
     };
     expect(PRESETS.map((preset) => preset.id).sort()).toEqual(Object.keys(expected).sort());
     const field = analyticField(64);

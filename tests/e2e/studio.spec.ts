@@ -474,9 +474,10 @@ test('authors noise nodes, uses undo and redo, groups nodes, and edits a note', 
   page,
 }) => {
   const library = page.getByRole('complementary', { name: 'Node library', exact: true });
-  await library.getByRole('button', { name: /Procedural noise/ }).click();
+  await library.locator('.noise-library > summary').click();
+  await library.locator('.noise-library').getByRole('button', { name: /Ridged multifractal/ }).click();
   await expect(terrainNodes(page)).toHaveCount(6);
-  await expect(page.getByRole('textbox', { name: 'Node name' })).toHaveValue('Procedural noise');
+  await expect(page.getByRole('textbox', { name: 'Node name' })).toHaveValue('Ridged noise');
   const noiseFamily = page.getByRole('combobox', { name: 'Noise family', exact: true });
   await noiseFamily.selectOption('naki');
   await expect(noiseFamily).toHaveValue('naki');
@@ -509,8 +510,9 @@ test('authors noise nodes, uses undo and redo, groups nodes, and edits a note', 
 });
 
 test('shows only noise controls used by the chosen algorithm and family', async ({ page }) => {
-  await page.getByRole('complementary', { name: 'Node library', exact: true })
-    .getByRole('button', { name: /Procedural noise/ }).click();
+  const library = page.getByRole('complementary', { name: 'Node library', exact: true });
+  await library.locator('.noise-library > summary').click();
+  await library.locator('.noise-library').getByRole('button', { name: /Ridged multifractal/ }).click();
   const family = page.getByRole('combobox', { name: 'Noise family', exact: true });
   const algorithm = page.getByRole('combobox', { name: 'Noise algorithm', exact: true });
   const octaves = page.getByRole('spinbutton', { name: 'Octaves value', exact: true });

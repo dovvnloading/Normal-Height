@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Search, Layers3, StickyNote, Dices, ChevronRight, Sparkles, Plus, X } from 'lucide-react';
+import { Search, Layers3, StickyNote, Dices, ChevronRight, Sparkles, Plus, X, Grid2X2 } from 'lucide-react';
 import { TerrainIcon, NODE_ICON_NAMES, PRESET_ICON_NAMES } from './TerrainIcon';
 import { NODE_DEFINITIONS, NOISE_MODES } from '../model/registry';
 import { PRESETS } from '../model/presets';
+import { STUDIO_KERNELS, NOISE_PRESETS } from '../model/noiseStudio';
 import { NumberField } from './Controls';
+import { NEW_STUDIO_PARAMS, NoiseLibraryDialog } from './NoiseStudio';
 import type { NodeKind, ParamValue } from '../model/types';
 
 export function NodeIcon({ kind, size = 17 }: { kind: NodeKind; size?: number }) {
@@ -14,7 +16,7 @@ export function NodeIcon({ kind, size = 17 }: { kind: NodeKind; size?: number })
 const NODE_SUBTITLES: Record<NodeKind, string> = {
   mountain: 'Connected landforms',
   heightImport: 'PNG & RAW elevation grids',
-  noise: '12 seeded noise families',
+  noise: `${STUDIO_KERNELS.length} studio generators`,
   hydraulic: 'Water & sediment',
   thermal: 'Talus & loose material',
   warp: 'Distort coordinates',
@@ -31,17 +33,20 @@ const NODE_SUBTITLES: Record<NodeKind, string> = {
 };
 interface Props {
   seed: number;
+  worldSize: number;
   onSeed: (seed: number) => void;
   onAdd: (kind: NodeKind, params?: Record<string, ParamValue>) => void;
   onPreset: (id: string) => void;
   activePreset: string;
   compact?: boolean;
 }
-export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact = false }: Props) {
+export function Library({ seed, worldSize, onSeed, onAdd, onPreset, activePreset, compact = false }: Props) {
   const [tab, setTab] = useState<'nodes' | 'presets'>('nodes');
   const [search, setSearch] = useState('');
+  const [noiseLibraryOpen, setNoiseLibraryOpen] = useState(false);
   const groups = ['Source', 'Shape', 'Simulate', 'Combine', 'Utility'];
   const query = search.trim().toLowerCase();
+  const studioMatches = !query || 'noise studio seed texture'.includes(query) || STUDIO_KERNELS.some(([, label]) => label.toLowerCase().includes(query)) || NOISE_PRESETS.some(p => `${p.name} ${p.category} ${p.description}`.toLowerCase().includes(query));
   const matches = Object.values(NODE_DEFINITIONS).filter(
     (d) =>
       d.kind !== 'group' &&
@@ -82,6 +87,12 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
                 <kbd>/</kbd>
               )}
             </div>
+            {studioMatches && <section className="studio-library-entry">
+              <span>STUDIO 03 / PROCEDURAL SOURCE</span>
+              <strong>Noise Studio</strong>
+              <p>{STUDIO_KERNELS.length} generators. {NOISE_PRESETS.length} starting points. Reproducible seeds and editable recipes.</p>
+              <button type="button" onClick={() => setNoiseLibraryOpen(true)}><Grid2X2 size={13} /> Browse Noise Studio <ChevronRight size={12} /></button>
+            </section>}
             {groups.map((category) => {
               const items = matches.filter((n) => n.category === category);
               if (!items.length) return null;
@@ -122,14 +133,14 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
             <details className="noise-library" open={query.length > 0 || undefined}>
               <summary>
                 <TerrainIcon name="procedural-noise" height={15} />
-                Noise families<span>12</span>
+                Classic families · v2<span>{NOISE_MODES.length}</span>
                 <ChevronRight size={13} />
               </summary>
               <div>
                 {NOISE_MODES.filter(
                   (n) => !query || n.label.toLowerCase().includes(query) || query === 'noise',
                 ).map((n, i) => (
-                  <button onClick={() => onAdd('noise', { mode: n.value })} key={n.value}>
+                  <button onClick={() => onAdd('noise', { noiseModel: 'v2', mode: n.value })} key={n.value}>
                     <span className="noise-index">{String(i + 1).padStart(2, '0')}</span>
                     {n.label}
                     <Plus size={12} />
@@ -138,7 +149,7 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
               </div>
             </details>
             {matches.length === 0 &&
-              !NOISE_MODES.some((n) => n.label.toLowerCase().includes(query)) && (
+              !studioMatches && !NOISE_MODES.some((n) => n.label.toLowerCase().includes(query)) && (
                 <div className="search-empty">
                   No matching nodes.<button onClick={() => setSearch('')}>Clear search</button>
                 </div>
@@ -206,6 +217,7 @@ export function Library({ seed, onSeed, onAdd, onPreset, activePreset, compact =
           <p>Same seed. Same landscape.</p>
         </div>
       )}
+      {noiseLibraryOpen && <NoiseLibraryDialog params={NEW_STUDIO_PARAMS} projectSeed={seed} worldSize={worldSize} adding onApply={params => { onAdd('noise', params); setNoiseLibraryOpen(false); }} onClose={() => setNoiseLibraryOpen(false)} />}
     </aside>
   );
 }

@@ -1,4 +1,5 @@
 import { createNode } from './registry';
+import { NOISE_PRESETS, STUDIO_DEFAULTS } from './noiseStudio';
 import { resolveSurface } from '../materials/pbr';
 import type { TerrainProject, TerrainNode, TerrainEdge, NodeKind, ParamValue } from './types';
 
@@ -23,7 +24,9 @@ function node(
   label?: string,
 ): TerrainNode {
   const n = createNode(kind, { x, y: 100 }, id);
-  return { ...n, label: label ?? n.label, params: { ...n.params, ...params } };
+  // These authored graphs predate Studio. Preserve their calibrated appearance;
+  // Studio presets opt in explicitly with noiseModel: 'v3'.
+  return { ...n, label: label ?? n.label, params: { ...n.params, ...(kind === 'noise' ? { noiseModel: 'v2' } : {}), ...params } };
 }
 export const PRESETS: Preset[] = [
   {
@@ -281,6 +284,26 @@ export const PRESETS: Preset[] = [
     ],
   },
 ];
+// Studio examples use the same recipes as the source library. Erosion examples
+// are ordinary editable graphs, so their source and processing stay inspectable.
+for (const [id, recipeId, name, description, seed, erode] of [
+  ['studio-ridges', 'alpine-ridges', 'Studio ridgelands', 'OpenSimplex2S ridges with rounded crests, followed by runoff and scree settling.', 82017, true],
+  ['studio-dunes', 'wind-dunes', 'Studio wind dunes', 'Directional dunes with asymmetric slopes and independently controllable phase distortion.', 59431, false],
+  ['studio-craters', 'impact-field', 'Studio impact field', 'Seeded crater bowls and rims, with editable density, radius and softness.', 17021, false],
+] as const) {
+  const recipe = NOISE_PRESETS.find(p => p.id === recipeId)!;
+  PRESETS.push({
+    id, name, description, seed, eyebrow: 'NOISE STUDIO / V3', color: '#7d8a76',
+    build: () => [
+      node('studio-source', 'noise', 0, { ...STUDIO_DEFAULTS, ...recipe.params, noiseModel: 'v3' }, recipe.name),
+      ...(erode ? [
+        node('studio-rain', 'hydraulic', 270, { cycles: 12, hillslope: 0.03, bedrockPreserve: true }, 'Weather the ridges'),
+        node('studio-scree', 'thermal', 540, { iterations: 3, talus: 0.025, strength: 0.2 }, 'Settle the scree'),
+      ] : []),
+      node('studio-output', 'output', erode ? 810 : 270),
+    ],
+  });
+}
 export function createProject(presetId = 'alpine'): TerrainProject {
   const preset = PRESETS.find((p) => p.id === presetId) ?? PRESETS[0];
   const nodes = preset.build();
@@ -299,7 +322,7 @@ export function createProject(presetId = 'alpine'): TerrainProject {
     presetId: preset.id,
     // A new terrain preset carries a deterministic matching procedural surface.
     // Imported projects retain their separately saved surface configuration.
-    surface: preset.id === 'badlands'
+    surface: preset.id === 'badlands' || preset.id === 'studio-dunes' || preset.id === 'studio-craters'
       ? { ...resolveSurface(), biome: 'arid', moisture: 0.16, snowLine: 1 }
       : (preset.id === 'volcano' || preset.id === 'volcanic-island')
         ? { ...resolveSurface(), biome: 'volcanic', moisture: 0.24, snowLine: 0.92 }

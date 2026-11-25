@@ -84,6 +84,8 @@ describe('versioned procedural noise', () => {
     const project = createProject();
     const source = createNode('noise', { x: 0, y: 0 }, 'source');
     const output = createNode('output', { x: 200, y: 0 }, 'out');
+    // This test exercises the preserved v2 implementation, not new-node defaults.
+    source.params.noiseModel = 'v2';
     source.params.mode = 'wave';
     project.graph = {
       nodes: [source, output],
@@ -104,6 +106,7 @@ describe('versioned procedural noise', () => {
 
   it('exposes fractal and warp controls only for the noise families that use them', () => {
     const source = createNode('noise', { x: 0, y: 0 }, 'source');
+    source.params.noiseModel = 'v2';
     for (const mode of ['perlin', 'simplex', 'voronoi', 'voronoi-edge', 'cellular']) {
       source.params.mode = mode;
       expect(noiseParamVisible(source, 'octaves')).toBe(false);

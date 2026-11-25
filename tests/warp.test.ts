@@ -11,7 +11,7 @@ describe('domain warp tile coordinates', () => {
     // A known smooth analytic source, tilted in both x and y so the test
     // observes both components of the displacement. No fractal phase warp.
     source.params = {
-      ...source.params, mode: 'wave', scale: 0.25, rotation: 30, stretch: 1,
+      ...source.params, noiseModel: 'v2', mode: 'wave', scale: 0.25, rotation: 30, stretch: 1,
       warp: 0, amplitude: 0.5, offset: 0.1,
     };
     const warp = createNode('warp', { x: 200, y: 0 }, 'warp');

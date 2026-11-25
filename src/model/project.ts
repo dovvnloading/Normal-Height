@@ -3,6 +3,9 @@ import { parseMaterialPaint } from '../materials/materialPaint';
 import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
 import { resolveSurface, SPLAT_LAYERS, SURFACE_LIMITS } from '../materials/pbr';
 import { NODE_DEFINITIONS, createNode } from './registry';
+import { resolveStudioSettings, STUDIO_PARAMS, validateStudioParams } from './noiseStudio';
+import { validateWorldDefinition } from './world';
+import type { WorldDefinition } from './world';
 import type { NodeKind, TerrainProject, TerrainNode, TerrainEdge, ParamValue } from './types';
 
 export const STORAGE_KEY = 'normal-height.project.v1';
@@ -12,8 +15,16 @@ export function parseProject(raw: unknown): TerrainProject {
   if (!raw || typeof raw !== 'object')
     throw new Error('This file does not contain a terrain project.');
   const p = raw as Record<string, unknown>;
-  if (p.version !== 1)
-    throw new Error('This project version is not supported. Expected a Normal Height v1 project.');
+  if (p.version !== 1 && p.version !== 2)
+    throw new Error(
+      'This project version is not supported. Expected Normal Height v1 or World v2.',
+    );
+  if (p.version === 2) {
+    const worldError = validateWorldDefinition(p.world);
+    if (worldError) throw new Error(worldError);
+  } else if (p.world !== undefined) {
+    throw new Error('World settings require an explicitly versioned World v2 project.');
+  }
   const g = p.graph as { nodes: unknown[]; edges: unknown[] } | undefined;
   if (
     !g ||
@@ -45,7 +56,16 @@ export function parseProject(raw: unknown): TerrainProject {
     clean.label = typeof n.label === 'string' ? n.label.slice(0, 100) : clean.label;
     const params =
       n.params && typeof n.params === 'object' ? (n.params as Record<string, unknown>) : {};
-    for (const def of NODE_DEFINITIONS[kind].params) {
+    const studio = kind === 'noise' && params.noiseModel === 'v3';
+    const definitions = studio
+      ? [
+          ...new Map(
+            [...NODE_DEFINITIONS[kind].params, ...STUDIO_PARAMS].map((d) => [d.key, d]),
+          ).values(),
+        ]
+      : NODE_DEFINITIONS[kind].params;
+    if (studio) validateStudioParams(params);
+    for (const def of definitions) {
       const value = params[def.key];
       if (value === undefined) continue;
       if (def.type === 'range' || def.type === 'number') {
@@ -63,6 +83,7 @@ export function parseProject(raw: unknown): TerrainProject {
     // Missing version means an older procedural noise node. Preserve its
     // exact seeded appearance instead of silently opting it into new math.
     if (kind === 'noise' && params.noiseModel === undefined) clean.params.noiseModel = 'legacy';
+    if (studio) Object.assign(clean.params, resolveStudioSettings(clean.params));
     if (kind === 'heightImport' && n.raster !== undefined) {
       clean.raster = parseHeightRaster(n.raster, remainingRasterBytes);
       remainingRasterBytes -= rasterBytes(clean.raster);
@@ -135,7 +156,10 @@ export function parseProject(raw: unknown): TerrainProject {
       throw new Error('Invalid PBR surface settings.');
     const rawSurface = p.surface as Record<string, unknown>;
     const biome = rawSurface.biome;
-    if (biome !== undefined && (typeof biome !== 'string' || !['alpine', 'arid', 'volcanic'].includes(biome)))
+    if (
+      biome !== undefined &&
+      (typeof biome !== 'string' || !['alpine', 'arid', 'volcanic'].includes(biome))
+    )
       throw new Error('Unknown PBR biome.');
     const clean = resolveSurface();
     if (biome !== undefined) clean.biome = biome as typeof clean.biome;
@@ -164,7 +188,8 @@ export function parseProject(raw: unknown): TerrainProject {
     surface = clean;
   }
   return {
-    version: 1,
+    version: p.version,
+    ...(p.version === 2 ? { world: structuredClone(p.world as WorldDefinition) } : {}),
     name: typeof p.name === 'string' ? p.name.slice(0, 100) : 'Untitled terrain',
     seed: Math.floor(p.seed),
     resolution: Math.floor(p.resolution),
@@ -172,7 +197,9 @@ export function parseProject(raw: unknown): TerrainProject {
     heightScale: p.heightScale,
     presetId: typeof p.presetId === 'string' ? p.presetId : 'custom',
     ...(surface ? { surface } : {}),
-    ...(p.materialPaint !== undefined ? { materialPaint: parseMaterialPaint(p.materialPaint) } : {}),
+    ...(p.materialPaint !== undefined
+      ? { materialPaint: parseMaterialPaint(p.materialPaint) }
+      : {}),
     graph: { nodes, edges },
   };
 }
@@ -188,7 +215,9 @@ export function downloadBlob(blob: Blob, filename: string) {
 }
 export function saveProject(project: TerrainProject) {
   downloadBlob(
-    new Blob([JSON.stringify({ ...project, surface: resolveSurface(project.surface) }, null, 2)], { type: 'application/json' }),
+    new Blob([JSON.stringify({ ...project, surface: resolveSurface(project.surface) }, null, 2)], {
+      type: 'application/json',
+    }),
     `${slug(project.name)}.nhterrain.json`,
   );
 }

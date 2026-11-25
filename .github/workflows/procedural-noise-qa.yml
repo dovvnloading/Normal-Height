@@ -5,12 +5,22 @@ on:
     branches: [main]
     paths:
       - 'src/engine/noise*.ts'
+      - 'src/engine/noiseStudio/**'
       - 'src/engine/index.ts'
+      - 'src/model/noiseStudio*'
       - 'src/model/project.ts'
       - 'src/model/registry.ts'
       - 'src/components/Inspector.tsx'
+      - 'src/components/Noise*'
+      - 'src/hooks/*Noise*'
+      - 'src/hooks/noise*'
+      - 'src/workers/noise*'
+      - 'src/export/noise*'
       - 'tests/noise-legacy-reference.test.ts'
+      - 'tests/noise*'
+      - 'tests/fixtures/noise-compatibility.json'
       - 'tests/e2e/studio.spec.ts'
+      - 'tests/e2e/noise-studio.spec.ts'
       - '.github/workflows/procedural-noise-qa.yml'
   workflow_dispatch:
 
@@ -47,6 +57,8 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Verify version selector and noise controls
         run: npx playwright test tests/e2e/studio.spec.ts --grep "shows only noise controls" --workers=1
+      - name: Verify Studio authoring, seeds, recipes and streaming export
+        run: npx playwright test tests/e2e/noise-studio.spec.ts --workers=1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -2,15 +2,64 @@
 
 **A procedural terrain studio for shaping mountain ranges, simulating erosion, and exporting precise heightmaps.**
 
-Normal Height is a React and TypeScript web application. Its visual node graph drives a real Float32 terrain pipeline, evaluated in a dedicated Web Worker. Three.js renders the displaced terrain; a separate 2D view inspects height, normals, slope, flow, wear, and deposition.
+Normal Height is a React and TypeScript web application. Its visual node graph drives a real Float32 terrain pipeline in a persistent, incrementally cached Web Worker. Three.js renders the displaced terrain; a separate 2D view inspects height, normals, slope, flow, wear, and deposition. **World Studio** extends the graph into continuous Cartesian worlds, regional builds, and tiled export.
 
 ![Normal Height studio showing the Alpine watershed, node graph, and hydraulic erosion controls](docs/images/studio-3d.png)
 
 _The running production app with the editable Alpine watershed graph at 512 × 512, PBR material and golden-hour lighting._
 
-![Orbiting four built-in landscapes: Alpine watershed, Granite massif, Volcanic caldera and Folded highlands](docs/images/landscape-tour.gif)
+![Tour of Alpine watershed and the recent Noise Studio ridgelands, wind dunes, and impact field landscapes](docs/images/landscape-tour.gif)
 
-_Built-in landscapes rendered live in the 3D preview. Regenerate these images with `node scripts/readme-media.mjs` (see the script header)._
+_The current application, rendered live. Regenerate the screenshots and GIFs with `node scripts/readme-media.mjs`. [Capture provenance and instructions](docs/MEDIA.md) distinguish software rendering from hardware performance evidence._
+
+## World Engine
+
+This engineering preview implements the continuous-world workflow. The release
+qualification limits below remain explicit in the app, guides, and exports.
+
+![World Studio with a continuous terrain overview, shared tile grid, physical dimensions, and a selected region](docs/images/world-studio.png)
+
+Open **World Studio** in the workspace toolbar. Set the physical extent and
+sample intervals, build an overview, then click or drag across tiles and choose
+**Refine region**. The same coordinates identify a sample in every tile; edge
+tiles crop to the exact domain. A rectangular world works with native World
+stages. Legacy square-domain sources and solvers explicitly require a square
+domain.
+
+![Actual World Studio workflow: overview, tile selection, regional detail, height and flow maps, stage report, and export](docs/images/world-workflow.gif)
+
+| Capability           | Current implementation                                                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Persistent compute   | Immutable, byte-bounded per-node cache; downstream edits reuse valid upstream fields; diagnostics show hits, misses, timings and memory estimates                                       |
+| World coordinates    | Explicit project v2, rectangular local Cartesian meters, independent origins and dimensions, canonical shared samples, partial tiles, region builds                                     |
+| Native graph detail  | Noise Studio v3, remap, terrace, blend, height/slope masks and bounded warp; global stages share one reference solution and reconstruct their displacement over the native input        |
+| Compute selection    | CPU reference, Auto, or WebGPU; remap/terrace/blend/height-mask WGSL kernels must pass a runtime numerical probe before use; unsupported/device failures are reported                   |
+| Coupled transport    | Optional experimental whole-domain water, sediment and thermal transport, global drainage, open/closed boundaries, synchronized shared-face exchange, and separate conservation ledgers |
+| World export         | Exact 4K/8K sample profiles, bounded tiles, PNG16/UInt16/Float32 height, flow/wear/deposition/slope, halo-aware normals, selected named masks, checksums and reproduction manifest      |
+| Delivery profiles    | Generic Cartesian output plus experimental Unreal/Unity grids and import settings; real engine import qualification remains pending                                                     |
+| Local region storage | Optional 64 MiB IndexedDB cache of completed CPU regions, version/checksum validation, atomic admission and memory fallback; separate from authored project storage                     |
+
+**Resolution is reported per stage.** An 8192² package may include a coarse
+global erosion or transport solution. The manifest records that simulation's
+actual spacing. Legacy single-tile exports retain their existing 2048² cap;
+World Studio is the separate tiled path. Full World PBR baking, raster/coast
+integration from #42, hardware GPU performance qualification, production engine
+imports, and 32K export qualification remain follow-up work.
+
+![Measured per-node cache reuse in the running program](docs/images/compute-cache.png)
+
+The recorded Alpine CPU fixture reduced a downstream remap edit from a median
+**4,593 ms uncached to 18.2 ms with cache reuse**, with exact output equivalence.
+A complete native Perlin → remap → terrace → output graph exported at **4096²
+in 33.0 s** and **8192² in 148.2 s** in the documented Node CPU environment.
+Actual Chromium downloads of that native CPU graph completed at **4096² in
+86.9 s** and **8192² in 345.1 s** on a separate Xeon CI runner; every PNG tile
+and shared border was independently verified. These are fixture measurements,
+not general browser/GPU speed promises. See the
+[World Engine guide, evidence and limitations](docs/WORLD_ENGINE.md),
+[cache measurements](docs/benchmarks/world-engine-cpu.json), and
+[export measurements](docs/benchmarks/world-engine-cpu-export.json), and
+[actual browser export evidence](docs/benchmarks/world-engine-browser-export.json).
 
 ## Run the application
 
@@ -30,7 +79,7 @@ npm test            # Engine, export, and rendering-math tests
 npm run test:e2e    # Optional full browser suite; run npm run build first
 ```
 
-**Routine CI runs only `npm test` and `npm run build`.** It does not install Chromium, run the browser suite, or run performance benchmarks on every push. To request extended browser QA or the mesh benchmark smoke test, open **GitHub Actions → Extended terrain QA (manual only) → Run workflow**. Locally, run `npm run build` first, install Chromium once with `npx playwright install chromium`, then run `npm run test:e2e`. Hardware benchmarking instructions are in [docs/MESH_PERFORMANCE.md](docs/MESH_PERFORMANCE.md).
+**Fast terrain checks run `npm test` and `npm run build`.** Pull requests that touch viewport, noise, PBR export, or World Engine code also run their targeted browser acceptance workflows. World correctness checks verify the selected commit without changing the branch. **GitHub Actions → World Studio media (manual) → Run workflow** captures the actual app as downloadable artifacts; publishing changed captures to the selected branch requires its explicit `publish` option. Extended browser QA and mesh benchmarks remain available through **GitHub Actions → Extended terrain QA (manual only) → Run workflow**. Locally, build first, install Chromium with `npx playwright install chromium`, then run `npm run test:e2e`. Hardware benchmarking instructions are in [docs/MESH_PERFORMANCE.md](docs/MESH_PERFORMANCE.md).
 
 ## What the studio does
 
@@ -59,18 +108,56 @@ It is not a commercial Terragen/Gaea clone or a validated physical
 fluid simulation. Judge its actual grayscale Height map and terrain
 relief against the reference, not its Flow mask or material textures.
 
-
 - **Mountain range generator:** direction, width, relief, sharpness, fractal detail, and distortion. Profiles include connected alpine ranges, broad massifs, volcanic calderas, and badlands.
-- **Twelve procedural noise families:** Perlin, simplex, fractal Brownian motion, ridged multifractal, billow, turbulence, Voronoi F1, Voronoi ridges, cellular, wave, warped turbulence, and an independently designed Naki-inspired pattern.
+- **Noise Studio v3:** 14 base generators, 10 fractal modes, independently seeded domain distortion, physical feature sizes, editable remap curves, and 18 artist presets. The original 12 noise families remain available as versioned compatibility choices.
 - **Shaping nodes:** domain warp, terrace, and height remap.
 - **Combination nodes:** blend fields with mix/add/multiply/min/max operations and optional masks; height and slope masks can also limit hydraulic erosion.
-- **Reproducible seeds:** a project seed plus per-node offsets. Changing node positions or selection does not change the generated terrain.
-- **Editable landscape graphs** include Dissected uplands, Alpine watershed, Granite massif, Desert badlands, Volcanic caldera, Folded highlands, River-cut highlands, and Volcanic island.
+- **Reproducible seeds:** project-linked or independent Studio seeds, optional seed names, resolved stream locks, and separate warp seeds. Explore nine variations, bookmark looks, and restore recent choices. Moving or reordering nodes does not change the random streams.
+- **Editable landscape graphs:** regional uplands, mountains, badlands, calderas, coastal islands, spline-enabled highlands, and three Studio examples for ridges, dunes, and crater fields.
+
+### Noise Studio
+
+![Noise Studio artist presets rendered from the real sampler with a shared seed and fixed grayscale range](docs/images/noise-studio-presets.png)
+
+Open **Nodes → Browse Noise Studio** to explore generated previews, or add a
+**Procedural noise** node. The inspector separates the base generator from its
+fractal structure, distortion, coordinates, shaping, and sampling quality.
+
+| Stage       | Choices                                                                                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Base field  | OpenSimplex2S, OpenSimplex2, Perlin, Value, Cubic Value, Worley/cellular, sparse Gabor, sparse spots, craters, wave, dunes, folded strata, white, Gaussian |
+| Fractal     | Single layer, fBm, ridged, billow, absolute turbulence, ping-pong, hybrid, heterogeneous, Swiss, Jordan                                                    |
+| Cellular    | F1, F2, F2−F1, F1/F2, cell value, smooth F1, true Euclidean edge distance; three distance metrics where applicable                                         |
+| Distortion  | Independent, progressive, or curl displacement with separate frequency, layer controls and seed                                                            |
+| Coordinates | Tile frequency or feature size in meters, separate X/Y scaling, rotation, translation, octave rotation                                                     |
+| Output      | Black/white levels, gamma, contrast, bias, invert, editable curve, amplitude, elevation offset                                                             |
+| Sampling    | Footprint filtering, optional 4/16 samples, unfiltered reference, seamless four-way blending                                                               |
+
+**Capture A** retains an independent reference while you edit B. The library and
+seed explorer generate actual heightfields in cancellable workers. Applying a
+preset, seed variation, imported recipe, or seed lock is one undo step.
+
+**Export source** writes the selected noise directly at up to **8192 × 8192**,
+with 16-bit PNG or Float32 RAW, a versioned recipe and reproduction metadata.
+Generation and encoding use strips; the final archive still occupies browser
+memory. This export contains the procedural source before downstream graph
+operations. The existing single-tile graph exporter retains its 2048² limit;
+World Studio provides a separate bounded, tiled full-graph export path with
+per-stage simulation and reconstruction metadata.
+
+See the [Noise Studio guide](docs/NOISE_STUDIO.md) for controls, seed semantics,
+reproducibility, measured performance and quality limits, and the
+[research and numerical contracts](docs/NOISE_RESEARCH.md) for algorithm sources.
 
 ### Procedural noise compatibility
 
-New Procedural noise nodes use **Noise algorithm → Corrected sampling (v2)**.
-This bounds Perlin without hard-clipping its extrema, smoothly compresses strong
+New Procedural noise nodes use **Noise Studio (v3)**. Existing v2 and legacy
+nodes keep their previous sampling until you choose **Upgrade to Studio**.
+Upgrading changes the pattern and is undoable. The algorithm version is saved
+with each node. Existing authored landscape presets keep their original version;
+the new Studio landscapes opt in explicitly.
+
+**Corrected sampling (v2)** bounds Perlin without hard-clipping its extrema, smoothly compresses strong
 turbulence and Voronoi ridge values, makes Wave's fractal controls effective,
 and makes Naki's zero Warp amount a true unwarped lobe field. Single-layer
 families hide the unused fractal controls. The engine's calibrated mountain,
@@ -115,7 +202,7 @@ Heightmap import accepts non-interlaced 8- or 16-bit grayscale PNGs up to 2048 s
 - Switch to **3D terrain** to inspect the sculpted relief and selected spline guide. The terrain is generated as real Float32 samples and continues through subsequent erosion/weathering nodes. The curve is saved non-destructively in portable project files and reevaluated for 16-bit/RAW exports.
 - For easier editing, zoom and pan the map; in edit mode, middle/right-drag pans and the wheel zooms. Use **Finish editing** to return to map inspection.
 
-Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automated basin routing, groundwater and GPU fluid solvers remain future work.
+Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automatic spline placement from basins, groundwater and GPU fluid solvers remain future work. World Studio now provides separate whole-domain drainage analysis and optional conservative transport; that does not automatically reroute an authored spline.
 
 ### Hydraulic erosion models
 
@@ -141,7 +228,7 @@ The Hydraulic erosion node provides five selectable models:
 
 Landscape, fluid, and hybrid modes split the terrain into a resistant bedrock
 substrate and a mobile material layer. **Mobile soil thickness** (meters) sets
-the initial cover *within* the original surface (it does not add elevation).
+the initial cover _within_ the original surface (it does not add elevation).
 **Bedrock resistance** sets how slowly exposed rock erodes after the mobile
 layer is removed. **Valley feature scale**, **Evolution steps**, **Hillslope
 transport**, and **Riverbank angle** retain their artistic terrain controls.
@@ -164,7 +251,6 @@ The fluid and hybrid options remain **experimental artistic erosion models**,
 not calibrated geophysical simulations. Visual quality should be judged using
 the actual Height and shaded-relief maps, not the Flow channel alone. See
 [hydrological design and limitations](docs/RESEARCH.md).
-
 
 ### Procedural PBR material studio (feature branch)
 
@@ -199,22 +285,24 @@ the actual Height and shaded-relief maps, not the Flow channel alone. See
 - **Workspace ergonomics:** Focus mode hides editor docks without remounting 3D, split ratio and map framing persist, camera orientation follows the actual view, and N/E/S/W camera directions plus local camera bookmarks are available. Grouped map channels, diagnostic-opacity overlays and pinch gestures support inspection.
 - **Viewport field guide:** [Navigation, measurements, comparisons, accessibility and validation](docs/VIEWPORT_UX.md). Use **Ctrl/⌘ K** for the node palette or **F** while in the preview to focus the viewport.
 - **Adaptive 3D terrain mesh:** the live preview keeps the original full-resolution Float32 terrain and independently refines nearby visible regions according to projected pixel size (bounded at 340K/680K/1.4M vertices for Balanced/High/Ultra). Source-derived continuous normals, monotone cubic height reconstruction, crack-free inter-tile edges, and matching outer skirts/meadow aprons reduce faceted slopes, serrated silhouettes, and zoom-related grid artifacts. The status overlay shows current triangle count, not a misleading fixed 512² mesh. Changing mesh fidelity does not rerun erosion or modify exports.
-- Working simulation grids reach 1024 × 1024 and export grids reach 2048 × 2048. High-resolution exports rerun the entire connected graph. The working grid sets the resolution of simulated erosion. Close-up mesh refinement can also resolve procedural material relief between those samples.
-- Cancellation terminates the active worker. The previous successful terrain stays visible while the next one builds; its physical measurements and label retain the **last completed field's** dimensions, elevation scale and source-stage identity rather than adopting unbuilt editor changes.
+- The original single-tile editor offers working grids up to 1024 × 1024 and graph export up to 2048 × 2048. Solver-specific coarse grids can be lower; mesh refinement does not add hydraulic simulation samples. World Studio provides a separate tiled 4K/8K output path and records the actual sampling and simulation spacing per stage. Close-up mesh refinement can resolve procedural material relief between the terrain samples.
+- Completed builds keep the worker and its bounded immutable cache alive. Cancellation terminates an active noncooperative legacy solver and releases that worker's cache. The previous successful terrain stays visible while the next one builds; its physical measurements and label retain the **last completed field's** dimensions, elevation scale and source-stage identity rather than adopting unbuilt editor changes.
 
 ![The Water flow map calculated by the hydraulic erosion simulation](docs/images/studio-flow.png)
 
 ### Files
 
-| Output                       | Encoding and meaning                                                                      |
-| ---------------------------- | ----------------------------------------------------------------------------------------- |
-| Heightmap PNG                | True 16-bit grayscale; actual height minimum/maximum mapped to 0–65535                    |
-| Elevation RAW                | Headerless, little-endian Float32 elevations in meters                                    |
-| Normal PNG                   | 8-bit RGB OpenGL tangent-space +Y normals, based on physical dimensions                   |
+| Output                       | Encoding and meaning                                                                                                                                                                       |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Heightmap PNG                | True 16-bit grayscale; actual height minimum/maximum mapped to 0–65535                                                                                                                     |
+| Elevation RAW                | Headerless, little-endian Float32 elevations in meters                                                                                                                                     |
+| Normal PNG                   | 8-bit RGB OpenGL tangent-space +Y normals, based on physical dimensions                                                                                                                    |
 | Full PBR ZIP                 | Coordinated base color, normals (GL/DX/detail), roughness, AO, metallic, ORM, Unity HDRP mask, splat weights, curvature, 16-bit terrain height, 16-bit signed relief, metadata and project |
-| Flow / wear / deposition PNG | 8-bit display visualizations; not physical flow-rate measurements                         |
-| Project                      | Versioned `.nhterrain.json`, containing graph, parameters, seeds, and physical dimensions |
-| ZIP bundle                   | Map, metadata, and reproducible project file                                              |
+| Flow / wear / deposition PNG | Legacy single-tile 8-bit display visualizations; not physical flow-rate measurements                                                                                                       |
+| Noise source ZIP             | Up to 8K PNG16 or Float32 scalar RAW, `.nhnoise.json` recipe, resolved seed and decoding metadata                                                                                          |
+| World package ZIP            | Tiled PNG16/UInt16/Float32 heights, PNG16 diagnostics and named masks, RGB normals, checksums, source revision, physical transforms, stage reports, and original project                   |
+| Project                      | Versioned `.nhterrain.json`, containing graph, parameters, seeds, and physical dimensions                                                                                                  |
+| ZIP bundle                   | Map, metadata, and reproducible project file                                                                                                                                               |
 
 The 16-bit metadata includes the exact elevation reconstruction formula, min/max, world extent, sample spacing, and orientation. PNG samples are big endian as required by the format. The first image row is north (negative Z in the 3D scene); X increases to the right/east.
 
@@ -246,7 +334,7 @@ src/hooks/        Worker lifecycle, debounced evaluation, cancellation, stale st
 tests/           Numerical, encoding, and browser workflow verification
 ```
 
-The graph evaluator follows dependencies from the previewed node or final output, memoizes each reachable node, and reports node timings and thumbnails. Height arrays are immutable across node boundaries. Worker results use transferable buffers. A conservative memory preflight bounds high-resolution graphs before expensive allocations. PBR ZIP encoding uses a separate worker to keep the interface responsive and cancelable.
+The graph compiler follows dependencies from the previewed node or final output. The persistent CPU evaluator retains reusable fields with semantic content keys, unique-buffer byte accounting and LRU eviction, and reports stage timings and thumbnails. Height arrays are immutable across node boundaries; independent result snapshots can be transferred without detaching cached fields. A conservative memory preflight bounds high-resolution graphs before expensive allocations. PBR ZIP encoding uses a separate worker. World Studio has its own bounded world evaluator and backpressured tiled-export worker; its manifests identify every native, globally evaluated and reconstructed stage.
 
 ## Hosting — GitHub Pages
 
@@ -255,4 +343,3 @@ The public app is deployed from the `main` branch through [the GitHub Pages work
 **One-time repository setup:** On GitHub, open **Settings → Pages → Build and deployment → Source**, choose **GitHub Actions**, and save. The workflow deploys the Vite production build to GitHub Pages on each push to `main`. If the latest deployment was triggered before Pages was enabled, run the **Deploy Normal Height to GitHub Pages** workflow manually from the **Actions** tab.
 
 The production build is a client-side webapp in `dist/`. It must be served over HTTP(S); Web Workers cannot be reliably loaded from `file://`. Vite's relative asset base supports subdirectory hosting. Project state stays in the visitor's browser unless they explicitly download it. GitHub Pages requires no server, API keys, or database for this application.
-
