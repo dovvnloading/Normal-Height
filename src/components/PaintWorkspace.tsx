@@ -1499,7 +1499,7 @@ export function PaintWorkspace(props: PaintWorkspaceProps) {
           <div className="nh-paint-footer-actions">
             <button type="button" title="Open paint layers" onClick={() => selectTab('layers')}>
               <Layers size={13} />
-              <span>{layers.length} layers</span>
+              <span>{layers.length} {layers.length === 1 ? 'layer' : 'layers'}</span>
             </button>
             <button
               type="button"
