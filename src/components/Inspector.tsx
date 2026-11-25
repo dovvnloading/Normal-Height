@@ -17,7 +17,8 @@ import {
 import { NODE_DEFINITIONS, noiseParamVisible } from '../model/registry';
 import { upgradeNoiseParams } from '../model/noiseStudio';
 import { layerColorHex, resolveSurface, SPLAT_LAYERS } from '../materials/pbr';
-import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
+import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, moveSplinePoint, splineLength, splineFootprint, splitLongestSplineSpan } from '../model/splines';
+import { formatMeters } from '../model/viewportUX';
 import type { SplinePoint } from '../model/splines';
 import { NumberField, ParamControl } from './Controls';
 import { TerrainIcon } from './TerrainIcon';
@@ -161,25 +162,15 @@ export function Inspector({
               ))}
               {node.kind === 'spline' && (() => {
                 const points = node.path ?? DEFAULT_SPLINE_PATH;
+                const percentAt = (point: SplinePoint, coord: 'x' | 'y') =>
+                  Number((point[coord] * 100).toFixed(3));
                 const changePoint = (index: number, coord: 'x' | 'y', percent: number) => {
-                  if (!Number.isFinite(percent)) return;
-                  onSplinePath(points.map((point, i) =>
-                    i === index ? { ...point, [coord]: Math.max(0, Math.min(1, percent / 100)) } : { ...point },
-                  ));
+                  if (!Number.isFinite(percent) || percent === percentAt(points[index], coord)) return;
+                  onSplinePath(moveSplinePoint(points, index, { ...points[index], [coord]: percent / 100 }));
                 };
-                const addPoint = () => {
-                  if (points.length >= MAX_SPLINE_POINTS) return;
-                  let segment = 0, longest = -1;
-                  for (let i = 0; i < points.length - 1; i++) {
-                    const length = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-                    if (length > longest) { longest = length; segment = i; }
-                  }
-                  const point = {
-                    x: (points[segment].x + points[segment + 1].x) / 2,
-                    y: (points[segment].y + points[segment + 1].y) / 2,
-                  };
-                  onSplinePath(insertSplinePoint(points, point));
-                };
+                const pathLength = splineLength(points);
+                const footprint = splineFootprint(Number(node.params.width ?? 0.016), Number(node.params.falloff ?? 3));
+                const ridge = node.params.mode === 'ridge';
                 return (
                   <section className="spline-editor" aria-label="Spline path editor">
                     <div className="spline-editor-heading">
@@ -198,11 +189,22 @@ export function Inspector({
                     </button>
                     <p className="spline-help">
                       {splineEditing
-                        ? 'Drag handles to reshape the path. Click the map to insert a point near the closest segment. First point is upstream.'
+                        ? 'Click to insert along the nearest curve span; drag empty map space to pan or pinch to zoom. Focus a handle and use arrows (Shift for larger steps). Escape cancels an active drag.'
                         : 'Switch to edit mode to draw directly over your terrain. The spline is saved with the project and evaluated before downstream erosion.'}
                     </p>
+                    <dl className="spline-path-metrics" aria-label="Path dimensions">
+                      <div><dt>Approx. path length</dt><dd>{formatMeters(pathLength * project.worldSize)}</dd></div>
+                      <div><dt>Core radius</dt><dd>{formatMeters(footprint.core * project.worldSize)}</dd></div>
+                      <div><dt>Outer reach</dt><dd>{formatMeters(footprint.outer * project.worldSize)}</dd></div>
+                    </dl>
+                    <p className="spline-help spline-footprint-help">
+                      {ridge ? 'Start → end' : 'Headwater → outlet'} · The shaded guide shows the authored core and outer reach, not a simulated water width.
+                    </p>
                     <div className="spline-edit-actions">
-                      <button type="button" onClick={addPoint} disabled={points.length >= MAX_SPLINE_POINTS}>
+                      <button type="button"
+                        title="Insert halfway along the longest curved span"
+                        onClick={() => onSplinePath(splitLongestSplineSpan(points))}
+                        disabled={points.length >= MAX_SPLINE_POINTS || pathLength <= 1e-10}>
                         <Plus size={12} /> Add point
                       </button>
                       <button type="button" onClick={() => onSplinePath([...points].reverse())}>
@@ -212,32 +214,35 @@ export function Inspector({
                         <RotateCcw size={12} /> Reset
                       </button>
                     </div>
+                    <p className="spline-capacity">{points.length >= MAX_SPLINE_POINTS
+                      ? 'Point limit reached. Remove a point to continue.'
+                      : `${MAX_SPLINE_POINTS - points.length} more points available · X east, Y south`}</p>
                     <div className="spline-point-list" aria-label="Control point coordinates">
                       {points.map((point, index) => (
                         <div className="spline-point-row" key={index}>
                           <span className="spline-point-number">{String(index + 1).padStart(2, '0')}</span>
                           <label>
                             X
-                            <input
-                              type="number"
+                            <NumberField
+                              key={`${node.id}-${index}-x`}
                               min={0}
                               max={100}
                               step={0.1}
-                              aria-label={`Point ${index + 1} X percent`}
-                              value={+(point.x * 100).toFixed(1)}
-                              onChange={(event) => changePoint(index, 'x', Number(event.target.value))}
+                              label={`Point ${index + 1} X percent`}
+                              value={percentAt(point, 'x')}
+                              onChange={(value) => changePoint(index, 'x', value)}
                             />
                           </label>
                           <label>
                             Y
-                            <input
-                              type="number"
+                            <NumberField
+                              key={`${node.id}-${index}-y`}
                               min={0}
                               max={100}
                               step={0.1}
-                              aria-label={`Point ${index + 1} Y percent`}
-                              value={+(point.y * 100).toFixed(1)}
-                              onChange={(event) => changePoint(index, 'y', Number(event.target.value))}
+                              label={`Point ${index + 1} Y percent`}
+                              value={percentAt(point, 'y')}
+                              onChange={(value) => changePoint(index, 'y', value)}
                             />
                           </label>
                           <button

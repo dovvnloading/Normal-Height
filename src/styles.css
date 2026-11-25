@@ -2348,16 +2348,39 @@ input[type='range']::-moz-range-thumb {
   color: var(--muted);
   font: 10px var(--mono);
 }
-.spline-point-row label input {
+.spline-point-row .number-field {
+  flex: 1;
+  max-width: none;
+  background: var(--raised);
+  border-color: var(--line);
+}
+.spline-point-row .number-field input {
   width: 100%;
   min-width: 0;
+  max-width: none;
   font: 10px var(--mono);
-  padding: 5px 3px;
   text-align: center;
-  background: var(--raised);
   color: var(--text);
-  border: 1px solid var(--line);
 }
+.spline-path-metrics {
+  margin: 12px 0 4px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--raised);
+  display: grid;
+  gap: 6px;
+}
+.spline-path-metrics > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.spline-path-metrics dt { font-size: 10px; color: var(--muted); }
+.spline-path-metrics dd { margin: 0; font: 10px var(--mono); color: var(--text); text-align: right; }
+.spline-footprint-help { margin: 6px 0 12px; }
+.spline-capacity { margin: 0 0 8px; font: 9px var(--mono); line-height: 1.5; color: var(--muted); }
 .spline-point-row > button {
   display: grid;
   place-items: center;

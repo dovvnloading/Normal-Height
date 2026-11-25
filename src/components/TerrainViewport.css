@@ -1092,6 +1092,15 @@
 .nh-spline-centerline { stroke: #76bfd0; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 6 4; }
 .nh-spline-layer.is-ridge .nh-spline-centerline { stroke: #e3ba79; }
 .nh-spline-layer.is-ridge .nh-spline-outline { stroke: #43372ebd; }
+.nh-spline-footprint { overflow: hidden; pointer-events: none; }
+.nh-spline-outer, .nh-spline-core { fill: none; stroke: #77c8db; stroke-linecap: round; stroke-linejoin: round; }
+.nh-spline-outer { stroke-opacity: .15; }
+.nh-spline-core { stroke-opacity: .26; }
+.nh-spline-layer.is-ridge .nh-spline-outer,
+.nh-spline-layer.is-ridge .nh-spline-core { stroke: #e8bd76; }
+.nh-spline-arrow, .nh-spline-arrow-shadow { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.nh-spline-arrow-shadow { stroke: #182529; stroke-width: 4px; }
+.nh-spline-arrow { stroke: #d5f3f7; stroke-width: 2px; }
 .nh-spline-handle {
   position: absolute;
   display: grid;
@@ -1110,6 +1119,8 @@
   padding: 0;
 }
 .nh-spline-handle:first-of-type { border-width: 3px; }
+.nh-spline-handle.is-end { border-radius: 5px; }
+.nh-spline-handle:focus-visible { z-index: 2; }
 .nh-spline-handle.is-dragging { cursor: grabbing; background: #fff; }
 .nh-spline-layer.is-ridge .nh-spline-handle {
   background: #f8f0e2;
