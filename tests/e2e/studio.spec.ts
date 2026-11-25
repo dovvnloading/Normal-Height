@@ -746,7 +746,7 @@ test('protects the graph inside a modal and exports a real 512-square 16-bit PNG
   expect(metadata.elevationMaxMeters).toBeGreaterThan(metadata.elevationMinMeters);
   expect(files['alpine-watershed.nhterrain.json']).toBeDefined();
   await expect(dialog.getByRole('status')).toContainText(
-    'Downloaded alpine-watershed-512-png16.zip',
+    'Download started: alpine-watershed-512-png16.zip',
   );
 });
 
@@ -792,7 +792,7 @@ test('edits surface settings and exports aligned PBR textures in a browser', asy
   expect(metadata.packedMaps.splat_rgba).toEqual(['rock', 'soil', 'vegetation', 'snow']);
   const project = JSON.parse(new TextDecoder().decode(files['alpine-watershed.nhterrain.json']));
   expect(project.surface).toEqual(metadata.surface);
-  await expect(dialog.getByRole('status')).toContainText('Downloaded alpine-watershed-256-pbr.zip');
+  await expect(dialog.getByRole('status')).toContainText('Download started: alpine-watershed-256-pbr.zip');
 });
 
 test('material edits repaint the visible 2D PBR canvas without rebuilding the erosion field', async ({ page }) => {

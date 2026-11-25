@@ -420,6 +420,48 @@ test('2K PBR preflight fails gracefully on constrained devices before starting a
   await expect(dialog.getByRole('alert')).toContainText('Choose a smaller resolution');
   const after = await page.evaluate(() => (window as Window & typeof globalThis & { __workersCreated: number }).__workersCreated);
   expect(after).toBe(before);
+  await expect(dialog.getByText('This selection exceeds the estimated device budget.')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Use 1024 × 1024' }).click();
+  await expect(dialog.getByRole('combobox', { name: 'Export resolution' })).toHaveValue('1024');
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await expect(dialog.getByText('This selection exceeds the estimated device budget.')).toHaveCount(0);
+});
+
+test('export startup failure leaves a usable dialog and retries with an exact Float32 download', async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
+  await loadFastProject(page, 512);
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export your landscape', exact: true });
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('raw32');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
+  await dialog.getByRole('checkbox').uncheck();
+  await expect(dialog).toContainText('256.0 KiB');
+  await page.evaluate(() => {
+    const Original = window.Worker;
+    window.Worker = new Proxy(Original, {
+      construct() {
+        window.Worker = Original;
+        throw new Error('Injected export worker startup failure');
+      },
+    });
+  });
+  const button = dialog.getByRole('button', { name: 'Export map', exact: true });
+  await button.click();
+  await expect(dialog.getByRole('alert')).toContainText('Injected export worker startup failure');
+  await expect(button).toBeEnabled();
+  const downloading = page.waitForEvent('download', { timeout: 60_000 });
+  await button.click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe('pbr-acceptance-512-256-elevation-f32le.raw');
+  const path = testInfo.outputPath(download.suggestedFilename());
+  await download.saveAs(path);
+  expect(await download.failure()).toBeNull();
+  expect((await readFile(path)).byteLength).toBe(256 * 256 * 4);
+  await expect(dialog.getByRole('status')).toContainText('Download started:');
+  await expect(dialog.getByRole('status')).toContainText('256.0 KiB');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('512');
+  await expect(dialog.getByText('Download started:', { exact: false })).toHaveCount(0);
+  await expect(button).toBeEnabled();
 });
 
 test('standalone 2K material maps reject constrained or unknown device memory before a Worker (#45)', async ({ page }) => {

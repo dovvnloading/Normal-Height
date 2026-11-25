@@ -1,27 +1,18 @@
 /// <reference lib="webworker" />
-import type { HeightField, TerrainProject } from '../model/types';
 import { makeExport } from './heightmap';
-import type { ExportFormat } from './heightmap';
+import type { EncodeRequest, EncodeResponse } from './exportProtocol';
+import { encodingStage } from './exportClient';
 import { checkPBRExportBudget, isPBRExportFormat } from './budget';
 
-type EncodeRequest = {
-  type: 'encode';
-  id: number;
-  field: HeightField;
-  project: TerrainProject;
-  format: ExportFormat;
-  outputNodeId?: string;
-  bundle: boolean;
-  memoryBudgetMiB?: number;
-};
 const worker = self as unknown as DedicatedWorkerGlobalScope;
+const send = (message: EncodeResponse, transfer: Transferable[] = []) => worker.postMessage(message, transfer);
 
 worker.addEventListener('message', (event: MessageEvent<EncodeRequest>) => {
   const request = event.data;
   if (request.type !== 'encode') return;
   try {
-    const stage = request.format === 'mask16' ? 'Encoding 16-bit mask' : 'Synthesizing and packing maps';
-    worker.postMessage({ type: 'progress', id: request.id, stage });
+    const stage = encodingStage(request.format, request.bundle);
+    send({ type: 'progress', id: request.id, stage });
     if (isPBRExportFormat(request.format)) {
       checkPBRExportBudget(
         request.field.resolution, request.memoryBudgetMiB ?? 512, request.format, request.bundle,
@@ -34,13 +25,13 @@ worker.addEventListener('message', (event: MessageEvent<EncodeRequest>) => {
     const transferable = bytes.buffer instanceof ArrayBuffer &&
       bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength
       ? bytes.buffer : bytes.slice().buffer;
-    worker.postMessage(
+    send(
       { type: 'result', id: request.id, filename: output.filename,
         mime: output.mime, bytes: transferable },
       [transferable],
     );
   } catch (error) {
-    worker.postMessage({ type: 'error', id: request.id,
+    send({ type: 'error', id: request.id,
       message: error instanceof Error ? error.message : 'Failed to encode material maps.' });
   }
 });
