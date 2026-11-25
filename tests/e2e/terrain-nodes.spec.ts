@@ -7,6 +7,9 @@ async function connect(page: Page, source: string, target: string) {
   await page.getByTitle('Fit graph (Home)').click();
   const from = page.getByLabel(source, { exact: true });
   const to = page.getByLabel(target, { exact: true });
+  // Node-added notifications can cover the lower destination port. Let
+  // Playwright check both endpoints are reachable before starting the wire.
+  await to.hover();
   await from.hover();
   // Chromium can scroll React Flow's wrapper during locator.hover(). React
   // Flow then restores its native scroll position, leaving the mouse beside
