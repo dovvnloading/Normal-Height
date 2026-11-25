@@ -218,6 +218,8 @@ export class TerrainScene {
     this.releaseBrushConsumer = null;
     if (this.brushPreview) this.applySurfaceMaterial();
     this.brushPreview = null;
+    this.renderer.domElement.dataset.brushPreviewStatus = 'idle';
+    this.renderer.domElement.dataset.brushPreviewResolution = '0';
     this.brush = feedback;
     this.brushOverlay?.dispose();
     this.brushOverlay = null;
@@ -1268,6 +1270,10 @@ export class TerrainScene {
     const monitor = this.renderer.domElement.dataset;
     monitor.displacementStatus = 'ready';
     monitor.materialStatus = this.settings.material === 'pbr' ? 'ready' : 'inactive';
+    // finishSurface has already cleared brushPreview. Publish that transition
+    // explicitly: the subscriber skips equal (null) previews on acknowledgment.
+    monitor.brushPreviewStatus = 'idle';
+    monitor.brushPreviewResolution = '0';
     this.brush?.baked(getPaintStrokes(this.project!), 'scene');
     this.needsRender = true;
   }
