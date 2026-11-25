@@ -50,7 +50,7 @@ async function openWorkspace(page: Page) {
   await studio.getByLabel('Automatic world previews').uncheck();
   await studio.getByText('Preview behaviour', { exact: true }).click();
   await studio.getByLabel('Automatic regional refinement').uncheck();
-  return { studio, errors };
+  return { studio, errors, project };
 }
 
 async function mapBounds(studio: Locator) {
@@ -61,6 +61,48 @@ async function mapBounds(studio: Locator) {
     terrain: (await studio.locator('.wv-plane').boundingBox())!,
   };
 }
+
+test('undo between imported legacy projects restores the inherited world domain', async ({
+  page,
+}) => {
+  const { studio, errors, project } = await openWorkspace(page);
+  await studio.getByRole('tab', { name: 'Setup', exact: true }).click();
+  await expect(studio.getByLabel('Width', { exact: true })).toHaveValue('8000');
+  await expect(studio.getByLabel('Height scale', { exact: true })).toHaveValue(
+    String(project.heightScale),
+  );
+
+  const replacement = {
+    ...structuredClone(project),
+    name: 'Smaller legacy world',
+    worldSize: 2000,
+    heightScale: 600,
+  };
+  await page.getByLabel('Import terrain project file').setInputFiles({
+    name: 'smaller-legacy-world.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(replacement)),
+  });
+  await expect(page.getByRole('button', { name: replacement.name, exact: true })).toBeVisible();
+  await studio.getByRole('tab', { name: 'Setup', exact: true }).click();
+  await expect(studio.getByLabel('Width', { exact: true })).toHaveValue('2000');
+  await expect(studio.getByLabel('Height scale', { exact: true })).toHaveValue('600');
+
+  // Import remounts the workspace; history restoration updates the existing instance.
+  // Both projects omit project.world, so their legacy dimensions must also drive sync.
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.getByRole('button', { name: project.name, exact: true })).toBeVisible();
+  await studio.getByRole('tab', { name: 'Setup', exact: true }).click();
+  await expect(studio.getByLabel('Width', { exact: true })).toHaveValue('8000');
+  await expect(studio.getByLabel('Depth', { exact: true })).toHaveValue('8000');
+  await expect(studio.getByLabel('Height scale', { exact: true })).toHaveValue(
+    String(project.heightScale),
+  );
+  await expect(
+    studio.getByRole('button', { name: 'Enable world in project', exact: true }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
+});
 
 async function waitForMapPaint(studio: Locator) {
   const canvas = studio.locator('.wv-plane > .wv-field > canvas.wv-raster').last();
