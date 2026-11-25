@@ -113,7 +113,7 @@ relief against the reference, not its Flow mask or material textures.
 - **Shaping nodes:** domain warp, terrace, and height remap.
 - **Combination nodes:** blend fields with mix/add/multiply/min/max operations and optional masks; height and slope masks can also limit hydraulic erosion.
 - **Reproducible seeds:** project-linked or independent Studio seeds, optional seed names, resolved stream locks, and separate warp seeds. Explore nine variations, bookmark looks, and restore recent choices. Moving or reordering nodes does not change the random streams.
-- **Editable landscape graphs:** regional uplands, mountains, badlands, calderas, spline-enabled highlands, and three Studio examples for ridges, dunes, and crater fields.
+- **Editable landscape graphs:** regional uplands, mountains, badlands, calderas, coastal islands, spline-enabled highlands, and three Studio examples for ridges, dunes, and crater fields.
 
 ### Noise Studio
 
@@ -177,6 +177,22 @@ unresolved octaves by their ensemble means. This is a conservative octave
 filter, not exact analytic integration of the entire noise spectrum (especially
 for highly anisotropic stretch, nonlinear warps, and single-layer cellular
 or wave patterns). Fine detail can resolve as export resolution increases.
+
+### Imported terrain, coastlines and placement masks
+
+Open **Landscapes → Volcanic island** for a wired example. Change **Sea level** on *Grade the coast*, then open **Export → Format → Named masks** and choose *Shore band* or *Open water*. Both masks follow the same coastline as the exported terrain.
+
+![Volcanic island terrain and its two aligned grayscale masks](docs/images/volcanic-island-outputs.webp)
+
+*Three outputs from the same 512 × 512 graph. Shaded relief uses elevation colors to show the submerged shelf. The mask panels show the exported weight range from black (0) to white (1).*
+
+| Node | How to use it |
+| --- | --- |
+| **Heightmap import** | Choose a source file in the inspector and connect **Height** to a shaping node or Terrain output. It embeds the samples in the project, fits the raster edge to edge with bilinear interpolation, and offers vertical gain, offset in meters, and a north/south flip. |
+| **Coastal shelf** | Set sea level as a fraction of the project height scale. Set beach and shelf widths in meters and their angles in degrees. By default water must reach a tile edge through side-adjacent cells. **Include inland lakes** also grades enclosed shorelines. **Profile strength** at zero keeps elevations and still produces both masks. |
+| **Mask output** | Connect any scalar port, then rename the node in the inspector. Export its branch as a 16-bit grayscale PNG at the selected grid size. Values are clamped to a fixed linear 0–1 range, so a constant 25% weight stays 25%. The optional ZIP includes the editable project and source connection. |
+
+Heightmap import accepts non-interlaced 8- or 16-bit grayscale PNGs up to 2048 samples per side. Headerless RAW grids must be square and little-endian. Use `.r16` or `.raw` for unsigned 16-bit samples and `.r32` or `*-f32le.raw` for Float32 elevations in meters. Integer samples span the project height scale. To restore a height PNG exported by this studio, set **Vertical gain** to its metadata elevation range divided by the project height scale and **Elevation offset** to its minimum elevation in meters. A Float32 RAW export carries meter values directly. Projects can embed up to 16 MiB of decoded samples across import nodes.
 
 ### River and ridge designer (Normal Height 1.1)
 

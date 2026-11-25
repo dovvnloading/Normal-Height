@@ -1,12 +1,16 @@
 import type { HeightField, TerrainNode, TerrainProject } from '../../model/types';
 import type { SedimentBudget } from '../erosion';
 import { canonical } from '../plan/graph';
+import { rasterIdentity } from '../../model/heightRaster';
 
 export interface CachedField extends HeightField {
   eroded: number;
   deposited: number;
   exportedSediment: number;
   sedimentBudget?: SedimentBudget;
+  /** Unit-range ports owned by the producing coast node. */
+  shore?: Float32Array;
+  water?: Float32Array;
 }
 export interface ComputeNodeDiagnostic {
   nodeId: string;
@@ -26,7 +30,12 @@ export interface ComputeDiagnostics {
 }
 
 const channels = ['height', 'flow', 'wear', 'deposition'] as const;
-const buffersOf = (field: CachedField) => new Set(channels.map((key) => field[key].buffer));
+const buffersOf = (field: CachedField) => {
+  const buffers = new Set(channels.map((key) => field[key].buffer));
+  if (field.shore) buffers.add(field.shore.buffer);
+  if (field.water) buffers.add(field.water.buffer);
+  return buffers;
+};
 
 /** Independent, alias-preserving snapshot; transferring it cannot detach cached data. */
 export function cloneWorkingField(field: CachedField): CachedField {
@@ -45,6 +54,8 @@ export function cloneWorkingField(field: CachedField): CachedField {
     flow: copy(field.flow),
     wear: copy(field.wear),
     deposition: copy(field.deposition),
+    shore: field.shore ? copy(field.shore) : undefined,
+    water: field.water ? copy(field.water) : undefined,
     sedimentBudget: field.sedimentBudget ? { ...field.sedimentBudget } : undefined,
   };
 }
@@ -99,12 +110,16 @@ export class GraphFieldCache {
     inputs: { port: string; channel: string; contentId: string }[],
   ): string {
     const signature = canonical({
-      implementation: 'cpu-graph-1',
+      implementation: 'cpu-graph-2',
       schema: project.version,
       kind: node.kind,
       params: node.params,
       bypassed: !!node.bypassed,
       path: node.path,
+      // Immutable raster identity is exact within this worker. A fresh
+      // structured clone may miss the cache, but can never reuse stale samples.
+      // Do not retain megabytes of base64 in the identity map.
+      raster: node.raster && rasterIdentity(node.raster),
       seed: project.seed,
       worldSize: project.worldSize,
       heightScale: project.heightScale,

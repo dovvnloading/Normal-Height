@@ -10,6 +10,7 @@ type EncodeRequest = {
   field: HeightField;
   project: TerrainProject;
   format: ExportFormat;
+  outputNodeId?: string;
   bundle: boolean;
   memoryBudgetMiB?: number;
 };
@@ -19,13 +20,14 @@ worker.addEventListener('message', (event: MessageEvent<EncodeRequest>) => {
   const request = event.data;
   if (request.type !== 'encode') return;
   try {
-    worker.postMessage({ type: 'progress', id: request.id, stage: 'Synthesizing and packing maps' });
+    const stage = request.format === 'mask16' ? 'Encoding 16-bit mask' : 'Synthesizing and packing maps';
+    worker.postMessage({ type: 'progress', id: request.id, stage });
     if (isPBRExportFormat(request.format)) {
       checkPBRExportBudget(
         request.field.resolution, request.memoryBudgetMiB ?? 512, request.format, request.bundle,
       );
     }
-    const output = makeExport(request.field, request.project, request.format, request.bundle);
+    const output = makeExport(request.field, request.project, request.format, request.bundle, request.outputNodeId);
     // fflate returns a full owned ArrayBuffer. Copy only when an encoder
     // returns a slice, which cannot safely transfer its shared backing buffer.
     const bytes = output.bytes;

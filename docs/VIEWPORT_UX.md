@@ -126,3 +126,24 @@ The visual QA workflow uses Chromium and software WebGL in CI; actual touch
 hardware, integrated GPUs and low-memory devices should be checked before
 performance claims are generalized. Rendering performance targets remain in
 `docs/MESH_PERFORMANCE.md`.
+
+
+## Cinematic water preview
+
+3D and Split modes offer a **Water** button next to **Display**. This is a presentation-only layer:
+it never changes simulation, materials, heightmaps, erosion or named-mask exports.
+The **Water & coastline** section has four art-directed looks (Tropical lagoon, Alpine lake,
+Open ocean and Golden hour) plus real-meter wave height, motion, clarity and foam.
+The waterline follows the Coast node feeding Terrain output; in graphs without a Coast node,
+it starts near the lower 22% of the current relief. Switching to **Custom** or moving the
+water-level slider sets a manual elevation in meters. Shallow water reveals the terrain,
+foam follows the source coastline, and sky/sun controls light reflected swells.
+Water geometry and depth textures are only allocated while enabled; motion can be paused
+with Wave motion = 0. Screenshots include water, while numeric exports do not.
+
+
+Cinematic scene shortcuts set coordinated sun, sky, cloud and water settings:
+**Tropical noon** for clear lagoon water; **Golden coast** for warm low-angle reflections;
+and **Storm surf** for choppy blue-gray seas. For graphs with an upstream Coast node,
+**Open ocean beyond the tile** is on by default, hiding the square water boundary.
+Uncheck it to inspect just the authored terrain tile. These are rendering choices only.

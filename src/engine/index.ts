@@ -12,6 +12,10 @@ import { generateOrogenicRelief } from './orogeny';
 import { evolveFluvialLandscape, FLUVIAL_DEFAULTS, FLUVIAL_MAX_RESOLUTION } from './fluvial';
 import type { FluvialOptions } from './fluvial';
 import { sculptSpline } from './spline';
+import { rasterBytes } from '../model/heightRaster';
+import { NODE_DEFINITIONS } from '../model/registry';
+import { COAST_DEFAULTS, shapeCoast } from './coast';
+import { sampleImportedHeight } from './heightImport';
 import { compileGraph, inputHandle, metadata, usesInput } from './plan/graph';
 import { cloneWorkingField, GraphFieldCache } from './compute/cache';
 import type { CachedField, ComputeDiagnostics } from './compute/cache';
@@ -65,11 +69,16 @@ export function estimatedWorkingBytes(
   // scratch and both old/new UI result buffers. A fixed reserve covers the
   // display mesh, encoding bookkeeping and small JS allocations.
   let buffers = 12;
+  let importScratchBytes = 0;
   for (const node of graph.nodes) {
     if (!needed.has(node.id) || metadata(node) || node.kind === 'output') continue;
     // A source has no input to forward; marking it bypassed still generates it.
-    if (node.bypassed && node.kind !== 'mountain' && node.kind !== 'noise') continue;
-    buffers += ['hydraulic', 'warp', 'blend', 'spline'].includes(node.kind) ? 4 : 1;
+    if (node.bypassed && NODE_DEFINITIONS[node.kind].inputs.length && node.kind !== 'maskOutput') continue;
+    if (node.kind === 'heightImport' && node.raster) {
+      importScratchBytes = Math.max(importScratchBytes, 3 * rasterBytes(node.raster));
+    }
+    if (node.kind === 'coast') buffers += 3;
+    else buffers += ['hydraulic', 'warp', 'blend', 'spline'].includes(node.kind) ? 4 : 1;
   }
   const byId = new Map(graph.nodes.map((node) => [node.id, node]));
   for (const edge of graph.edges) {
@@ -79,11 +88,11 @@ export function estimatedWorkingBytes(
       needed.has(target.id) &&
       usesInput(edge, target) &&
       edge.sourceHandle &&
-      edge.sourceHandle !== 'height'
+      ['flow', 'wear', 'deposition'].includes(edge.sourceHandle)
     )
       buffers++;
   }
-  const reserve = 64 * 1024 * 1024;
+  const reserve = 64 * 1024 * 1024 + importScratchBytes;
   const cell = resolution * resolution * Float32Array.BYTES_PER_ELEMENT;
   const settled = reserve + buffers * cell;
   // Fluvial uplands hold a transient Float64/routing working set (~144 B
@@ -382,13 +391,15 @@ export function evaluateGraph(
         inputHandle(edge, node),
         handle === 'height'
           ? field
-          : {
-              ...field,
-              height: normalizeDiagnostic(
-                field[handle as 'flow' | 'wear' | 'deposition'],
-                handle === 'flow',
-              ),
-            },
+          : handle === 'shore' || handle === 'water'
+            ? baseField(field[handle] ?? empty)
+            : {
+                ...field,
+                height: normalizeDiagnostic(
+                  field[handle as 'flow' | 'wear' | 'deposition'],
+                  handle === 'flow',
+                ),
+              },
       );
     }
     progress(0);
@@ -402,7 +413,8 @@ export function evaluateGraph(
       node.kind === 'noise' && node.params.noiseModel === 'v2' ? 'v2' : 'legacy',
     );
     let field: WorkingField;
-    if (node.bypassed && input) field = input;
+    if (node.bypassed && input && node.kind !== 'maskOutput')
+      field = node.kind === 'coast' ? { ...input, shore: undefined, water: undefined } : input;
     else if (node.kind === 'mountain')
       field = baseField(
         createMountains(node, n, noise, seed, {
@@ -410,6 +422,8 @@ export function evaluateGraph(
           heightScale: project.heightScale,
         }),
       );
+    else if (node.kind === 'heightImport')
+      field = baseField(sampleImportedHeight(node, n, project.heightScale));
     else if (node.kind === 'noise')
       field = baseField(
         node.params.noiseModel === 'v3'
@@ -418,10 +432,32 @@ export function evaluateGraph(
       );
     else {
       if (!input) throw new Error(`Connect a height input to “${node.label}”.`);
-      field = { ...input };
+      field = { ...input, shore: undefined, water: undefined };
       switch (node.kind) {
         case 'output':
           break;
+        case 'maskOutput':
+          field = baseField(input.height.some((v) => v < 0 || v > 1)
+            ? input.height.map((value) => clamp(value))
+            : input.height);
+          break;
+        case 'coast': {
+          const { height, shore, water } = shapeCoast(input.height, n, {
+            worldSize: project.worldSize,
+            heightScale: project.heightScale,
+            seaLevel: number(node, 'seaLevel', COAST_DEFAULTS.seaLevel, -1, 2),
+            beachWidth: number(node, 'beachWidth', COAST_DEFAULTS.beachWidth, 0, 3000),
+            shelfWidth: number(node, 'shelfWidth', COAST_DEFAULTS.shelfWidth, 0, 5000),
+            beachSlope: number(node, 'beachSlope', COAST_DEFAULTS.beachSlope, 0.1, 35),
+            shelfSlope: number(node, 'shelfSlope', COAST_DEFAULTS.shelfSlope, 0.1, 25),
+            strength: number(node, 'strength', COAST_DEFAULTS.strength, 0, 1),
+            includeLakes: node.params.includeLakes === true,
+          });
+          field.height = height;
+          field.shore = shore;
+          field.water = water;
+          break;
+        }
         case 'spline':
           field.height = sculptSpline(input.height, n, node.path, {
             mode: text(node, 'mode', 'river') === 'ridge' ? 'ridge' : 'river',
@@ -666,7 +702,11 @@ export function evaluateGraph(
   };
   const calculated = calculate(target);
   // Cached fields remain worker-owned; callers may edit or transfer this snapshot.
-  const output = cache ? cloneWorkingField(calculated) : calculated;
+  // The public result carries height and erosion diagnostics only. Coastal
+  // ports remain in the worker cache; do not allocate unused snapshot copies.
+  const output = cache
+    ? cloneWorkingField({ ...calculated, shore: undefined, water: undefined })
+    : calculated;
   let min = Infinity,
     max = -Infinity,
     sum = 0;

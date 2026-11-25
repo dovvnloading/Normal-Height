@@ -37,7 +37,10 @@ import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
 import { STUDIO_KERNELS } from './model/noiseStudio';
 import { createProject, PRESETS } from './model/presets';
-import { parseProject, saveProject, STORAGE_KEY } from './model/project';
+import { parseProject, saveProject } from './model/project';
+import { autosaveProject, loadLastSession } from './model/autosave';
+import { appendUndoSnapshot } from './model/history';
+import { assertRasterBudget, MAX_PROJECT_FILE_BYTES, rasterIdentity } from './model/heightRaster';
 import { loadViewSettings, saveViewSettings } from './model/viewSettings';
 import { resolveSurface } from './materials/pbr';
 import { canAppendMaterialStroke, type MaterialStroke } from './materials/materialPaint';
@@ -65,30 +68,21 @@ function savedTheme(): ThemeMode | null {
   }
 }
 
-// Every session opens the current default landscape. The autosave of the
-// last session is offered (Restore last session), never loaded by itself:
-// an old scene would hide newer presets and engine defaults.
-function initialProject() {
-  let lastSession: TerrainProject | null = null;
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) lastSession = parseProject(JSON.parse(saved));
-  } catch {
-    lastSession = null;
-  }
-  return { project: createProject(), lastSession, message: '' };
+function projectSnapshot(project: TerrainProject) {
+  return JSON.stringify(project, (key, value) => key === 'raster' && value ? rasterIdentity(value) : value);
 }
+
 const isEditing = (element: EventTarget | null) =>
   element instanceof HTMLElement &&
   (element.matches('input,textarea,select') || element.isContentEditable);
 
 export default function App() {
-  const [initial] = useState(initialProject);
-  const [project, setProject] = useState(initial.project);
+  const [initial] = useState(() => createProject());
+  const [project, setProject] = useState(initial);
   const projectRef = useRef(project);
   projectRef.current = project;
   const [selectedId, setSelectedId] = useState<string | null>(
-    initial.project.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ?? null,
+    initial.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ?? null,
   );
   const [previewNodeId, setPreviewNodeId] = useState<string | undefined>();
   const [editingSplineId, setEditingSplineId] = useState<string | null>(null);
@@ -138,9 +132,9 @@ export default function App() {
     project: TerrainProject;
     label: string;
   } | null>(null);
-  const [toast, setToast] = useState(initial.message);
+  const [toast, setToast] = useState('');
   // The previous session's autosave, until the user restores it or edits.
-  const [lastSession, setLastSession] = useState(initial.lastSession);
+  const [lastSession, setLastSession] = useState<TerrainProject | null>(null);
   const [saved, setSaved] = useState(true);
   const [storageError, setStorageError] = useState(false);
   const [historyTick, setHistoryTick] = useState(0);
@@ -213,7 +207,7 @@ export default function App() {
   }, [toast]);
   const apply = useCallback((next: TerrainProject, group = '', record = true) => {
     const previous = projectRef.current;
-    const changed = JSON.stringify(next) !== JSON.stringify(previous);
+    const changed = projectSnapshot(next) !== projectSnapshot(previous);
     if (!changed && !pendingMove.current) return;
     if (!record) {
       pendingMove.current ??= previous;
@@ -225,7 +219,7 @@ export default function App() {
         lastEdit.current.group !== group ||
         now - lastEdit.current.time > 900
       ) {
-        past.current = [...past.current.slice(-59), pendingMove.current ?? previous];
+        past.current = appendUndoSnapshot(past.current, pendingMove.current ?? previous, next);
         future.current = [];
         setHistoryTick((n) => n + 1);
       }
@@ -256,22 +250,32 @@ export default function App() {
     setHistoryTick((n) => n + 1);
   }, []);
   useEffect(() => {
+    let active = true;
+    void loadLastSession().then((previous) => {
+      if (active && projectRef.current === initial) setLastSession(previous);
+    }).catch(() => { /* Unreadable or unavailable browser storage. */ });
+    return () => { active = false; };
+  }, [initial]);
+  useEffect(() => {
     // The untouched starting landscape is not saved over the last session;
     // the first edit (or a restore) starts autosaving and retires the offer.
-    if (project === initial.project) return;
+    if (project === initial) return;
     setLastSession(null);
     setSaved(false);
-    const timer = setTimeout(() => {
+    let active = true;
+    const timer = setTimeout(async () => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-        setSaved(true);
-        setStorageError(false);
+        await autosaveProject(project, () => active);
+        if (active) {
+          setSaved(true);
+          setStorageError(false);
+        }
       } catch {
-        setStorageError(true);
+        if (active) setStorageError(true);
       }
     }, 600);
-    return () => clearTimeout(timer);
-  }, [project, initial.project]);
+    return () => { active = false; clearTimeout(timer); };
+  }, [project, initial]);
   useEffect(() => {
     if (previewNodeId && !project.graph.nodes.some((n) => n.id === previewNodeId))
       setPreviewNodeId(undefined);
@@ -351,11 +355,9 @@ export default function App() {
           String(params.mode)
             .replace(/-/g, ' ')
             .replace(/^./, (s) => s.toUpperCase()) + ' noise';
-      if (kind === 'spline') {
-        // Insert the designer immediately before hydraulic erosion (or before
-        // the final output), preserving the existing procedural pipeline.
-        const target =
-          p.graph.nodes.find((n) => n.kind === 'hydraulic') ??
+      if (kind === 'spline' || kind === 'coast') {
+        // Rivers feed downstream erosion. Shorelines follow the finished relief.
+        const target = (kind === 'spline' ? p.graph.nodes.find((n) => n.kind === 'hydraulic') : undefined) ??
           p.graph.nodes.find((n) => n.kind === 'output');
         const inputEdge =
           target &&
@@ -385,10 +387,16 @@ export default function App() {
             },
           });
         } else apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
-        setEditingSplineId(node.id);
-        setViewMode('2d');
-        setChannel('terrain');
-        notify('River / ridge designer added. Drag points on the 2D map; click to insert a point.');
+        if (kind === 'spline') {
+          setEditingSplineId(node.id);
+          setViewMode('2d');
+          setChannel('terrain');
+          notify('River / ridge designer added. Drag points on the 2D map; click to insert a point.');
+        } else {
+          notify(target && inputEdge && !target.parentId
+            ? 'Coastal shelf connected before Terrain output.'
+            : 'Coastal shelf added. Connect its height input.');
+        }
       } else {
         apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
         notify(`${node.label} added. Connect its ports in the graph.`);
@@ -425,15 +433,26 @@ export default function App() {
     const p = projectRef.current;
     const n = p.graph.nodes.find((n) => n.id === selectedId);
     if (!n || n.kind === 'output' || n.kind === 'group') return;
+    if (p.graph.nodes.length >= 128) {
+      notify('This project has reached the 128-node limit.');
+      return;
+    }
     const copy = {
-      ...structuredClone(n),
+      ...n,
+      params: { ...n.params },
+      ...(n.path ? { path: n.path.map((point) => ({ ...point })) } : {}),
       id: crypto.randomUUID(),
       label: `${n.label} copy`,
       position: { x: n.position.x + 35, y: n.position.y + 180 },
     };
-    apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, copy] } });
+    const nodes = [...p.graph.nodes, copy];
+    try { assertRasterBudget(nodes); } catch (error) {
+      notify((error as Error).message);
+      return;
+    }
+    apply({ ...p, graph: { ...p.graph, nodes } });
     setSelectedId(copy.id);
-  }, [selectedId, apply]);
+  }, [selectedId, apply, notify]);
   const remove = useCallback(() => {
     if (!selectedId) return;
     const p = projectRef.current;
@@ -480,7 +499,7 @@ export default function App() {
       const designer = next.graph.nodes.find((node) => node.kind === 'spline');
       setSelectedId(
         designer?.id ??
-          next.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ??
+          next.graph.nodes.find((node) => node.kind === 'coast' || node.kind === 'hydraulic')?.id ??
           next.graph.nodes.find((node) => node.kind === 'noise')?.id ??
           null,
       );
@@ -498,10 +517,15 @@ export default function App() {
     [apply, notify],
   );
   const preview = useCallback(
-    (id: string) =>
-      setPreviewNodeId(
-        id === projectRef.current.graph.nodes.find((n) => n.kind === 'output')?.id ? undefined : id,
-      ),
+    (id: string) => {
+      const nodes = projectRef.current.graph.nodes;
+      if (nodes.find((n) => n.id === id)?.kind === 'maskOutput') {
+        setViewMode('2d');
+        setChannel('height');
+        setEditingSplineId(null);
+      }
+      setPreviewNodeId(id === nodes.find((n) => n.kind === 'output')?.id ? undefined : id);
+    },
     [],
   );
   const save = useCallback(() => {
@@ -510,8 +534,8 @@ export default function App() {
   }, [notify]);
   const openFile = async (file: File) => {
     try {
-      if (file.size > 3_000_000)
-        throw new Error('This project is too large. The maximum file size is 3 MB.');
+      if (file.size > MAX_PROJECT_FILE_BYTES)
+        throw new Error('This project is too large. The maximum file size is 32 MiB.');
       const loaded = parseProject(JSON.parse(await file.text()));
       apply(loaded);
       setEditingSplineId(null);
@@ -812,6 +836,9 @@ export default function App() {
               theme={theme}
               field={engine.result?.field ?? null}
               project={displayedProject}
+              maskPreview={engine.completedProject?.graph.nodes.some(
+                (node) => node.id === engine.result?.outputNodeId && node.kind === 'maskOutput',
+              ) ?? false}
               viewMode={viewMode}
               channel={channel}
               settings={settings}
@@ -926,6 +953,12 @@ export default function App() {
             onParams={(patch) => {
               const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
               if (current) updateNode({ params: { ...current.params, ...patch } });
+            }}
+            onImportRaster={(raster) => {
+              const nodes = projectRef.current.graph.nodes.map((node) =>
+                node.id === selectedId && node.kind === 'heightImport' ? { ...node, raster } : node);
+              assertRasterBudget(nodes);
+              apply({ ...projectRef.current, graph: { ...projectRef.current.graph, nodes } });
             }}
             onRename={(label) => updateNode({ label }, `${selectedId}-label`)}
             onBypass={() => selected && updateNode({ bypassed: !selected.bypassed })}
