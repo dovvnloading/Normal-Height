@@ -61,7 +61,9 @@ test('World transport is opt-in and reports a finite conservative 64² reference
   });
   await expect(page.getByText(project.name, { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Build terrain', exact: true }).click();
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible({ timeout: 90_000 });
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
   const dialog = page.getByRole('region', { name: 'World Studio', exact: true });
   await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible({

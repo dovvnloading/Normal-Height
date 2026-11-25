@@ -222,7 +222,9 @@ test('actual CPU World UI downloads and independently verifies 4096 and 8192 PNG
       buffer: Buffer.from(projectJSON),
     });
     await expect(page.getByRole('button', { name: project.name, exact: true })).toBeVisible();
-    await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible({ timeout: 90_000 });
+    await expect(
+      page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+    ).toBeVisible({ timeout: 90_000 });
     await page.getByRole('button', { name: '2D map', exact: true }).click();
     await expect(page.getByRole('button', { name: '2D map', exact: true })).toHaveAttribute(
       'aria-pressed',

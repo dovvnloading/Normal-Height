@@ -42,7 +42,7 @@ truthful progress/resolution semantics, comparison behavior, delivery recovery
 and the verification commands. The following sections describe the numerical
 engine and its qualification evidence.
 
-![Recorded World overview and region selection from the earlier Studio interface](images/world-studio.png)
+![World overview with physical coordinates and a continuous tile grid in the persistent workspace](images/world-studio.png)
 
 ### Two evaluations, with explicit roles
 
@@ -90,7 +90,7 @@ their original boundary rules. The application refuses rectangular legacy
 graphs and periodic global simulations with an actionable error. Native
 rectangular graphs and the new rectangular transport reference are supported.
 
-![Per-stage execution, backend and spacing in the running application](images/world-stage-report.png)
+![Earlier stage-report capture recording per-stage execution, backend and spacing](images/world-stage-report.png)
 
 ## Persistent CPU computation
 
@@ -182,7 +182,7 @@ or a proven multirate coarse/fine coupling scheme.
 
 ## Export packages
 
-![Recorded World export controls from the earlier Studio interface](images/world-export.png)
+![Deliver mode with output checks, destination budgets, and reachable export actions](images/world-export.png)
 
 The exporter samples and encodes bounded tiles and streams ZIP chunks with
 consumer acknowledgments. File saves apply backpressure after each write.

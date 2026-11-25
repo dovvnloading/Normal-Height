@@ -19,10 +19,10 @@ World-native 3D, regional refinement, analysis and delivery into one authoring
 flow. Its numerical engine remains an engineering preview; release
 qualification is recorded in the app, guides and exported manifests.
 
-![World Studio with a continuous terrain overview, shared tile grid, physical dimensions, and a selected region](docs/images/world-studio.png)
+![World Engine with a continuous terrain map and physical 3D terrain in the persistent Split workspace](docs/images/world-workspace-split.png)
 
-_Recorded terrain output from the earlier Studio interface. The current
-[World workspace guide](docs/WORLD_WORKSPACE.md) describes the redesigned controls and workflow._
+_The persistent workspace, captured from the production build in Chromium. See the
+[World workspace guide](docs/WORLD_WORKSPACE.md) for controls, feedback, and delivery._
 
 Open **World Studio** in the workspace toolbar. **Explore** provides a continuous
 map with cursor-centered zoom, pan, a navigator and physical probes; switch to

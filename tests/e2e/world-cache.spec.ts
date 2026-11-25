@@ -33,7 +33,9 @@ async function openWorld(page: Page, fixture: Buffer, reload = false): Promise<L
     mimeType: 'application/json',
     buffer: fixture,
   });
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible({ timeout: 90_000 });
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
   const workspace = page.getByRole('region', { name: 'World Studio', exact: true });
   // Keep explicit builds observable; camera settling must not replace their

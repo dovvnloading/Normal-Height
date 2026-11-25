@@ -185,7 +185,9 @@ async function openExport(page: Page, duplicateMasks = false) {
     buffer: Buffer.from(JSON.stringify(project)),
   });
   await expect(page.getByRole('button', { name: project.name, exact: true })).toBeVisible();
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: '2D map', exact: true }).click();
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
   const dialog = page.getByRole('region', { name: 'World Studio', exact: true });

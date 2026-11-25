@@ -750,7 +750,7 @@ export function WorldExportPanel({
               </strong>
               <small>
                 {estimate
-                  ? `${number(plan.files, 0)} files · ${number(plan.mapCount, 0)} maps per tile`
+                  ? `${number(plan.files, 0)} files · ${number(plan.mapCount, 0)} ${plan.mapCount === 1 ? 'map' : 'maps'} per tile`
                   : 'Resolve the issue below to continue.'}
               </small>
             </div>

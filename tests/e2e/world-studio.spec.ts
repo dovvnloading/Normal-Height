@@ -58,7 +58,9 @@ test('World Studio builds, refines, exports aligned tiles, and saves explicit wo
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(project)),
   });
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Build terrain', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Compute diagnostics' })).toContainText('3 cached');
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
@@ -156,7 +158,9 @@ test('cancelled world work cannot publish and the workspace fits a compact viewp
     await route.continue();
   });
   await page.goto('/');
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible({ timeout: 90_000 });
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
   const dialog = page.getByRole('region', { name: 'World Studio', exact: true });
   await dialog.getByRole('button', { name: 'Cancel preview', exact: true }).click();

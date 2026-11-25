@@ -16,6 +16,8 @@ The procedural graph can be opened as a resizable dock in the World workspace. S
 
 Valid World settings are linked back to the project through the normal project history and persistence path. An incomplete numeric edit stays in its field until it is committed with Enter or blur. Escape restores the current authored value. A failed save keeps the draft visible and reports the problem.
 
+![World Engine with the same sampled terrain in Map and Terrain panes](images/world-workspace-split.png)
+
 ## Navigation and display
 
 The map uses local Cartesian meters: +X is east, +Z is south, and the first raster row is north. Elevation is `datum + normalized terrain height × heightScale`. These coordinates are not a geographic coordinate reference system.
@@ -68,11 +70,15 @@ Statistics, histograms and elevation sections describe the completed preview gri
 
 **Pin current terrain** retains a completed field in memory. Wipe and elevation-difference comparisons require the same physical footprint. Compatible fields with different sample counts are interpolated for display. Both sides use a common color range, and differences compare physical elevations including scale and datum. The pinned field remains unchanged while a replacement build runs. Comparison mode holds its footprint instead of scheduling navigation-driven sampling.
 
+![Dark Analyze workspace with elevation distribution, a physical section and a pinned comparison](images/world-workspace-dark.png)
+
 ## Delivery is an independent job
 
 Delivery starts with a captured copy of the project, World definition, region, maps, profile and output dimensions. Changing workspace or continuing to explore does not change that package. Returning to Terrain keeps the export alive. Explicit **Cancel export** stops its worker and requests abort of an open writable stream; component disposal also cleans up a job and invalidates a still-pending file picker.
 
 The action dock stays reachable while reviewing settings. A job, failure or completion moves into view when its state changes. The receipt is visibly labeled **Last completed export**, with its completion time and captured footprint, so later edits remain distinct from the finished package.
+
+![Completed file export with captured settings, exact grid, encoding and file receipt](images/world-export-receipt.png)
 
 ### Output contracts
 

@@ -40,7 +40,9 @@ async function openWorkspace(page: Page) {
     mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(project)),
   });
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible({ timeout: 90_000 });
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
   const studio = page.getByRole('region', { name: 'World Studio', exact: true });
   await expect(studio.getByText('World overview ready', { exact: true })).toBeVisible({
