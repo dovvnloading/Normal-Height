@@ -61,7 +61,26 @@ test('previews a quarter mask in absolute grayscale and restores terrain units',
   }
   await map.hover();
   await expect(page.locator('.nh-map-sample')).toContainText('25.0% weight');
+
+  // A named output is a scalar mask, not terrain material coverage. Both the
+  // visible action and its keyboard shortcut must leave that preview intact.
+  const paint = page.getByRole('button', { name: 'Paint terrain', exact: true });
+  await expect(paint).toBeDisabled();
+  await expect(paint).toHaveAttribute('title', 'Return to Terrain output to resume painting.');
+  await map.focus();
+  await page.keyboard.press('b');
+  await expect(paint).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByLabel('Map channel', { exact: true })).toHaveValue('height');
+  await expect(map).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Painting studio', exact: true })).toHaveCount(0);
+  await expect.poll(() => centerPixel(map)).toEqual([64, 64, 64, 255]);
+
   await page.getByRole('button', { name: 'Return to Terrain output', exact: true }).click();
   await expect(legend).toContainText('Elevation');
   await expect(legend.getByText('200 m', { exact: true })).toBeVisible();
+  await expect(paint).toBeEnabled();
+  await page.locator('.nh-map > canvas').focus();
+  await page.keyboard.press('b');
+  await expect(paint).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('region', { name: 'Painting studio', exact: true })).toBeVisible();
 });
