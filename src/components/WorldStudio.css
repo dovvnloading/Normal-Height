@@ -1189,16 +1189,15 @@
   align-items: center;
   gap: 9px;
   position: absolute;
-  left: 50%;
-  bottom: 65px;
-  transform: translateX(-50%);
+  top: 68px;
+  right: 16px;
   z-index: 15;
   border: 1px solid var(--we-border);
   border-radius: 8px;
   background: var(--we-surface);
   box-shadow: var(--we-shadow);
   padding: 7px 9px 7px 13px;
-  max-width: calc(100% - 30px);
+  max-width: min(440px, calc(100% - 80px));
   width: max-content;
   font-size: 12px;
 }

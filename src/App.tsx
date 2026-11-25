@@ -162,6 +162,7 @@ export default function App() {
   const openWorld = useCallback(() => {
     setWorldOpened(true);
     setViewportFocus(false);
+    setToast('');
     setWorkspace('world');
   }, []);
   const previousWorkspace = useRef(workspace);

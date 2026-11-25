@@ -105,6 +105,9 @@ test('undo between imported legacy projects restores the inherited world domain'
 });
 
 async function waitForMapPaint(studio: Locator) {
+  const map = studio.getByRole('region', { name: 'Interactive world map', exact: true });
+  await expect.poll(async () => (await map.boundingBox())?.width ?? 0).toBeGreaterThan(320);
+  await expect.poll(async () => (await map.boundingBox())?.height ?? 0).toBeGreaterThan(240);
   const canvas = studio.locator('.wv-plane > .wv-field > canvas.wv-raster').last();
   await expect
     .poll(() =>
@@ -152,8 +155,8 @@ test('map navigation preserves physical anchors, keyboard selection, and graph s
     .poll(async () => (await studio.locator('.wv-plane').boundingBox())!.width)
     .toBeGreaterThan(before.terrain.width * 1.5);
   const after = (await mapBounds(studio)).terrain;
-  expect(after.x + after.width * 0.68).toBeCloseTo(cursor.x, 0);
-  expect(after.y + after.height * 0.43).toBeCloseTo(cursor.y, 0);
+  expect(Math.abs(after.x + after.width * 0.68 - cursor.x)).toBeLessThanOrEqual(1);
+  expect(Math.abs(after.y + after.height * 0.43 - cursor.y)).toBeLessThanOrEqual(1);
 
   await map.focus();
   await page.keyboard.press('Home');
@@ -168,8 +171,14 @@ test('map navigation preserves physical anchors, keyboard selection, and graph s
   await page.keyboard.press('f');
   const framed = await mapBounds(studio),
     selected = (await selection.boundingBox())!;
-  expect(selected.x + selected.width / 2).toBeCloseTo(framed.frame.x + framed.frame.width / 2, 0);
-  expect(selected.y + selected.height / 2).toBeCloseTo(framed.frame.y + framed.frame.height / 2, 0);
+  // DOM percentages use the terrain's bordered box, while camera size uses integer client
+  // dimensions. Allow one CSS pixel of presentation rounding; analytic camera tests stay exact.
+  expect(
+    Math.abs(selected.x + selected.width / 2 - (framed.frame.x + framed.frame.width / 2)),
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(selected.y + selected.height / 2 - (framed.frame.y + framed.frame.height / 2)),
+  ).toBeLessThanOrEqual(1);
   await page.keyboard.press('Shift+G');
   await expect(studio.getByRole('button', { name: 'Show tile grid', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -266,6 +275,13 @@ test('physical 3D and split views own one renderer and release it when hidden', 
   await expect(studio.getByLabel('Terrain vertical exaggeration', { exact: true })).toHaveValue(
     '1',
   );
+  await expect(
+    studio.getByRole('button', { name: 'Orthographic projection', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'false');
+  await expect(
+    studio.getByRole('button', { name: 'Show terrain wireframe', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'false');
+  await studio.getByRole('button', { name: 'Reset terrain camera', exact: true }).click();
   await waitForMapPaint(studio);
   await waitForTerrainPaint(canvas);
   await page.screenshot({ path: info.outputPath('world-workspace-physical-split.png') });

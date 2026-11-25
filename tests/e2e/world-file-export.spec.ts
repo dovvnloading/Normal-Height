@@ -306,10 +306,15 @@ test('an export keeps its captured settings and completes while the World worksp
 
 test('the production export worker waits for file writes and closes a valid RAW archive', async ({
   page,
-}) => {
+}, info) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const dialog = await openExport(page);
+  await dialog
+    .locator('.we-export-action-dock')
+    .getByRole('button', { name: 'Review', exact: true })
+    .click();
+  await page.screenshot({ path: info.outputPath('world-export-review.png') });
   await page.evaluate(() => {
     (window as ProbeWindow).__worldFileSink.holdFirstWrite = true;
   });
@@ -372,6 +377,10 @@ test('the production export worker waits for file writes and closes a valid RAW 
   await expect(
     dialog.getByRole('button', { name: 'Save directly to file', exact: true }),
   ).toBeEnabled();
+  await dialog
+    .getByRole('region', { name: 'Last completed world export' })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('world-export-receipt.png') });
   expect(errors).toEqual([]);
 });
 

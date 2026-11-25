@@ -25,6 +25,7 @@ import {
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Box, Focus, Mountain, RotateCcw, Sun, TriangleAlert } from 'lucide-react';
 import { clamp, formatWorldDistance, worldGridBounds, worldMapPixels } from './worldViewMath';
+import { terrainAspectResize, terrainAspectScale } from './worldTerrainCamera';
 import type { WorldLayer, WorldLayerScale, WorldRegion, WorldSnapshot } from './worldViewMath';
 
 interface Props {
@@ -64,6 +65,7 @@ export function WorldTerrain3D({ snapshot, layer, scale, region, active = true }
     position: [number, number, number];
     target: [number, number, number];
     zoom: number;
+    aspect: number;
   } | null>(null);
 
   useEffect(() => {
@@ -298,6 +300,10 @@ export function WorldTerrain3D({ snapshot, layer, scale, region, active = true }
       scene.background = null;
 
       const far = Math.max(2000, verticalSpan * 32);
+      let viewportAspect =
+        element.clientWidth > 0 && element.clientHeight > 0
+          ? element.clientWidth / element.clientHeight
+          : 1;
       const perspective = new PerspectiveCamera(39, 1, 0.005, far);
       const ortho = new OrthographicCamera(-1, 1, 1, -1, 0.005, far);
       let camera: PerspectiveCamera | OrthographicCamera = settingsRef.current.orthographic
@@ -309,7 +315,8 @@ export function WorldTerrain3D({ snapshot, layer, scale, region, active = true }
         box.getCenter(target);
         controls?.target.copy(target);
         const sceneSize = box.getSize(new Vector3());
-        const distance = Math.max(1.6, sceneSize.length() * 1.6);
+        const distance =
+          Math.max(1.6, sceneSize.length() * 1.6) * terrainAspectScale(viewportAspect);
         camera.position.set(distance * 0.65, target.y + distance * 0.65, distance * 0.8);
         camera.lookAt(target);
         if (camera instanceof OrthographicCamera) {
@@ -323,6 +330,10 @@ export function WorldTerrain3D({ snapshot, layer, scale, region, active = true }
       if (savedView.current?.footprint === footprint) {
         camera.position.fromArray(savedView.current.position);
         controls.target.fromArray(savedView.current.target);
+        camera.position
+          .sub(controls.target)
+          .multiplyScalar(terrainAspectResize(savedView.current.aspect, viewportAspect))
+          .add(controls.target);
         if (camera instanceof OrthographicCamera) {
           camera.zoom = savedView.current.zoom;
           camera.updateProjectionMatrix();
@@ -335,6 +346,7 @@ export function WorldTerrain3D({ snapshot, layer, scale, region, active = true }
             position: [camera.position.x, camera.position.y, camera.position.z],
             target: [controls.target.x, controls.target.y, controls.target.z],
             zoom: camera instanceof OrthographicCamera ? camera.zoom : 1,
+            aspect: viewportAspect,
           };
       });
       controls.enableDamping = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -360,15 +372,24 @@ export function WorldTerrain3D({ snapshot, layer, scale, region, active = true }
       cleanups.push(() => controls?.removeEventListener('change', requestRender));
       const resize = () => {
         if (!renderer) return;
-        const width = Math.max(1, element.clientWidth),
-          height = Math.max(1, element.clientHeight);
+        const width = element.clientWidth,
+          height = element.clientHeight;
+        if (width <= 0 || height <= 0) return;
+        const aspect = width / height;
+        const pivot = controls?.target ?? target;
+        camera.position
+          .sub(pivot)
+          .multiplyScalar(terrainAspectResize(viewportAspect, aspect))
+          .add(pivot);
+        viewportAspect = aspect;
         renderer.setSize(width, height, false);
-        perspective.aspect = width / height;
+        perspective.aspect = aspect;
         perspective.updateProjectionMatrix();
-        ortho.left = (-width / height) * 0.9;
-        ortho.right = (width / height) * 0.9;
-        ortho.top = 0.9;
-        ortho.bottom = -0.9;
+        const halfHeight = 0.9 * terrainAspectScale(aspect);
+        ortho.left = -aspect * halfHeight;
+        ortho.right = aspect * halfHeight;
+        ortho.top = halfHeight;
+        ortho.bottom = -halfHeight;
         ortho.updateProjectionMatrix();
         requestRender();
       };
