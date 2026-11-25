@@ -1,0 +1,72 @@
+name: World Engine correctness
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/engine/**'
+      - 'src/export/world*'
+      - 'src/model/**'
+      - 'src/hooks/**'
+      - 'src/components/World*'
+      - 'src/components/world*'
+      - 'src/components/ComputePanel*'
+      - 'src/App.tsx'
+      - 'tests/world*'
+      - 'tests/e2e/world*'
+      - 'scripts/world-gpu-qualify.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'playwright.config.ts'
+      - 'vite.config.ts'
+      - '.github/workflows/world-engine-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: world-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  world:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A rerun verifies its original commit, even if the branch advances.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Probe WebGPU kernels and record CPU fallback on a software adapter
+        shell: bash
+        run: |
+          npm run dev -- --host 127.0.0.1 --port 4180 --strictPort > /tmp/normal-height-gpu-probe.log 2>&1 &
+          GPU_PROBE_PID=$!
+          trap 'kill "$GPU_PROBE_PID" || true' EXIT
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:4180/ > /dev/null; then break; fi
+            sleep 1
+          done
+          NH_WORLD_URL=http://127.0.0.1:4180 NH_GPU_SOFTWARE=1 node scripts/world-gpu-qualify.mjs docs/benchmarks/world-gpu-software.json
+      - name: Verify world workflow through real production workers
+        run: npx playwright test tests/e2e/world*.spec.ts --workers=1
+      - name: Preserve numerical and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-engine-evidence
+          path: |
+            docs/benchmarks/world-gpu-software.json
+            test-results/
+            playwright-report/
+          retention-days: 14

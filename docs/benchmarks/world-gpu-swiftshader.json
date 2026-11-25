@@ -1,0 +1,85 @@
+{
+  "createdAt": "2026-11-24T22:59:26.578Z",
+  "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36",
+  "secureContext": true,
+  "capability": {
+    "requested": "webgpu",
+    "available": true,
+    "qualified": true,
+    "backend": "webgpu",
+    "reason": "Pointwise kernels passed the runtime numerical probe on a fallback/software adapter. This is not hardware performance qualification.",
+    "adapter": "google / swiftshader",
+    "maxStorageBufferBindingSize": 134217728,
+    "maxBufferSize": 268435456,
+    "maxComputeWorkgroupsPerDimension": 65535,
+    "numerical": {
+      "maxAbsoluteError": 2.384185791015625e-7,
+      "rmse": 2.0400007489846925e-8,
+      "sampleCount": 2056
+    }
+  },
+  "graph": {
+    "backend": "webgpu",
+    "samples": 66049,
+    "maxAbsoluteError": 1.7881393432617188e-7,
+    "rmse": 6.688223060966961e-8,
+    "cpuDurationMs": 157.30000000004657,
+    "requestedGpuDurationMs": 149.89999999990687,
+    "stages": [
+      {
+        "nodeId": "source",
+        "label": "Procedural noise",
+        "kind": "noise",
+        "scope": "pointwise",
+        "mode": "native",
+        "backend": "cpu-reference",
+        "algorithmVersion": "world-1/noise/v3",
+        "samplesX": 257,
+        "samplesZ": 257,
+        "spacingX": 15.625,
+        "spacingZ": 15.625,
+        "simulationResolution": null,
+        "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+      },
+      {
+        "nodeId": "shape",
+        "label": "Height remap",
+        "kind": "remap",
+        "scope": "pointwise",
+        "mode": "native",
+        "backend": "webgpu",
+        "algorithmVersion": "world-1/remap/reference",
+        "samplesX": 257,
+        "samplesZ": 257,
+        "spacingX": 15.625,
+        "spacingZ": 15.625,
+        "simulationResolution": null,
+        "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+      },
+      {
+        "nodeId": "output",
+        "label": "Terrain output",
+        "kind": "output",
+        "scope": "pointwise",
+        "mode": "native",
+        "backend": "cpu-reference",
+        "algorithmVersion": "world-1/output/reference",
+        "samplesX": 257,
+        "samplesZ": 257,
+        "spacingX": 15.625,
+        "spacingZ": 15.625,
+        "simulationResolution": null,
+        "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+      }
+    ]
+  },
+  "execution": "Explicit software adapter run. Numerical evidence only; not hardware acceleration or performance qualification.",
+  "evidenceSource": {
+    "sourceRevision": "a7e8eee0f8925b4b5c7a2b356a7a611625cd4364",
+    "workflowRun": "https://github.com/dovvnloading/Normal-Height/actions/runs/45505809236",
+    "jobId": 138840610588,
+    "step": "Probe WebGPU kernels and record CPU fallback on a software adapter",
+    "stepConclusion": "success",
+    "note": "The numerical qualification step passed. The later media capture was superseded by a newer source run; it does not change this recorded numerical result."
+  }
+}

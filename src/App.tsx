@@ -21,6 +21,8 @@ import {
   CheckCircle2,
   Moon,
   Sun,
+  Globe2,
+  Cpu,
 } from 'lucide-react';
 import { Library } from './components/Library';
 import { Inspector } from './components/Inspector';
@@ -29,6 +31,8 @@ import { TerrainViewport } from './components/TerrainViewport';
 import { ExportDialog } from './components/ExportDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
+import { WorldStudio } from './components/WorldStudio';
+import { ComputePanel } from './components/ComputePanel';
 import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
 import { STUDIO_KERNELS } from './model/noiseStudio';
@@ -98,7 +102,9 @@ export default function App() {
     () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
   );
   const theme: ThemeMode = themeChoice ?? (systemDark ? 'dark' : 'light');
-  const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | null>(null);
+  const [modal, setModal] = useState<
+    'export' | 'help' | 'palette' | 'presets' | 'world' | 'compute' | null
+  >(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   // Sidebars become temporary overlays at different breakpoints. Close each
@@ -150,12 +156,14 @@ export default function App() {
   // matching worker result arrives. Visual-only surface controls stay live.
   const displayedProject = useMemo(() => {
     const built = engine.result && engine.completedProject;
-    return built ? {
-      ...project,
-      worldSize: built.worldSize,
-      heightScale: built.heightScale,
-      seed: built.seed,
-    } : project;
+    return built
+      ? {
+          ...project,
+          worldSize: built.worldSize,
+          heightScale: built.heightScale,
+          seed: built.seed,
+        }
+      : project;
   }, [project, engine.result, engine.completedProject]);
   const selected = project.graph.nodes.find((n) => n.id === selectedId) ?? null;
   const selectedSpline = selected?.kind === 'spline' ? selected : null;
@@ -166,12 +174,14 @@ export default function App() {
   const lastBuiltPreviewLabel = useMemo(() => {
     const built = engine.completedProject;
     if (!built) return null;
-    const id = engine.completedPreviewNodeId ??
-      built.graph.nodes.find((node) => node.kind === 'output')?.id;
+    const id =
+      engine.completedPreviewNodeId ?? built.graph.nodes.find((node) => node.kind === 'output')?.id;
     return built.graph.nodes.find((node) => node.id === id)?.label ?? 'Terrain output';
   }, [engine.completedProject, engine.completedPreviewNodeId]);
-  const displayedPreviewLabel = engine.stale && engine.result && lastBuiltPreviewLabel
-    ? `Last built: ${lastBuiltPreviewLabel}` : previewLabel;
+  const displayedPreviewLabel =
+    engine.stale && engine.result && lastBuiltPreviewLabel
+      ? `Last built: ${lastBuiltPreviewLabel}`
+      : previewLabel;
   const notify = useCallback((message: string) => setToast(message), []);
   useEffect(() => {
     const query = window.matchMedia?.('(prefers-color-scheme: dark)');
@@ -182,10 +192,9 @@ export default function App() {
   }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute(
-      'content',
-      theme === 'dark' ? '#292e30' : '#e9ebe7',
-    );
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'dark' ? '#292e30' : '#e9ebe7');
   }, [theme]);
   useEffect(() => saveViewSettings(settings), [settings]);
   const toggleTheme = () => {
@@ -267,7 +276,10 @@ export default function App() {
     if (previewNodeId && !project.graph.nodes.some((n) => n.id === previewNodeId))
       setPreviewNodeId(undefined);
     if (selectedId && !project.graph.nodes.some((n) => n.id === selectedId)) setSelectedId(null);
-    if (editingSplineId && (editingSplineId !== selectedId || !project.graph.nodes.some((n) => n.id === editingSplineId)))
+    if (
+      editingSplineId &&
+      (editingSplineId !== selectedId || !project.graph.nodes.some((n) => n.id === editingSplineId))
+    )
       setEditingSplineId(null);
   }, [project, previewNodeId, selectedId, editingSplineId]);
   const updateGraph = useCallback(
@@ -279,19 +291,24 @@ export default function App() {
       apply({ ...projectRef.current, ...patch }, Object.keys(patch).join('-')),
     [apply],
   );
-  const paintMaterial = useCallback((strokes: MaterialStroke[]) => {
-    const current = projectRef.current;
-    const next = [...(current.materialPaint ?? [])];
-    for (const stroke of strokes) {
-      if (!canAppendMaterialStroke(next, stroke)) {
-        notify('This stroke exceeds the project paint limit. Undo a stroke or use a shorter drag.');
-        return false;
+  const paintMaterial = useCallback(
+    (strokes: MaterialStroke[]) => {
+      const current = projectRef.current;
+      const next = [...(current.materialPaint ?? [])];
+      for (const stroke of strokes) {
+        if (!canAppendMaterialStroke(next, stroke)) {
+          notify(
+            'This stroke exceeds the project paint limit. Undo a stroke or use a shorter drag.',
+          );
+          return false;
+        }
+        next.push(stroke);
       }
-      next.push(stroke);
-    }
-    apply({ ...current, materialPaint: next });
-    return true;
-  }, [apply, notify]);
+      apply({ ...current, materialPaint: next });
+      return true;
+    },
+    [apply, notify],
+  );
   const updateNode = useCallback(
     (patch: Partial<NonNullable<typeof selected>>, group = '') => {
       if (!selectedId) return;
@@ -337,11 +354,12 @@ export default function App() {
       if (kind === 'spline') {
         // Insert the designer immediately before hydraulic erosion (or before
         // the final output), preserving the existing procedural pipeline.
-        const target = p.graph.nodes.find((n) => n.kind === 'hydraulic') ??
+        const target =
+          p.graph.nodes.find((n) => n.kind === 'hydraulic') ??
           p.graph.nodes.find((n) => n.kind === 'output');
-        const inputEdge = target && p.graph.edges.find(
-          (e) => e.target === target.id && (e.targetHandle ?? 'in') === 'in',
-        );
+        const inputEdge =
+          target &&
+          p.graph.edges.find((e) => e.target === target.id && (e.targetHandle ?? 'in') === 'in');
         if (target && inputEdge && !target.parentId) {
           node.position = { ...target.position };
           const affected = p.graph.nodes.map((n) =>
@@ -381,22 +399,27 @@ export default function App() {
     },
     [selectedId, apply, notify],
   );
-  const changeSplinePath = useCallback((path: SplinePoint[]) => {
-    const id = editingSplineId ?? (projectRef.current.graph.nodes.find(
-      (node) => node.id === selectedId && node.kind === 'spline',
-    )?.id);
-    if (!id) return;
-    const current = projectRef.current;
-    apply({
-      ...current,
-      graph: {
-        ...current.graph,
-        nodes: current.graph.nodes.map((node) =>
-          node.id === id ? { ...node, path: path.map((point) => ({ ...point })) } : node,
-        ),
-      },
-    });
-  }, [editingSplineId, selectedId, apply]);
+  const changeSplinePath = useCallback(
+    (path: SplinePoint[]) => {
+      const id =
+        editingSplineId ??
+        projectRef.current.graph.nodes.find(
+          (node) => node.id === selectedId && node.kind === 'spline',
+        )?.id;
+      if (!id) return;
+      const current = projectRef.current;
+      apply({
+        ...current,
+        graph: {
+          ...current.graph,
+          nodes: current.graph.nodes.map((node) =>
+            node.id === id ? { ...node, path: path.map((point) => ({ ...point })) } : node,
+          ),
+        },
+      });
+    },
+    [editingSplineId, selectedId, apply],
+  );
 
   const duplicate = useCallback(() => {
     const p = projectRef.current;
@@ -455,7 +478,12 @@ export default function App() {
       const next = createProject(id);
       apply(next);
       const designer = next.graph.nodes.find((node) => node.kind === 'spline');
-      setSelectedId(designer?.id ?? next.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ?? next.graph.nodes.find((node) => node.kind === 'noise')?.id ?? null);
+      setSelectedId(
+        designer?.id ??
+          next.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ??
+          next.graph.nodes.find((node) => node.kind === 'noise')?.id ??
+          null,
+      );
       setPreviewNodeId(undefined);
       setEditingSplineId(designer?.id ?? null);
       if (designer) {
@@ -533,8 +561,12 @@ export default function App() {
               ?.focus(),
           0,
         );
-      } else if (event.key.toLowerCase() === 'f' && !command &&
-        event.target instanceof HTMLElement && event.target.closest('.nh-viewport')) {
+      } else if (
+        event.key.toLowerCase() === 'f' &&
+        !command &&
+        event.target instanceof HTMLElement &&
+        event.target.closest('.nh-viewport')
+      ) {
         event.preventDefault();
         setViewportFocus((v) => !v);
       } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
@@ -672,7 +704,9 @@ export default function App() {
             className="icon-button theme-toggle"
             aria-label="Dark mode"
             aria-pressed={theme === 'dark'}
-            title={theme === 'dark' ? 'Switch to light stone theme' : 'Switch to dark charcoal theme'}
+            title={
+              theme === 'dark' ? 'Switch to light stone theme' : 'Switch to dark charcoal theme'
+            }
             onClick={toggleTheme}
           >
             {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
@@ -699,6 +733,14 @@ export default function App() {
           <ChevronDown size={10} />
         </div>
         <div className="workspace-build">
+          <button
+            className="world-open-button"
+            onClick={() => setModal('world')}
+            title="Continuous worlds, regional refinement, and tiled export"
+          >
+            <Globe2 size={14} />
+            <span>World Studio</span>
+          </button>
           <label className="working-resolution">
             <span>Working grid</span>
             <select
@@ -763,7 +805,9 @@ export default function App() {
               onPaint={paintMaterial}
               onLayerColor={(layer, color) => {
                 const surface = resolveSurface(projectRef.current.surface);
-                updateProject({ surface: { ...surface, layerColors: { ...surface.layerColors, [layer]: color } } });
+                updateProject({
+                  surface: { ...surface, layerColors: { ...surface.layerColors, [layer]: color } },
+                });
               }}
               theme={theme}
               field={engine.result?.field ?? null}
@@ -788,7 +832,11 @@ export default function App() {
                   notify('Build the current terrain before pinning a comparison baseline.');
                   return;
                 }
-                setBaseline({ field: engine.result.field, project: structuredClone(project), label: previewLabel });
+                setBaseline({
+                  field: engine.result.field,
+                  project: structuredClone(project),
+                  label: previewLabel,
+                });
                 notify('Comparison baseline pinned. Change your terrain, then open Compare.');
               }}
               onClearBaseline={() => setBaseline(null)}
@@ -873,10 +921,7 @@ export default function App() {
             onParam={(key, value) => {
               const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
               if (current)
-                updateNode(
-                  { params: { ...current.params, [key]: value } },
-                  `${current.id}-${key}`,
-                );
+                updateNode({ params: { ...current.params, [key]: value } }, `${current.id}-${key}`);
             }}
             onParams={(patch) => {
               const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
@@ -912,6 +957,17 @@ export default function App() {
           )}
         </div>
         <div className="status-center">
+          <button
+            className="compute-status-button"
+            onClick={() => setModal('compute')}
+            title="Inspect stage timings and persistent cache"
+            aria-label="Compute diagnostics"
+          >
+            <Cpu size={11} />
+            {engine.result?.diagnostics
+              ? ` ${engine.result.diagnostics.cacheHits} cached`
+              : ' CPU reference'}
+          </button>
           <GitBranch size={11} />
           {project.graph.nodes.filter((n) => n.kind !== 'group' && n.kind !== 'note').length} nodes
           <span>·</span>
@@ -939,9 +995,12 @@ export default function App() {
                   `Balance residual: ${sedimentBudget.balanceErrorM3.toLocaleString('en-US', { maximumFractionDigits: 2 })} m³`,
                 ].join('\n')}
               >
-                Sediment out {new Intl.NumberFormat('en-US', {
-                  notation: 'compact', maximumFractionDigits: 1,
-                }).format(sedimentBudget.exportedVolumeM3)} m³
+                Sediment out{' '}
+                {new Intl.NumberFormat('en-US', {
+                  notation: 'compact',
+                  maximumFractionDigits: 1,
+                }).format(sedimentBudget.exportedVolumeM3)}{' '}
+                m³
               </span>
             </>
           )}
@@ -983,6 +1042,25 @@ export default function App() {
       />
       {modal === 'export' && <ExportDialog project={project} onClose={() => setModal(null)} />}
       {modal === 'help' && <HelpDialog onClose={() => setModal(null)} />}
+      {modal === 'world' && (
+        <WorldStudio
+          project={project}
+          onSave={(world) => apply({ ...projectRef.current, version: 2, world })}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === 'compute' && (
+        <ComputePanel
+          project={project}
+          result={engine.result}
+          stale={engine.stale}
+          onClear={() => {
+            engine.clearCache();
+            notify('Compute cache cleared. The current preview is retained.');
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === 'palette' && (
         <Modal
           title="Add to your process"
@@ -1025,7 +1103,7 @@ export default function App() {
             <div className="preset-dialog-list">
               {PRESETS.map((p) => (
                 <button key={p.id} onClick={() => loadPreset(p.id)}>
-                  <TerrainIcon name={PRESET_ICON_NAMES[p.id] ?? "mountain-range"} height={32} />
+                  <TerrainIcon name={PRESET_ICON_NAMES[p.id] ?? 'mountain-range'} height={32} />
                   <span>
                     <strong>{p.name}</strong>
                     <small>{p.description}</small>
