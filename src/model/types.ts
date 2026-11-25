@@ -1,19 +1,26 @@
+import type { HeightRaster } from './heightRaster';
 import type { MaterialStroke } from '../materials/materialPaint';
+import type { PaintLayer } from '../materials/paintLayers';
 import type { SplinePoint } from './splines';
 import type { SurfaceSettings } from '../materials/pbr';
 import type { SedimentBudget } from '../engine/erosion';
+import type { ComputeDiagnostics } from '../engine/compute/cache';
+import type { WorldDefinition } from './world';
 
 export type NodeKind =
   | 'mountain'
+  | 'heightImport'
   | 'noise'
   | 'warp'
   | 'spline'
+  | 'coast'
   | 'hydraulic'
   | 'thermal'
   | 'terrace'
   | 'remap'
   | 'blend'
   | 'mask'
+  | 'maskOutput'
   | 'output'
   | 'note'
   | 'group';
@@ -25,6 +32,7 @@ export interface TerrainNode {
   params: Record<string, ParamValue>;
   /** Geometry lives in the project, not a render-only overlay. */
   path?: SplinePoint[];
+  raster?: HeightRaster;
   position: { x: number; y: number };
   bypassed?: boolean;
   parentId?: string;
@@ -43,7 +51,9 @@ export interface TerrainGraph {
   edges: TerrainEdge[];
 }
 export interface TerrainProject {
-  version: 1;
+  version: 1 | 2;
+  /** Explicit opt-in World schema. Version 1 retains the original single-domain pipeline. */
+  world?: WorldDefinition;
   name: string;
   seed: number;
   resolution: number;
@@ -53,6 +63,8 @@ export interface TerrainProject {
   /** Optional, backward-compatible PBR material configuration. */
   surface?: SurfaceSettings;
   materialPaint?: MaterialStroke[];
+  /** Ordered bottom-to-top authored layers. Legacy materialPaint is used when absent. */
+  paintLayers?: PaintLayer[];
   graph: TerrainGraph;
 }
 export interface HeightField {
@@ -79,6 +91,8 @@ export interface EvaluationResult {
   stats: TerrainStats;
   duration: number;
   outputNodeId: string;
+  /** CPU execution and persistent-cache measurements, when available. */
+  diagnostics?: ComputeDiagnostics;
 }
 export interface EvaluationOptions {
   resolution: number;
@@ -96,10 +110,27 @@ export type WorkerResponse =
   | { type: 'progress'; id: number; progress: number; stage: string }
   | { type: 'result'; id: number; result: EvaluationResult }
   | { type: 'error'; id: number; message: string };
-export type MapChannel = 'height' | 'terrain' | 'normal' | 'slope' | 'flow' | 'wear' | 'deposition'
-  | 'basecolor' | 'roughness' | 'ao' | 'splat' | 'curvature' | 'orm'
-  | 'materialNormal' | 'detailNormal' | 'relief'
-  | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
+export type MapChannel =
+  | 'height'
+  | 'terrain'
+  | 'normal'
+  | 'slope'
+  | 'flow'
+  | 'wear'
+  | 'deposition'
+  | 'basecolor'
+  | 'roughness'
+  | 'ao'
+  | 'splat'
+  | 'curvature'
+  | 'orm'
+  | 'materialNormal'
+  | 'detailNormal'
+  | 'relief'
+  | 'rockWeight'
+  | 'soilWeight'
+  | 'vegetationWeight'
+  | 'snowWeight';
 export type ViewMode = '3d' | '2d' | 'split' | 'compare';
 export interface ViewSettings {
   material: 'alpine' | 'clay' | 'height' | 'pbr';
@@ -123,6 +154,19 @@ export interface ViewSettings {
   cloudShadowStrength: number;
   expandGround: boolean;
   groundReach: number;
+  /** Optional preview-only water; never changes the graph, PBR maps or exported data. */
+  waterEnabled: boolean;
+  /** Extend a connected coast into a panoramic ocean beyond the square tile. */
+  waterHorizon: boolean;
+  waterLevelMode: 'coast' | 'manual';
+  /** Manual waterline in physical meters, independent of vertical exaggeration. */
+  waterLevel: number;
+  waterPalette: 'lagoon' | 'alpine' | 'ocean' | 'dusk';
+  /** Wave amplitude in meters. */
+  waterWaveHeight: number;
+  waterSpeed: number;
+  waterClarity: number;
+  waterFoam: number;
 }
 export interface ParamDefinition {
   key: string;

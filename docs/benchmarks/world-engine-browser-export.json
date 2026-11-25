@@ -1,0 +1,546 @@
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "startedAt": "2026-11-24T23:15:23.196Z",
+  "source": {
+    "githubSHA": "2e4fb2293299b6c118b351c3516dab2a3dfe792f",
+    "githubHeadRef": "feature/world-engine",
+    "githubRun": "https://github.com/dovvnloading/Normal-Height/actions/runs/45508227581",
+    "buildProvenance": "Each verified export includes its actual manifest.build below; GITHUB_SHA can be the CI merge commit."
+  },
+  "environment": {
+    "node": "v24.22.3",
+    "os": "linux 7.0.0-1016-aws",
+    "cpu": "Intel(R) Xeon(R) 6975P-C",
+    "browser": "chromium",
+    "browserVersion": "158.0.8127.18",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "headless": true,
+    "editorViewportMode": "2D map, explicitly selected before opening World Studio; the 3D viewport is hidden and terrain drawing is paused."
+  },
+  "fixture": {
+    "sha256": "63fd82c542577df9912264cc8f97326eac9345847bee7993b33b36f56ec29fd9",
+    "project": {
+      "version": 2,
+      "name": "World browser native graph profile",
+      "seed": 24062,
+      "resolution": 128,
+      "worldSize": 12000,
+      "heightScale": 1800,
+      "presetId": "custom",
+      "graph": {
+        "nodes": [
+          {
+            "id": "source",
+            "kind": "noise",
+            "label": "Native Perlin",
+            "position": {
+              "x": 0,
+              "y": 0
+            },
+            "params": {
+              "kernel": "perlin",
+              "fractal": "none",
+              "seedMode": "linked",
+              "seed": 713,
+              "seedText": "",
+              "seedLocked": false,
+              "lockedSeed": 0,
+              "scaleMode": "tile",
+              "scale": 8.4,
+              "featureSize": 1000,
+              "scaleX": 1,
+              "scaleY": 1,
+              "rotation": 17,
+              "offsetX": 0,
+              "offsetY": 0,
+              "octaves": 6,
+              "persistence": 0.5,
+              "lacunarity": 2.05,
+              "octaveRotation": 36.87,
+              "weightedStrength": 0,
+              "ridgeSharpness": 2,
+              "ridgeSoftness": 0.05,
+              "ridgeGain": 2,
+              "pingPongStrength": 2,
+              "fractalOffset": 0.7,
+              "derivativeWarp": 0.25,
+              "derivativeDamping": 0.8,
+              "cellularMetric": "euclidean",
+              "cellularReturn": "f1",
+              "cellularJitter": 1,
+              "cellularSmoothness": 0.25,
+              "cellularEdgeWidth": 0.15,
+              "gaborFrequency": 2,
+              "gaborBandwidth": 1,
+              "gaborOrientation": 0,
+              "gaborSpread": 15,
+              "gaborDensity": 4,
+              "spotDensity": 0.7,
+              "spotRadius": 0.45,
+              "spotSoftness": 0.5,
+              "craterRim": 0.15,
+              "waveProfile": "sine",
+              "wavePhase": 0,
+              "waveAsymmetry": 0.7,
+              "phaseNoise": 0.35,
+              "warpType": "none",
+              "warpKernel": "opensimplex2s",
+              "warpAmplitude": 0.5,
+              "warpFrequency": 0.7,
+              "warpOctaves": 3,
+              "warpPersistence": 0.5,
+              "warpLacunarity": 2,
+              "warpSeedMode": "derived",
+              "warpSeed": 0,
+              "blackPoint": 0,
+              "whitePoint": 1,
+              "gamma": 1,
+              "contrast": 1,
+              "bias": 0,
+              "invert": false,
+              "curve": "[[0,0],[1,1]]",
+              "amplitude": 1,
+              "offset": 0,
+              "clampOutput": true,
+              "tiling": "off",
+              "sampling": "point",
+              "noiseModel": "v3"
+            }
+          },
+          {
+            "id": "remap",
+            "kind": "remap",
+            "label": "Height remap",
+            "position": {
+              "x": 240,
+              "y": 0
+            },
+            "params": {
+              "contrast": 1.2,
+              "brightness": -0.05,
+              "gamma": 1.15,
+              "clamp": false
+            }
+          },
+          {
+            "id": "terrace",
+            "kind": "terrace",
+            "label": "Terrace",
+            "position": {
+              "x": 480,
+              "y": 0
+            },
+            "params": {
+              "steps": 19,
+              "softness": 0.75
+            }
+          },
+          {
+            "id": "output",
+            "kind": "output",
+            "label": "Terrain output",
+            "position": {
+              "x": 720,
+              "y": 0
+            },
+            "params": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-0",
+            "source": "source",
+            "target": "remap",
+            "sourceHandle": "height",
+            "targetHandle": "in"
+          },
+          {
+            "id": "edge-1",
+            "source": "remap",
+            "target": "terrace",
+            "sourceHandle": "height",
+            "targetHandle": "in"
+          },
+          {
+            "id": "edge-2",
+            "source": "terrace",
+            "target": "output",
+            "sourceHandle": "height",
+            "targetHandle": "in"
+          }
+        ]
+      },
+      "world": {
+        "version": 1,
+        "domain": {
+          "originX": -6000,
+          "originZ": -6000,
+          "width": 12000,
+          "depth": 12000,
+          "cellsX": 8192,
+          "cellsZ": 8192,
+          "heightScale": 1800,
+          "datum": 0,
+          "boundary": "closed"
+        },
+        "tileCells": 256,
+        "globalResolution": 64,
+        "backend": "cpu-reference"
+      }
+    }
+  },
+  "scope": {
+    "export": "Actual World Studio button through production export worker, ACK/backpressure, in-memory Blob download, and completed Playwright download. Each export starts a fresh worker; requested dimensions are samples, not intervals.",
+    "heartbeat": "A renderer main-thread 25 ms timer runs from immediately before the export button action until the download completes. Gaps include UI updates, Blob publication, automation scheduling, and browser/host contention. No universal performance threshold is asserted.",
+    "verification": "Separate Node phase; independent ZIP central-directory/CRC32 and PNG chunk CRC32/zlib/filter decoding, every tile and shared edge. Verification time is excluded from browser export time.",
+    "memory": "Only optional sampled performance.memory renderer heap is measured. Manifest memory values are conservative estimates and are labelled separately.",
+    "limitations": "One simple native CPU graph, height PNG16 only, one run per size. No erosion, global simulations, masks, normals, diagnostics, transport, GPU compute, file-system picker sink, or external engine import is qualified by this profile."
+  },
+  "results": [
+    {
+      "samples": [4096, 4096],
+      "status": "verified",
+      "exportThroughCompletedDownloadMs": 86918.984711,
+      "filename": "world-browser-native-graph-profile-world-4096x4096-generic.zip",
+      "browserObservation": {
+        "elapsedMs": 86923.10000000003,
+        "heartbeat": {
+          "intervalMs": 25,
+          "observedGaps": 3477,
+          "p95GapMs": 25.60000000000582,
+          "maxGapMs": 40.09999999997672,
+          "p95ExcessDelayMs": 0.6000000000058208,
+          "maxExcessDelayMs": 15.099999999976717
+        },
+        "heap": {
+          "available": true,
+          "before": {
+            "usedJSHeapSize": 24500000,
+            "totalJSHeapSize": 42100000,
+            "jsHeapSizeLimit": 3760000000
+          },
+          "after": {
+            "usedJSHeapSize": 24500000,
+            "totalJSHeapSize": 42100000,
+            "jsHeapSizeLimit": 3760000000
+          },
+          "peakSampledUsedJSHeapSizeBytes": 24500000,
+          "samples": 3478,
+          "caveat": "Chromium performance.memory is nonstandard and may be quantized or shared. These sampled renderer JavaScript heap values are not total browser/process memory, worker heap, GPU memory, or a complete allocation peak."
+        }
+      },
+      "archive": {
+        "archiveBytes": 13675986,
+        "archiveSha256": "d97038b24543f631e1aa7a252bf96dea751ecf74086f2bc72b305d3ed663bf2b",
+        "decodedPixelsSha256": "f6477ee54cebc95b164018c2b3c25fb6e5c0eb69b008b97c3f4541c9962bdb53",
+        "decodedHashOrder": "Tile row-major; each tile row-major, big-endian grayscale16; shared samples included.",
+        "verifiedZipEntries": 259,
+        "verifiedPngFiles": 256,
+        "verifiedPngChunks": 768,
+        "filterRowCounts": [0, 65776, 0, 0, 0],
+        "tileGrid": [16, 16],
+        "tileIntervals": 256,
+        "uniqueSamplesCovered": 16777216,
+        "decodedSamplesIncludingBorders": 16900321,
+        "exactSharedEdges": 480,
+        "exactSharedBorderSampleComparisons": 123330,
+        "distinct16BitValues": 65475,
+        "samplesNotRepresentableByReplicated8Bit": 16850227,
+        "encodedRange": [0, 65535],
+        "manifest": {
+          "build": {
+            "revision": "4e0c8cb08ca0531083336016150d748e9098451e",
+            "dirty": false,
+            "source": "git"
+          },
+          "backend": "cpu-reference",
+          "dimensions": {
+            "samples": [4096, 4096],
+            "intervals": [4095, 4095],
+            "widthMeters": 12000,
+            "depthMeters": 12000,
+            "sampleSpacingMeters": [2.93040293040293, 2.93040293040293],
+            "originMeters": [-6000, -6000]
+          },
+          "encoding": {
+            "heightFormat": "png16",
+            "heightUnits": "Metres",
+            "elevationMinMeters": -94.73684281110764,
+            "elevationMaxMeters": 1766.6927576065063,
+            "quantizationStepMeters": 0.028403595031931243,
+            "decode": "elevation_m = elevationMinMeters + uint16/65535 * (elevationMaxMeters-elevationMinMeters). Constant maps decode to the minimum.",
+            "rawByteOrder": "Little endian",
+            "diagnosticUnits": {
+              "flow": "Global normalized diagnostic weight, 0–1; not discharge in physical units.",
+              "wear": "Legacy erosion diagnostic scalar, not measured metres of erosion.",
+              "deposition": "Legacy deposition diagnostic scalar, not measured metres of deposition.",
+              "slope": "Degrees from the physical height gradient; 0–90.",
+              "masks": "Fixed 0–1 scalar weights from authored mask nodes."
+            },
+            "diagnosticRanges": {}
+          },
+          "stages": [
+            {
+              "nodeId": "source",
+              "label": "Native Perlin",
+              "kind": "noise",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/noise/v3",
+              "samplesX": 4096,
+              "samplesZ": 4096,
+              "spacingX": 2.93040293040293,
+              "spacingZ": 2.93040293040293,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            },
+            {
+              "nodeId": "remap",
+              "label": "Height remap",
+              "kind": "remap",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/remap/reference",
+              "samplesX": 4096,
+              "samplesZ": 4096,
+              "spacingX": 2.93040293040293,
+              "spacingZ": 2.93040293040293,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            },
+            {
+              "nodeId": "terrace",
+              "label": "Terrace",
+              "kind": "terrace",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/terrace/reference",
+              "samplesX": 4096,
+              "samplesZ": 4096,
+              "spacingX": 2.93040293040293,
+              "spacingZ": 2.93040293040293,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            },
+            {
+              "nodeId": "output",
+              "label": "Terrain output",
+              "kind": "output",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/output/reference",
+              "samplesX": 4096,
+              "samplesZ": 4096,
+              "spacingX": 2.93040293040293,
+              "spacingZ": 2.93040293040293,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            }
+          ],
+          "memoryEstimate": {
+            "archiveBytes": 37453380,
+            "peakBytes": 149241832,
+            "retainedArchiveBytes": 74906760,
+            "tileCount": 256,
+            "tileIntervals": 256,
+            "sampleCountIncludingBorders": 16900321,
+            "budgetBytes": 536870912
+          },
+          "approximation": "Reachable graph sampled at the requested coordinates and footprint; no preview upscaling."
+        }
+      },
+      "independentVerificationMs": 1073.239314999999
+    },
+    {
+      "samples": [8192, 8192],
+      "status": "verified",
+      "exportThroughCompletedDownloadMs": 345093.386449,
+      "filename": "world-browser-native-graph-profile-world-8192x8192-generic.zip",
+      "browserObservation": {
+        "elapsedMs": 345100.7,
+        "heartbeat": {
+          "intervalMs": 25,
+          "observedGaps": 13803,
+          "p95GapMs": 25.199999999953434,
+          "maxGapMs": 54,
+          "p95ExcessDelayMs": 0.19999999995343387,
+          "maxExcessDelayMs": 29
+        },
+        "heap": {
+          "available": true,
+          "before": {
+            "usedJSHeapSize": 24500000,
+            "totalJSHeapSize": 42100000,
+            "jsHeapSizeLimit": 3760000000
+          },
+          "after": {
+            "usedJSHeapSize": 24500000,
+            "totalJSHeapSize": 42100000,
+            "jsHeapSizeLimit": 3760000000
+          },
+          "peakSampledUsedJSHeapSizeBytes": 24500000,
+          "samples": 13804,
+          "caveat": "Chromium performance.memory is nonstandard and may be quantized or shared. These sampled renderer JavaScript heap values are not total browser/process memory, worker heap, GPU memory, or a complete allocation peak."
+        }
+      },
+      "archive": {
+        "archiveBytes": 32290121,
+        "archiveSha256": "a376416d68241e0d6b79a757001160541ef24987e3eb5c273c1af9b46238dca1",
+        "decodedPixelsSha256": "6e6850f7cb3a40145f334ce0222ba48077b061166a4a050e4a3d677bc95a16c0",
+        "decodedHashOrder": "Tile row-major; each tile row-major, big-endian grayscale16; shared samples included.",
+        "verifiedZipEntries": 1027,
+        "verifiedPngFiles": 1024,
+        "verifiedPngChunks": 3072,
+        "filterRowCounts": [0, 263136, 0, 0, 0],
+        "tileGrid": [32, 32],
+        "tileIntervals": 256,
+        "uniqueSamplesCovered": 67108864,
+        "decodedSamplesIncludingBorders": 67617729,
+        "exactSharedEdges": 1984,
+        "exactSharedBorderSampleComparisons": 509826,
+        "distinct16BitValues": 65536,
+        "samplesNotRepresentableByReplicated8Bit": 67415915,
+        "encodedRange": [0, 65535],
+        "manifest": {
+          "build": {
+            "revision": "4e0c8cb08ca0531083336016150d748e9098451e",
+            "dirty": false,
+            "source": "git"
+          },
+          "backend": "cpu-reference",
+          "dimensions": {
+            "samples": [8192, 8192],
+            "intervals": [8191, 8191],
+            "widthMeters": 12000,
+            "depthMeters": 12000,
+            "sampleSpacingMeters": [1.4650225857648638, 1.4650225857648638],
+            "originMeters": [-6000, -6000]
+          },
+          "encoding": {
+            "heightFormat": "png16",
+            "heightUnits": "Metres",
+            "elevationMinMeters": -94.73684281110764,
+            "elevationMaxMeters": 1766.6956543922424,
+            "quantizationStepMeters": 0.02840363923404822,
+            "decode": "elevation_m = elevationMinMeters + uint16/65535 * (elevationMaxMeters-elevationMinMeters). Constant maps decode to the minimum.",
+            "rawByteOrder": "Little endian",
+            "diagnosticUnits": {
+              "flow": "Global normalized diagnostic weight, 0–1; not discharge in physical units.",
+              "wear": "Legacy erosion diagnostic scalar, not measured metres of erosion.",
+              "deposition": "Legacy deposition diagnostic scalar, not measured metres of deposition.",
+              "slope": "Degrees from the physical height gradient; 0–90.",
+              "masks": "Fixed 0–1 scalar weights from authored mask nodes."
+            },
+            "diagnosticRanges": {}
+          },
+          "stages": [
+            {
+              "nodeId": "source",
+              "label": "Native Perlin",
+              "kind": "noise",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/noise/v3",
+              "samplesX": 8192,
+              "samplesZ": 8192,
+              "spacingX": 1.4650225857648638,
+              "spacingZ": 1.4650225857648638,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            },
+            {
+              "nodeId": "remap",
+              "label": "Height remap",
+              "kind": "remap",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/remap/reference",
+              "samplesX": 8192,
+              "samplesZ": 8192,
+              "spacingX": 1.4650225857648638,
+              "spacingZ": 1.4650225857648638,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            },
+            {
+              "nodeId": "terrace",
+              "label": "Terrace",
+              "kind": "terrace",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/terrace/reference",
+              "samplesX": 8192,
+              "samplesZ": 8192,
+              "spacingX": 1.4650225857648638,
+              "spacingZ": 1.4650225857648638,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            },
+            {
+              "nodeId": "output",
+              "label": "Terrain output",
+              "kind": "output",
+              "scope": "pointwise",
+              "mode": "native",
+              "backend": "cpu-reference",
+              "algorithmVersion": "world-1/output/reference",
+              "samplesX": 8192,
+              "samplesZ": 8192,
+              "spacingX": 1.4650225857648638,
+              "spacingZ": 1.4650225857648638,
+              "simulationResolution": null,
+              "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+            }
+          ],
+          "memoryEstimate": {
+            "archiveBytes": 143555446,
+            "peakBytes": 361445964,
+            "retainedArchiveBytes": 287110892,
+            "tileCount": 1024,
+            "tileIntervals": 256,
+            "sampleCountIncludingBorders": 67617729,
+            "budgetBytes": 536870912
+          },
+          "approximation": "Reachable graph sampled at the requested coordinates and footprint; no preview upscaling."
+        }
+      },
+      "independentVerificationMs": 2332.1510699999635
+    }
+  ],
+  "browserEnvironment": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.8127.18 Safari/537.36",
+    "hardwareConcurrency": 4,
+    "deviceMemoryGiB": 16,
+    "devicePixelRatio": 1,
+    "visibilityState": "visible"
+  },
+  "cancellation": {
+    "requestedSamples": [8192, 8192],
+    "observedPhase": "Measuring common elevation range · tile 1/1024",
+    "elapsedUntilCancelledMs": 779.098562000001,
+    "cancelActionThroughVisibleStatusMs": 46.0145420000008,
+    "lastCompletePreviewSha256": "bef26ba973283f188a90cb7274112b770f9dac4e57ccd293ec5d2620d8a02c5d",
+    "retainedPreviewSha256": "bef26ba973283f188a90cb7274112b770f9dac4e57ccd293ec5d2620d8a02c5d",
+    "retainedCompletePreview": true,
+    "downloadsImmediatelyAfterCancel": 0,
+    "observation": "The cancelled run is followed by two full exports; no cancelled/stale download may appear during either run."
+  },
+  "noStaleDownloadAfterCancellation": true,
+  "finishedAt": "2026-11-24T23:22:44.916Z",
+  "observedDownloads": [
+    "world-browser-native-graph-profile-world-4096x4096-generic.zip",
+    "world-browser-native-graph-profile-world-8192x8192-generic.zip"
+  ],
+  "pageErrors": []
+}

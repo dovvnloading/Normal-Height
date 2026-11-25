@@ -3,13 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { buildGroundApron, TERRAIN_SIZE } from './GroundExtension';
 import { skyLighting } from './Atmosphere';
 import type { HeightField, TerrainProject, ViewSettings } from '../model/types';
+import { DEFAULT_VIEW_SETTINGS } from '../model/viewSettings';
 
 const settings: ViewSettings = {
-  material: 'pbr', nearFieldDetail: true, meshQuality: 'high', sunAzimuth: 315, sunElevation: 38, exaggeration: 1,
-  contours: false, wireframe: false, autoRotate: false,
-  skyEnabled: true, skyTurbidity: 4.5, skyRayleigh: 2.2, skyExposure: 1,
-  cloudCoverage: 0.42, cloudSpeed: 0.35, cloudShadowStrength: 0.72,
-  expandGround: false, groundReach: 5,
+  ...DEFAULT_VIEW_SETTINGS,
+  skyEnabled: true,
 };
 
 function flatField(height: number): HeightField {

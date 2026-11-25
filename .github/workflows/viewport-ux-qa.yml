@@ -5,13 +5,26 @@ on:
     branches: [main]
     paths:
       - 'src/components/TerrainViewport.*'
+      - 'src/components/PaintWorkspace.*'
+      - 'src/components/MaterialBrush.tsx'
+      - 'src/hooks/useBrushInput.ts'
+      - 'src/materials/brush*'
+      - 'src/materials/paint*'
+      - 'src/materials/materialPaint*'
+      - 'src/render/brushFeedback*'
+      - 'src/render/materialBrushOverlay.ts'
       - 'src/render/TerrainScene.ts'
+      - 'src/render/WaterSurface.ts'
+      - 'src/render/water.ts'
+      - 'tests/e2e/water.spec.ts'
       - 'src/render/terrainMesh.ts'
       - 'src/render/terrainDisplacement.ts'
       - 'src/render/compare.worker.ts'
       - 'src/model/viewportUX*'
       - 'src/App.tsx'
       - 'tests/e2e/viewport-ux.spec.ts'
+      - 'tests/e2e/painting-studio.spec.ts'
+      - 'tests/e2e/helpers/viewport-screenshot.ts'
       - 'tests/e2e/subpoly-displacement.spec.ts'
       - '.github/workflows/viewport-ux-qa.yml'
   workflow_dispatch:
@@ -25,9 +38,19 @@ concurrency:
 
 jobs:
   viewport:
-    name: Browser interaction and layout
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: viewport
+            name: Browser interaction and layout
+            specs: tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts tests/e2e/water.spec.ts
+          - suite: painting
+            name: Painting studio acceptance
+            specs: tests/e2e/painting-studio.spec.ts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -38,13 +61,13 @@ jobs:
       - run: npm run build
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
-      - name: Verify viewport interactions and displaced silhouettes
-        run: npx playwright test tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts --workers=1
+      - name: Verify browser interactions
+        run: npx playwright test ${{ matrix.specs }} --workers=1
       - name: Save screenshots, traces and browser report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: viewport-ux-evidence
+          name: viewport-ux-evidence-${{ matrix.suite }}
           path: |
             test-results/
             playwright-report/

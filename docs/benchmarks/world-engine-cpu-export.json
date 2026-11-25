@@ -1,0 +1,355 @@
+{
+  "createdAt": "2026-11-24T22:37:10.125Z",
+  "runtime": "v24.22.3",
+  "system": "linux 6.18.57",
+  "cpu": "AMD EPYC 9V74 80-Core Processor",
+  "backend": "cpu-reference",
+  "measurement": "Node/Vite SSR execution. Process RSS includes the runtime, compiler and fixture verification; not browser heap or GPU memory.",
+  "fixture": {
+    "project": {
+      "version": 1,
+      "name": "World native graph benchmark",
+      "seed": 24062,
+      "resolution": 256,
+      "worldSize": 12000,
+      "heightScale": 1800,
+      "presetId": "custom",
+      "graph": {
+        "nodes": [
+          {
+            "id": "source",
+            "kind": "noise",
+            "label": "Procedural noise",
+            "position": {
+              "x": 0,
+              "y": 0
+            },
+            "params": {
+              "kernel": "perlin",
+              "fractal": "none",
+              "seedMode": "linked",
+              "seed": 713,
+              "seedText": "",
+              "seedLocked": false,
+              "lockedSeed": 0,
+              "scaleMode": "tile",
+              "scale": 8.4,
+              "featureSize": 1000,
+              "scaleX": 1,
+              "scaleY": 1,
+              "rotation": 17,
+              "offsetX": 0,
+              "offsetY": 0,
+              "octaves": 6,
+              "persistence": 0.5,
+              "lacunarity": 2.05,
+              "octaveRotation": 36.87,
+              "weightedStrength": 0,
+              "ridgeSharpness": 2,
+              "ridgeSoftness": 0.05,
+              "ridgeGain": 2,
+              "pingPongStrength": 2,
+              "fractalOffset": 0.7,
+              "derivativeWarp": 0.25,
+              "derivativeDamping": 0.8,
+              "cellularMetric": "euclidean",
+              "cellularReturn": "f1",
+              "cellularJitter": 1,
+              "cellularSmoothness": 0.25,
+              "cellularEdgeWidth": 0.15,
+              "gaborFrequency": 2,
+              "gaborBandwidth": 1,
+              "gaborOrientation": 0,
+              "gaborSpread": 15,
+              "gaborDensity": 4,
+              "spotDensity": 0.7,
+              "spotRadius": 0.45,
+              "spotSoftness": 0.5,
+              "craterRim": 0.15,
+              "waveProfile": "sine",
+              "wavePhase": 0,
+              "waveAsymmetry": 0.7,
+              "phaseNoise": 0.35,
+              "warpType": "none",
+              "warpKernel": "opensimplex2s",
+              "warpAmplitude": 0.5,
+              "warpFrequency": 0.7,
+              "warpOctaves": 3,
+              "warpPersistence": 0.5,
+              "warpLacunarity": 2,
+              "warpSeedMode": "derived",
+              "warpSeed": 0,
+              "blackPoint": 0,
+              "whitePoint": 1,
+              "gamma": 1,
+              "contrast": 1,
+              "bias": 0,
+              "invert": false,
+              "curve": "[[0,0],[1,1]]",
+              "amplitude": 1,
+              "offset": 0,
+              "clampOutput": true,
+              "tiling": "off",
+              "sampling": "point",
+              "noiseModel": "v3"
+            }
+          },
+          {
+            "id": "remap",
+            "kind": "remap",
+            "label": "Height remap",
+            "position": {
+              "x": 200,
+              "y": 0
+            },
+            "params": {
+              "contrast": 1.2,
+              "brightness": -0.05,
+              "gamma": 1.15,
+              "clamp": false
+            }
+          },
+          {
+            "id": "terrace",
+            "kind": "terrace",
+            "label": "Terrace",
+            "position": {
+              "x": 400,
+              "y": 0
+            },
+            "params": {
+              "steps": 19,
+              "softness": 0.75
+            }
+          },
+          {
+            "id": "output",
+            "kind": "output",
+            "label": "Terrain output",
+            "position": {
+              "x": 600,
+              "y": 0
+            },
+            "params": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge-0",
+            "source": "source",
+            "target": "remap",
+            "sourceHandle": "height",
+            "targetHandle": "in"
+          },
+          {
+            "id": "edge-1",
+            "source": "remap",
+            "target": "terrace",
+            "sourceHandle": "height",
+            "targetHandle": "in"
+          },
+          {
+            "id": "edge-2",
+            "source": "terrace",
+            "target": "output",
+            "sourceHandle": "height",
+            "targetHandle": "in"
+          }
+        ]
+      }
+    },
+    "world": {
+      "version": 1,
+      "domain": {
+        "originX": -6000,
+        "originZ": -6000,
+        "width": 12000,
+        "depth": 12000,
+        "cellsX": 8192,
+        "cellsZ": 8192,
+        "heightScale": 1800,
+        "datum": 0,
+        "boundary": "closed"
+      },
+      "tileCells": 256,
+      "globalResolution": 64,
+      "backend": "cpu-reference"
+    }
+  },
+  "results": [
+    {
+      "samples": [4096, 4096],
+      "elapsedMs": 33003.933516000005,
+      "archiveBytes": 13675701,
+      "peakProcessRSSBytes": 495984640,
+      "peakHeapBytes": 65185440,
+      "estimate": {
+        "archiveBytes": 37453380,
+        "peakBytes": 74335072,
+        "retainedArchiveBytes": 0,
+        "tileCount": 256,
+        "tileIntervals": 256,
+        "sampleCountIncludingBorders": 16900321,
+        "budgetBytes": 536870912
+      },
+      "verificationMs": 422.76606499999616,
+      "verifiedFiles": 256,
+      "decodedSamples": 16900321,
+      "sharedEdgeComparisons": 123330,
+      "exactGridReassembled": true,
+      "allStageModes": ["native"],
+      "stages": [
+        {
+          "nodeId": "source",
+          "label": "Procedural noise",
+          "kind": "noise",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/noise/v3",
+          "samplesX": 4096,
+          "samplesZ": 4096,
+          "spacingX": 2.93040293040293,
+          "spacingZ": 2.93040293040293,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        },
+        {
+          "nodeId": "remap",
+          "label": "Height remap",
+          "kind": "remap",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/remap/reference",
+          "samplesX": 4096,
+          "samplesZ": 4096,
+          "spacingX": 2.93040293040293,
+          "spacingZ": 2.93040293040293,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        },
+        {
+          "nodeId": "terrace",
+          "label": "Terrace",
+          "kind": "terrace",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/terrace/reference",
+          "samplesX": 4096,
+          "samplesZ": 4096,
+          "spacingX": 2.93040293040293,
+          "spacingZ": 2.93040293040293,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        },
+        {
+          "nodeId": "output",
+          "label": "Terrain output",
+          "kind": "output",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/output/reference",
+          "samplesX": 4096,
+          "samplesZ": 4096,
+          "spacingX": 2.93040293040293,
+          "spacingZ": 2.93040293040293,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        }
+      ],
+      "elevationMinMeters": -94.73684281110764,
+      "elevationMaxMeters": 1766.6927576065063,
+      "quantizationStepMeters": 0.028403595031931243
+    },
+    {
+      "samples": [8192, 8192],
+      "elapsedMs": 148248.61913799998,
+      "archiveBytes": 32289835,
+      "peakProcessRSSBytes": 569421824,
+      "peakHeapBytes": 79167152,
+      "estimate": {
+        "archiveBytes": 143555446,
+        "peakBytes": 74335072,
+        "retainedArchiveBytes": 0,
+        "tileCount": 1024,
+        "tileIntervals": 256,
+        "sampleCountIncludingBorders": 67617729,
+        "budgetBytes": 536870912
+      },
+      "verificationMs": 1887.957414000004,
+      "verifiedFiles": 1024,
+      "decodedSamples": 67617729,
+      "sharedEdgeComparisons": 509826,
+      "exactGridReassembled": true,
+      "allStageModes": ["native"],
+      "stages": [
+        {
+          "nodeId": "source",
+          "label": "Procedural noise",
+          "kind": "noise",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/noise/v3",
+          "samplesX": 8192,
+          "samplesZ": 8192,
+          "spacingX": 1.4650225857648638,
+          "spacingZ": 1.4650225857648638,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        },
+        {
+          "nodeId": "remap",
+          "label": "Height remap",
+          "kind": "remap",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/remap/reference",
+          "samplesX": 8192,
+          "samplesZ": 8192,
+          "spacingX": 1.4650225857648638,
+          "spacingZ": 1.4650225857648638,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        },
+        {
+          "nodeId": "terrace",
+          "label": "Terrace",
+          "kind": "terrace",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/terrace/reference",
+          "samplesX": 8192,
+          "samplesZ": 8192,
+          "spacingX": 1.4650225857648638,
+          "spacingZ": 1.4650225857648638,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        },
+        {
+          "nodeId": "output",
+          "label": "Terrain output",
+          "kind": "output",
+          "scope": "pointwise",
+          "mode": "native",
+          "backend": "cpu-reference",
+          "algorithmVersion": "world-1/output/reference",
+          "samplesX": 8192,
+          "samplesZ": 8192,
+          "spacingX": 1.4650225857648638,
+          "spacingZ": 1.4650225857648638,
+          "simulationResolution": null,
+          "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+        }
+      ],
+      "elevationMinMeters": -94.73684281110764,
+      "elevationMaxMeters": 1766.6956543922424,
+      "quantizationStepMeters": 0.02840363923404822
+    }
+  ]
+}

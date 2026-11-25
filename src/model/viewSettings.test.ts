@@ -20,6 +20,9 @@ describe('versioned preview settings', () => {
     expect(settings.nearFieldDetail).toBe(false);
     expect(settings.exaggeration).toBe(1.8);
     expect(settings.sunAzimuth).toBe(DEFAULT_VIEW_SETTINGS.sunAzimuth);
+    expect(settings.waterEnabled).toBe(false);
+    expect(settings.waterHorizon).toBe(true);
+    expect(settings.waterLevelMode).toBe('coast');
   });
 
   it('clamps malformed numeric settings and drops unknown keys', () => {
@@ -32,6 +35,14 @@ describe('versioned preview settings', () => {
       grassDensity: 100000,
       nearFieldDetail: 'false',
       material: 'unrecognized',
+      waterEnabled: 'true',
+      waterHorizon: 'true',
+      waterLevelMode: 'invalid',
+      waterPalette: 'rainbow',
+      waterWaveHeight: 120,
+      waterLevel: -90000,
+      waterClarity: -3,
+      waterSpeed: Infinity,
       __proto__: { pollution: true },
     });
     expect(settings.skyEnabled).toBe(false);
@@ -43,6 +54,13 @@ describe('versioned preview settings', () => {
     expect('grassDensity' in settings).toBe(false);
     expect(settings.material).toBe('pbr');
     expect(settings.nearFieldDetail).toBe(true);
+    expect(settings.waterEnabled).toBe(false);
+    expect(settings.waterLevelMode).toBe('coast');
+    expect(settings.waterPalette).toBe('lagoon');
+    expect(settings.waterWaveHeight).toBe(5);
+    expect(settings.waterLevel).toBe(-12000);
+    expect(settings.waterClarity).toBe(0);
+    expect(settings.waterSpeed).toBe(DEFAULT_VIEW_SETTINGS.waterSpeed);
     expect(Object.keys(settings)).toEqual(Object.keys(DEFAULT_VIEW_SETTINGS));
     expect(parseViewSettings(null)).toEqual(DEFAULT_VIEW_SETTINGS);
   });

@@ -1,20 +1,16 @@
+import { crc32 } from '../model/pngCrc';
 import { zlibSync, zipSync, strToU8 } from 'fflate';
 import { normalMapPixels, colorizeMap } from '../render/maps';
 import { generatePBR, pbrPixels, SPLAT_LAYERS, resolveSurface, AO_RADII_METERS } from '../materials/pbr';
 import type { PBRChannel } from '../materials/pbr';
 import type { HeightField, TerrainProject } from '../model/types';
 import { slug } from '../model/project';
+import { serializeProjectFile } from '../model/projectStorage';
+import { listMaskOutputs } from './maskOutputs';
 import { isSinglePBRExportFormat } from './budget';
+import { getPaintLayers, getPaintStrokes } from '../materials/paintLayers';
 
 const encoder = new TextEncoder();
-function crc32(data: Uint8Array) {
-  let crc = 0xffffffff;
-  for (const byte of data) {
-    crc ^= byte;
-    for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
 function chunk(type: string, data: Uint8Array) {
   const result = new Uint8Array(data.length + 12);
   const view = new DataView(result.buffer);
@@ -98,7 +94,7 @@ export function encodeRawHeight(field: HeightField, heightScale: number) {
     view.setFloat32(i * 4, field.height[i] * heightScale, true);
   return bytes;
 }
-export type ExportFormat = 'png16' | 'raw32' | 'normal' | 'flow' | 'wear' | 'deposition'
+export type ExportFormat = 'png16' | 'mask16' | 'raw32' | 'normal' | 'flow' | 'wear' | 'deposition'
   | 'pbr' | 'basecolor' | 'roughness' | 'ao' | 'metallic' | 'orm'
   | 'splat' | 'curvature' | 'normalGL' | 'normalDX' | 'detailNormal';
 export function makeExport(
@@ -106,9 +102,41 @@ export function makeExport(
   project: TerrainProject,
   format: ExportFormat,
   bundle: boolean,
+  outputNodeId?: string,
 ) {
   const name = slug(project.name);
   const range = heightRange(field.height);
+  if (format === 'mask16') {
+    const mask = listMaskOutputs(project.graph).find((item) => item.id === outputNodeId);
+    if (!mask?.input) throw new Error('Choose a connected Mask output to export.');
+    const prefix = `${name}-${field.resolution}-${mask.stem}-mask16`;
+    const filename = prefix + '.png';
+    const bytes = encodeHeightPNG(field, { min: 0, max: 1 });
+    if (!bundle) return { bytes, filename, mime: 'image/png' };
+    const metadata = {
+      application: 'Normal Height',
+      version: 1,
+      format,
+      filename,
+      outputNodeId: mask.id,
+      outputName: mask.label,
+      sourceNodeId: mask.input.source,
+      sourceHandle: mask.input.sourceHandle || 'height',
+      maskEncoding: 'Linear unsigned 16-bit grayscale. Weight = sample / 65535. Input is clamped to [0, 1].',
+      colorSpace: 'linear-non-color',
+      resolution: [field.resolution, field.resolution],
+      worldSizeMeters: [project.worldSize, project.worldSize],
+      sampleSpacingMeters: project.worldSize / (field.resolution - 1),
+      orientation: 'Row-major, first row is north (negative Z). X increases east/right.',
+      seed: project.seed,
+    };
+    const files = {
+      [filename]: bytes,
+      [prefix + '-metadata.json']: strToU8(JSON.stringify(metadata, null, 2)),
+      [name + '.nhterrain.json']: strToU8(serializeProjectFile({ ...project, resolution: field.resolution })),
+    };
+    return { bytes: zipSync(files, { level: 0 }), filename: prefix + '.zip', mime: 'application/zip' };
+  }
   if (format === 'pbr') {
     const maps = generatePBR(field, project);
     const reliefRange = heightRange(maps.detail);
@@ -144,7 +172,8 @@ export function makeExport(
         minMeters: reliefRange.min, maxMeters: reliefRange.max,
         decoding: 'vertical relief in meters = minMeters + sample/65535 * (maxMeters-minMeters)',
       },
-      paintedStrokes: project.materialPaint?.length ?? 0,
+      paintedStrokes: getPaintStrokes(project).length,
+      paintLayers: getPaintLayers(project).map(({ id, name, visible, opacity }) => ({ id, name, visible, opacity })),
       terrainAnalysis: {
         slope: 'Physical gradient in meters per meter; slope exposed in degrees',
         landform: 'Signed plane-corrected multi-radius height residual: positive valley / negative crest',
@@ -190,7 +219,7 @@ export function makeExport(
       [prefix + '-unity-hdrp-mask.png']: png('unityMask'),
       [name + '-material-metadata.json']: strToU8(JSON.stringify(metadata, null, 2)),
       [name + '.nhterrain.json']: strToU8(
-        JSON.stringify({ ...project, surface: resolveSurface(project.surface), resolution: field.resolution }, null, 2),
+        serializeProjectFile({ ...project, surface: resolveSurface(project.surface), resolution: field.resolution }),
       ),
     };
     // PNG files are already compressed: storing them in ZIP avoids a second
@@ -277,7 +306,7 @@ export function makeExport(
           [filename]: bytes,
           [`${name}-metadata.json`]: strToU8(JSON.stringify(metadata, null, 2)),
           [`${name}.nhterrain.json`]: strToU8(
-            JSON.stringify(resolvedProject, null, 2),
+            serializeProjectFile(resolvedProject),
           ),
         },
         { level: 6 },

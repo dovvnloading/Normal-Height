@@ -19,11 +19,14 @@ import { sampleSpline } from '../model/splines';
 import type { SplinePoint } from '../model/splines';
 import { Atmosphere, skyLighting } from './Atmosphere';
 import { GroundExtension, TERRAIN_SIZE } from './GroundExtension';
+import { WaterSurface } from './WaterSurface';
+import { resolveWaterLevelMeters } from './water';
 import { updatePreviewTexture } from './pbrTexture';
 import { applyPackedPBRMaterial } from './pbrMaterial';
 import { createTerrainPicker } from './terrainPicking';
 import { MaterialBrushOverlay } from './materialBrushOverlay';
-import type { BrushFeedback } from './brushFeedback';
+import type { BrushFeedback, LiveBrushPreview } from './brushFeedback';
+import { getPaintStrokes } from '../materials/paintLayers';
 import { geometryBufferBytes } from './meshDiagnostics';
 
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
@@ -87,6 +90,9 @@ export class TerrainScene {
   // Software WebGL and 2D-only sessions should pay no GPU setup cost.
   private atmosphere: Atmosphere | null = null;
   private groundExtension: GroundExtension | null = null;
+  private water: WaterSurface | null = null;
+  private lastWaterFrame = 0;
+  private waterFrameInterval = 1 / 30;
   private theme: 'light' | 'dark' = 'light';
   private readonly floor: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
   private readonly grid: THREE.GridHelper;
@@ -164,6 +170,9 @@ export class TerrainScene {
   private readonly onContextLost: (event: Event) => void;
   private brush: BrushFeedback | null = null;
   private brushOverlay: MaterialBrushOverlay | null = null;
+  private brushUnsubscribe: (() => void) | null = null;
+  private releaseBrushConsumer: (() => void) | null = null;
+  private brushPreview: LiveBrushPreview | null = null;
   private pickSurface: ReturnType<typeof createTerrainPicker> | null = null;
   private readonly inverseTerrain = new THREE.Matrix4();
   private readonly localRay = new THREE.Ray();
@@ -203,6 +212,14 @@ export class TerrainScene {
   }
 
   setMaterialBrush(feedback: BrushFeedback | null) {
+    this.brushUnsubscribe?.();
+    this.releaseBrushConsumer?.();
+    this.brushUnsubscribe = null;
+    this.releaseBrushConsumer = null;
+    if (this.brushPreview) this.applySurfaceMaterial();
+    this.brushPreview = null;
+    this.renderer.domElement.dataset.brushPreviewStatus = 'idle';
+    this.renderer.domElement.dataset.brushPreviewResolution = '0';
     this.brush = feedback;
     this.brushOverlay?.dispose();
     this.brushOverlay = null;
@@ -212,7 +229,34 @@ export class TerrainScene {
       });
       this.terrain.add(this.brushOverlay.mesh);
     }
+    if (feedback) {
+      this.releaseBrushConsumer = feedback.registerConsumer('scene');
+      this.brushUnsubscribe = feedback.subscribe(() => {
+        const preview = feedback.liveFor('scene');
+        if (preview === this.brushPreview) return;
+        this.brushPreview = preview;
+        this.applySurfaceMaterial(preview ?? undefined);
+        this.renderer.domElement.dataset.brushPreviewStatus = preview ? 'live' : 'idle';
+        this.renderer.domElement.dataset.brushPreviewResolution = String(preview?.field.resolution ?? 0);
+        this.needsRender = true;
+      });
+    }
+    this.renderer.domElement.setAttribute('aria-label', feedback
+      ? 'Interactive 3D terrain. Drag to paint. Hold Space to orbit, Alt-click to sample a material. Right-drag to pan, scroll to zoom.'
+      : 'Interactive 3D terrain. Drag to orbit, right-drag to pan, scroll to zoom.');
     this.needsRender = true;
+  }
+
+  /** Convert a screen-sized radius to the tile plane at the actual cursor hit. */
+  brushRadiusAt(clientX: number, clientY: number, pixels: number): number {
+    const center = this.pickPoint(clientX, clientY);
+    if (center) {
+      for (const [dx, dy] of [[pixels, 0], [-pixels, 0], [0, pixels], [0, -pixels]]) {
+        const edge = this.pickPoint(clientX + dx, clientY + dy);
+        if (edge) return Math.max(0.0001, Math.min(0.5, Math.hypot(edge.u - center.u, edge.v - center.v)));
+      }
+    }
+    return Math.max(0.0001, Math.min(0.5, pixels / Math.max(1, this.renderer.domElement.clientWidth)));
   }
 
   /** Height on the displayed triangles in scene units, including exaggeration. */
@@ -311,6 +355,7 @@ export class TerrainScene {
     this.renderer.domElement.dataset.projection = 'perspective';
     this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
+    this.renderer.domElement.dataset.waterStatus = 'inactive';
     if (this.meshBenchmark) {
       const gl = this.renderer.getContext();
       this.gpuTimer = gl.getExtension('EXT_disjoint_timer_query_webgl2');
@@ -596,8 +641,11 @@ export class TerrainScene {
     // software devices. User actions are never throttled.
     const weatherFrame = weatherMoves &&
       seconds - this.lastWeatherFrame >= this.weatherInterval;
-    if (this.needsRender || this.controls.autoRotate || weatherFrame) {
+    const waterFrame = !!this.water && this.settings.waterSpeed > 0 &&
+      seconds - this.lastWaterFrame >= this.waterFrameInterval;
+    if (this.needsRender || this.controls.autoRotate || weatherFrame || waterFrame) {
       const started = performance.now();
+      this.water?.setTime(seconds, this.settings.waterSpeed);
       const gl = this.meshBenchmark && this.gpuTimer
         ? this.renderer.getContext() as WebGL2RenderingContext : null;
       let gpuQuery: WebGLQuery | null = null;
@@ -627,6 +675,14 @@ export class TerrainScene {
         this.renderer.domElement.dataset.pbrFirstRenderMs =
           (performance.now() - started).toFixed(2);
         this.measurePBRFirstRender = false;
+      }
+      if (waterFrame) {
+        this.lastWaterFrame = seconds;
+        this.waterFrameInterval = THREE.MathUtils.lerp(
+          this.waterFrameInterval,
+          THREE.MathUtils.clamp((performance.now() - started) / 1000 * 4.3, 1 / 30, 1 / 10),
+          0.20,
+        );
       }
       if (weatherFrame) {
         const finished = performance.now();
@@ -763,6 +819,25 @@ export class TerrainScene {
     this.needsRender = true;
   }
 
+  /** Lazily allocate water only when enabled and a completed field is available. */
+  private syncWater() {
+    const monitor = this.renderer.domElement.dataset;
+    if (!this.settings.waterEnabled || !this.field || !this.project) {
+      this.water?.dispose();
+      this.water = null;
+      monitor.waterStatus = 'inactive';
+      delete monitor.waterLevelMeters;
+      return;
+    }
+    this.water ??= new WaterSurface(this.scene);
+    this.water.update(this.field, this.project, this.settings);
+    monitor.waterStatus = 'ready';
+    monitor.waterLevelMeters = resolveWaterLevelMeters(
+      this.project, this.settings, this.field,
+    ).toFixed(2);
+    this.needsRender = true;
+  }
+
   applySettings(settings: ViewSettings) {
     const paletteChanged = this.settings.material !== settings.material;
     const scaleChanged = this.settings.exaggeration !== settings.exaggeration;
@@ -797,6 +872,7 @@ export class TerrainScene {
     if (this.terrain) this.terrain.scale.y = settings.exaggeration;
     if (this.skirt) this.skirt.scale.y = settings.exaggeration;
     this.updateSupport();
+    this.syncWater();
     if (settings.expandGround) {
       this.groundExtension ??= new GroundExtension(this.scene, this.renderer);
       this.groundExtension.update(this.field, this.project, settings, this.minimumElevation, this.terrain);
@@ -1065,6 +1141,7 @@ export class TerrainScene {
     this.skirt.receiveShadow = true;
     this.scene.add(this.skirt);
     this.updateSupport();
+    this.syncWater();
     this.setInspection(this.hoverPoint, this.pinnedPoints);
     this.rebuildSplineGuide();
     this.groundExtension?.update(
@@ -1170,6 +1247,7 @@ export class TerrainScene {
       // both the signed relief and the weights for the new surface.
       if (this.field === field && this.project &&
           this.project.materialPaint === project.materialPaint &&
+          this.project.paintLayers === project.paintLayers &&
           displacementSettings(this.project) === displacementSettings(project)) {
         this.project = project;
         this.surfaceMaps = maps;
@@ -1187,11 +1265,16 @@ export class TerrainScene {
   }
 
   private finishSurface() {
+    this.brushPreview = null;
     this.applySurfaceMaterial();
     const monitor = this.renderer.domElement.dataset;
     monitor.displacementStatus = 'ready';
     monitor.materialStatus = this.settings.material === 'pbr' ? 'ready' : 'inactive';
-    this.brush?.baked(this.project!.materialPaint);
+    // finishSurface has already cleared brushPreview. Publish that transition
+    // explicitly: the subscriber skips equal (null) previews on acknowledgment.
+    monitor.brushPreviewStatus = 'idle';
+    monitor.brushPreviewResolution = '0';
+    this.brush?.baked(getPaintStrokes(this.project!), 'scene');
     this.needsRender = true;
   }
 
@@ -1207,8 +1290,10 @@ export class TerrainScene {
   }
 
   /** Upload textures only for PBR. Other palettes share the displaced geometry. */
-  private applySurfaceMaterial() {
-    const field = this.field, project = this.project, maps = this.surfaceMaps;
+  private applySurfaceMaterial(previewOverride?: LiveBrushPreview) {
+    const field = previewOverride?.field ?? this.field,
+      project = previewOverride?.project ?? this.project,
+      maps = previewOverride?.maps ?? this.surfaceMaps;
     if (!field || !project || !maps) return;
     const monitor = this.renderer.domElement.dataset;
     if (this.settings.material !== 'pbr') {
@@ -1412,6 +1497,8 @@ export class TerrainScene {
   }
 
   dispose() {
+    this.brushUnsubscribe?.();
+    this.releaseBrushConsumer?.();
     this.disposed = true;
     this.pendingMesh = null;
     if (this.meshBenchmark) delete (window as BenchmarkWindow).__nhMeshBenchmark;
@@ -1434,6 +1521,8 @@ export class TerrainScene {
     this.controls.dispose();
     this.atmosphere?.dispose();
     this.groundExtension?.dispose();
+    this.water?.dispose();
+    this.water = null;
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost);
     this.renderer.domElement.removeEventListener('dblclick', this.onFocusTerrain);
     this.scene.traverse((object) => {

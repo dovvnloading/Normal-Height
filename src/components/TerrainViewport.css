@@ -609,6 +609,131 @@
     linear-gradient(#6e8190, #9daeb5 55%, #c6c9c2);
 }
 
+.nh-water-toggle.active {
+  color: #176d88;
+  border-color: #7fb0c1;
+  background: #d9eef2;
+}
+.nh-water-readout {
+  position: absolute;
+  left: 17px;
+  top: 57px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #e9fbfa;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  pointer-events: none;
+  border: 1px solid #85c6d462;
+  border-radius: 4px;
+  padding: 5px 8px;
+  background: #0e5060cc;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 3px 14px #112c3250;
+}
+.nh-water-settings { margin-top: 10px; }
+.nh-water-moods {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 12px 0 14px;
+}
+.nh-water-moods button {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  background: #eef2eb;
+  color: #365d60;
+  border: 1px solid #b5c7b8;
+  border-radius: 5px;
+  padding: 4px 3px 7px;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+.nh-water-moods button:hover {
+  background: #dfe9e7;
+  border-color: #6997a1;
+}
+.nh-water-mood-swatch {
+  width: 100%;
+  height: 30px;
+  border-radius: 3px;
+  box-shadow: inset 0 -1px 3px #001d2d55;
+}
+.nh-water-mood-tropical {
+  background: radial-gradient(circle at 72% 28%, #fff8ae 0 6%, transparent 15%),
+    linear-gradient(#59a3d2 0%, #a4dcea 45%, #4dd3c0 46%, #087a9a 100%);
+}
+.nh-water-mood-golden {
+  background: radial-gradient(circle at 68% 37%, #fff4b2 0 7%, transparent 17%),
+    linear-gradient(#6a7d9a 0%, #f1a486 47%, #5c96a5 48%, #1b4266 100%);
+}
+.nh-water-mood-storm {
+  background: radial-gradient(ellipse at 30% 30%, #9daeb4 0 16%, transparent 62%),
+    linear-gradient(#43525e 0%, #7f9399 46%, #2f627c 48%, #132d44 100%);
+}
+.nh-water-palettes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 13px;
+}
+.nh-water-palettes button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 3px 7px;
+  border: 1px solid #c5d1cb;
+  background: #edf1ed;
+  border-radius: 5px;
+  cursor: pointer;
+  color: #425850;
+  font: inherit;
+  font-size: 9px;
+}
+.nh-water-palettes button.active {
+  border-color: #4f8790;
+  background: #dcecf0;
+  box-shadow: inset 0 0 0 1px #4f8790;
+}
+.nh-water-swatch {
+  display: block;
+  width: 100%;
+  height: 32px;
+  border-radius: 3px;
+  box-shadow: inset 0 -2px 7px #001b2c55;
+}
+.nh-water-level-mode {
+  display: flex;
+  padding: 2px;
+  border-radius: 5px;
+  background: #e1e9df;
+  gap: 2px;
+  margin-bottom: 11px;
+}
+.nh-water-level-mode button {
+  flex: 1;
+  padding: 6px 4px;
+  border-radius: 4px;
+  border: 0;
+  color: #50665b;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+.nh-water-level-mode button.active {
+  background: #f8fbf8;
+  color: #266077;
+  box-shadow: 0 1px 4px #00000013;
+}
 .nh-display-section-heading {
   display: flex;
   align-items: center;
@@ -1100,6 +1225,16 @@
   font-size: 10px;
 }
 .nh-map-update.error { border-color: #ad6d61; color: #833f34; }
+.nh-map-update.error button {
+  margin-left: 10px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 5px 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
 .nh-inspection-readout {
   position: absolute;
   z-index: 6;
@@ -1676,3 +1811,14 @@
   .nh-brush-layer-list > svg { display: none; }
   .nh-brush-layer-list button { font-size: 10px; padding: 4px; }
 }
+
+/* Selection guides remain aligned with the map through zoom and pan. */
+.nh-paint-selection {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 4;
+  filter: drop-shadow(0 1px 1px #142b22);
+}
+.nh-painting canvas[data-brush-navigating='true'] { cursor: grab; }
+.nh-painting canvas[data-brush-navigating='true']:active { cursor: grabbing; }

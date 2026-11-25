@@ -26,6 +26,15 @@ export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   cloudShadowStrength: 0.72,
   expandGround: false,
   groundReach: 5,
+  waterEnabled: false,
+  waterHorizon: true,
+  waterLevelMode: 'coast',
+  waterLevel: 0,
+  waterPalette: 'lagoon',
+  waterWaveHeight: 1.3,
+  waterSpeed: 0.75,
+  waterClarity: 0.74,
+  waterFoam: 0.78,
 };
 
 const ranges: Partial<Record<keyof ViewSettings, [number, number]>> = {
@@ -39,11 +48,16 @@ const ranges: Partial<Record<keyof ViewSettings, [number, number]>> = {
   cloudSpeed: [0, 2],
   cloudShadowStrength: [0, 1],
   groundReach: [3, 8],
+  waterLevel: [-12000, 12000],
+  waterWaveHeight: [0, 5],
+  waterSpeed: [0, 2],
+  waterClarity: [0, 1],
+  waterFoam: [0, 1],
 };
 
 const switches: (keyof ViewSettings)[] = [
   'contours', 'wireframe', 'autoRotate', 'skyEnabled', 'expandGround',
-  'nearFieldDetail',
+  'nearFieldDetail', 'waterEnabled', 'waterHorizon',
 ];
 
 export function parseViewSettings(value: unknown): ViewSettings {
@@ -52,6 +66,12 @@ export function parseViewSettings(value: unknown): ViewSettings {
   const input = value as Record<string, unknown>;
   if (['pbr', 'alpine', 'clay', 'height'].includes(String(input.material))) {
     result.material = input.material as ViewSettings['material'];
+  }
+  if (['coast', 'manual'].includes(String(input.waterLevelMode))) {
+    result.waterLevelMode = input.waterLevelMode as ViewSettings['waterLevelMode'];
+  }
+  if (['lagoon', 'alpine', 'ocean', 'dusk'].includes(String(input.waterPalette))) {
+    result.waterPalette = input.waterPalette as ViewSettings['waterPalette'];
   }
   if (['balanced', 'high', 'ultra'].includes(String(input.meshQuality))) {
     result.meshQuality = input.meshQuality as ViewSettings['meshQuality'];

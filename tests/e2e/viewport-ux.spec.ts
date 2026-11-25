@@ -391,6 +391,8 @@ test('2D comparison remains available when the browser cannot create WebGL', asy
 });
 
 test('paints the displayed terrain, commits one undo step, and erases back to the procedural map', async ({ page }, testInfo) => {
+  // Keep the software WebGL workload bounded, as in the close-range paint test.
+  await page.setViewportSize({ width: 960, height: 660 });
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => {
@@ -412,8 +414,10 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
     name: 'brush.nhterrain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)),
   });
   const scene = page.locator('.nh-three-host canvas');
-  const strokes = () => page.evaluate(() =>
-    (JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject).materialPaint ?? []);
+  const strokes = () => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem('normal-height.project.v1') || '{}') as TerrainProject;
+    return saved.paintLayers?.flatMap(layer => layer.strokes) ?? saved.materialPaint ?? [];
+  });
   await expect(page.locator('.nh-viewport')).toHaveAttribute('data-displayed-world-size', '5000');
   await page.getByRole('button', { name: 'Paint terrain' }).click();
   await page.getByRole('button', { name: 'Snow', exact: true }).click();
@@ -427,6 +431,7 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
   await page.mouse.down();
   await page.mouse.move(x + 36, y + 6, { steps: 8 });
   await page.mouse.up();
+  await page.mouse.move(1, 1);
   await expect.poll(async () => (await strokes()).length).toBe(1);
   const [stroke] = await strokes();
   expect(stroke.layer).toBe('snow');
@@ -434,8 +439,26 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
   expect(stroke.strength).toBe(1);
   await expect(scene).toHaveAttribute('data-material-status', 'ready');
   await expect.poll(async () => Number(await scene.getAttribute('data-pbr-upload-count'))).toBeGreaterThan(beforeUpload);
+  // The renderer preserves its drawing buffer for snapshot export. Capture
+  // the presented WebGL frame rather than waiting for a full-page compositor
+  // screenshot, which can stall on SwiftShader after a material upload.
+  await expect(scene).toHaveAttribute('data-brush-preview-status', 'idle');
+  const painted = await scene.evaluate(async (source: HTMLCanvasElement) => {
+    await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+    const sample = document.createElement('canvas');
+    sample.width = 96;
+    sample.height = 64;
+    const ctx = sample.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(source, 0, 0, sample.width, sample.height);
+    const pixels = ctx.getImageData(0, 0, sample.width, sample.height).data;
+    const colors = new Set<number>();
+    for (let i = 0; i < pixels.length; i += 4)
+      colors.add((pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2]);
+    return { colors: colors.size, png: source.toDataURL('image/png').split(',')[1] };
+  });
+  expect(painted.colors, 'the painted terrain frame is not blank').toBeGreaterThan(32);
   await testInfo.attach('Painted terrain', {
-    body: await page.locator('.nh-viewport').screenshot(), contentType: 'image/png',
+    body: Buffer.from(painted.png, 'base64'), contentType: 'image/png',
   });
 
   await page.getByRole('button', { name: '2D map', exact: true }).click();
@@ -494,7 +517,8 @@ test('paints the displayed terrain, commits one undo step, and erases back to th
 
   // The complete brush and channel selector remain reachable on a small phone.
   await page.setViewportSize({ width: 360, height: 740 });
-  await page.getByRole('button', { name: 'Focus viewport', exact: true }).click();
+  const focus = page.getByRole('button', { name: 'Focus viewport', exact: true });
+  if (await focus.isVisible()) await focus.click();
   await expect(page.getByRole('button', { name: 'Paint terrain' })).toBeInViewport();
   await expect(page.getByRole('slider', { name: 'Brush hardness' })).toBeInViewport();
   await expect(page.getByLabel('Map channel')).toBeInViewport();
@@ -546,10 +570,13 @@ test('paints an alpine outcrop with the close-range material shader active', asy
     body: Buffer.from(wide.png, 'base64'), contentType: 'image/png',
   });
   await terrain.dblclick();
-  await terrain.hover();
-  await page.mouse.wheel(0, -4000);
-  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 30_000 });
   await page.getByRole('button', { name: 'Paint terrain' }).click();
+  // The painting shelves reduce the canvas height. Establish close-range
+  // framing in that final layout so the shader's physical pixel-footprint
+  // threshold is still satisfied while the two authored materials are tested.
+  await terrain.hover();
+  await page.mouse.wheel(0, -5000);
+  await expect(terrain).toHaveAttribute('data-near-field-detail', 'active', { timeout: 30_000 });
   await page.getByRole('slider', { name: 'Brush strength' }).focus();
   await page.keyboard.press('End');
   const paintCenter = async (layer: 'Snow' | 'Rock') => {

@@ -38,7 +38,9 @@ export function paintChangeBounds(
   const last = n - 1;
   for (const path of [before, after])
     for (let i = start; i < path.length; i++) {
-      const { radius, points } = path[i];
+      if (path[i].fullTile) return tileRect(n);
+      const { points } = path[i];
+      const radius = path[i].radius * (1 + (path[i].jitter ?? 0) * 0.8);
       for (const { u, v } of points) {
         left = Math.min(left, (u - radius) * last);
         right = Math.max(right, (u + radius) * last);

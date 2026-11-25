@@ -21,6 +21,8 @@ import {
   CheckCircle2,
   Moon,
   Sun,
+  Globe2,
+  Cpu,
 } from 'lucide-react';
 import { Library } from './components/Library';
 import { Inspector } from './components/Inspector';
@@ -29,14 +31,22 @@ import { TerrainViewport } from './components/TerrainViewport';
 import { ExportDialog } from './components/ExportDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
+import { WorldStudio } from './components/WorldStudio';
+import { ComputePanel } from './components/ComputePanel';
 import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
 import { STUDIO_KERNELS } from './model/noiseStudio';
 import { createProject, PRESETS } from './model/presets';
-import { parseProject, saveProject, STORAGE_KEY } from './model/project';
+import { parseProject, saveProject } from './model/project';
+import { readSessionBackup, writeSessionBackup } from './model/sessionBackup';
+import { projectStorageBytes, PROJECT_STORAGE_ERROR } from './model/projectStorage';
+import { autosaveProject, loadLastSession } from './model/autosave';
+import { appendUndoSnapshot } from './model/history';
+import { assertRasterBudget, MAX_PROJECT_FILE_BYTES, rasterIdentity } from './model/heightRaster';
 import { loadViewSettings, saveViewSettings } from './model/viewSettings';
 import { resolveSurface } from './materials/pbr';
-import { canAppendMaterialStroke, type MaterialStroke } from './materials/materialPaint';
+import type { MaterialStroke } from './materials/materialPaint';
+import { applyPaintStrokes, paintCapacity, type PaintLayer } from './materials/paintLayers';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
 import type {
@@ -52,6 +62,7 @@ import type {
 
 type ThemeMode = 'light' | 'dark';
 const THEME_STORAGE_KEY = 'normal-height.theme.v1';
+const SAVE_TIME_KEY = 'normal-height.project-saved-at.v1';
 function savedTheme(): ThemeMode | null {
   try {
     const choice = localStorage.getItem(THEME_STORAGE_KEY);
@@ -61,33 +72,25 @@ function savedTheme(): ThemeMode | null {
   }
 }
 
-// Every session opens the current default landscape. The autosave of the
-// last session is offered (Restore last session), never loaded by itself:
-// an old scene would hide newer presets and engine defaults.
-function initialProject() {
-  let lastSession: TerrainProject | null = null;
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) lastSession = parseProject(JSON.parse(saved));
-  } catch {
-    lastSession = null;
-  }
-  return { project: createProject(), lastSession, message: '' };
+function projectSnapshot(project: TerrainProject) {
+  return JSON.stringify(project, (key, value) => key === 'raster' && value ? rasterIdentity(value) : value);
 }
+
 const isEditing = (element: EventTarget | null) =>
   element instanceof HTMLElement &&
   (element.matches('input,textarea,select') || element.isContentEditable);
 
 export default function App() {
-  const [initial] = useState(initialProject);
-  const [project, setProject] = useState(initial.project);
+  const [initial] = useState(() => createProject());
+  const [project, setProject] = useState(initial);
   const projectRef = useRef(project);
   projectRef.current = project;
   const [selectedId, setSelectedId] = useState<string | null>(
-    initial.project.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ?? null,
+    initial.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ?? null,
   );
   const [previewNodeId, setPreviewNodeId] = useState<string | undefined>();
   const [editingSplineId, setEditingSplineId] = useState<string | null>(null);
+  const [paintSession, setPaintSession] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [channel, setChannel] = useState<MapChannel>('height');
   const [settings, setSettings] = useState<ViewSettings>(loadViewSettings);
@@ -98,7 +101,9 @@ export default function App() {
     () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
   );
   const theme: ThemeMode = themeChoice ?? (systemDark ? 'dark' : 'light');
-  const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | null>(null);
+  const [modal, setModal] = useState<
+    'export' | 'help' | 'palette' | 'presets' | 'world' | 'compute' | null
+  >(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   // Sidebars become temporary overlays at different breakpoints. Close each
@@ -132,9 +137,9 @@ export default function App() {
     project: TerrainProject;
     label: string;
   } | null>(null);
-  const [toast, setToast] = useState(initial.message);
+  const [toast, setToast] = useState('');
   // The previous session's autosave, until the user restores it or edits.
-  const [lastSession, setLastSession] = useState(initial.lastSession);
+  const [lastSession, setLastSession] = useState<TerrainProject | null>(null);
   const [saved, setSaved] = useState(true);
   const [storageError, setStorageError] = useState(false);
   const [historyTick, setHistoryTick] = useState(0);
@@ -150,12 +155,14 @@ export default function App() {
   // matching worker result arrives. Visual-only surface controls stay live.
   const displayedProject = useMemo(() => {
     const built = engine.result && engine.completedProject;
-    return built ? {
-      ...project,
-      worldSize: built.worldSize,
-      heightScale: built.heightScale,
-      seed: built.seed,
-    } : project;
+    return built
+      ? {
+          ...project,
+          worldSize: built.worldSize,
+          heightScale: built.heightScale,
+          seed: built.seed,
+        }
+      : project;
   }, [project, engine.result, engine.completedProject]);
   const selected = project.graph.nodes.find((n) => n.id === selectedId) ?? null;
   const selectedSpline = selected?.kind === 'spline' ? selected : null;
@@ -166,12 +173,14 @@ export default function App() {
   const lastBuiltPreviewLabel = useMemo(() => {
     const built = engine.completedProject;
     if (!built) return null;
-    const id = engine.completedPreviewNodeId ??
-      built.graph.nodes.find((node) => node.kind === 'output')?.id;
+    const id =
+      engine.completedPreviewNodeId ?? built.graph.nodes.find((node) => node.kind === 'output')?.id;
     return built.graph.nodes.find((node) => node.id === id)?.label ?? 'Terrain output';
   }, [engine.completedProject, engine.completedPreviewNodeId]);
-  const displayedPreviewLabel = engine.stale && engine.result && lastBuiltPreviewLabel
-    ? `Last built: ${lastBuiltPreviewLabel}` : previewLabel;
+  const displayedPreviewLabel =
+    engine.stale && engine.result && lastBuiltPreviewLabel
+      ? `Last built: ${lastBuiltPreviewLabel}`
+      : previewLabel;
   const notify = useCallback((message: string) => setToast(message), []);
   useEffect(() => {
     const query = window.matchMedia?.('(prefers-color-scheme: dark)');
@@ -182,10 +191,9 @@ export default function App() {
   }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    document.querySelector('meta[name="theme-color"]')?.setAttribute(
-      'content',
-      theme === 'dark' ? '#292e30' : '#e9ebe7',
-    );
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'dark' ? '#292e30' : '#e9ebe7');
   }, [theme]);
   useEffect(() => saveViewSettings(settings), [settings]);
   const toggleTheme = () => {
@@ -202,10 +210,18 @@ export default function App() {
     const timer = setTimeout(() => setToast(''), 6500);
     return () => clearTimeout(timer);
   }, [toast]);
-  const apply = useCallback((next: TerrainProject, group = '', record = true) => {
+  const apply = useCallback((next: TerrainProject, group = '', record = true, recovering = false) => {
     const previous = projectRef.current;
-    const changed = JSON.stringify(next) !== JSON.stringify(previous);
-    if (!changed && !pendingMove.current) return;
+    const bytes = projectStorageBytes(next);
+    // Permit recovery and shrinking of older oversized sessions, but not
+    // edits that increase an already oversized project.
+    if (!recovering && bytes > MAX_PROJECT_FILE_BYTES && bytes >= projectStorageBytes(previous)) {
+      notify(PROJECT_STORAGE_ERROR);
+      return false;
+    }
+    const paintChanged = next.materialPaint !== previous.materialPaint || next.paintLayers !== previous.paintLayers;
+    const changed = paintChanged || projectSnapshot(next) !== projectSnapshot(previous);
+    if (!changed && !pendingMove.current) return true;
     if (!record) {
       pendingMove.current ??= previous;
     } else {
@@ -216,7 +232,7 @@ export default function App() {
         lastEdit.current.group !== group ||
         now - lastEdit.current.time > 900
       ) {
-        past.current = [...past.current.slice(-59), pendingMove.current ?? previous];
+        past.current = appendUndoSnapshot(past.current, pendingMove.current ?? previous, next);
         future.current = [];
         setHistoryTick((n) => n + 1);
       }
@@ -225,7 +241,8 @@ export default function App() {
     }
     projectRef.current = next;
     setProject(next);
-  }, []);
+    return true;
+  }, [notify]);
   const undo = useCallback(() => {
     const previous = past.current.pop();
     if (!previous) return;
@@ -247,27 +264,55 @@ export default function App() {
     setHistoryTick((n) => n + 1);
   }, []);
   useEffect(() => {
+    let active = true;
+    void Promise.allSettled([loadLastSession(), readSessionBackup()]).then(([primary, storedBackup]) => {
+      if (!active || projectRef.current !== initial) return;
+      const previous = primary.status === 'fulfilled' ? primary.value : null;
+      const backup = storedBackup.status === 'fulfilled' ? storedBackup.value : null;
+      let primaryTime = 0;
+      try { primaryTime = Number(localStorage.getItem(SAVE_TIME_KEY)) || 0; } catch { /* optional */ }
+      // Imported raster sessions may use an IndexedDB pointer. The independent
+      // backup also recovers painted projects when publishing that pointer or a
+      // normal JSON session fails because localStorage has reached its quota.
+      setLastSession(backup && (!previous || backup.savedAt >= primaryTime) ? backup.project : previous);
+    });
+    return () => { active = false; };
+  }, [initial]);
+  useEffect(() => {
     // The untouched starting landscape is not saved over the last session;
     // the first edit (or a restore) starts autosaving and retires the offer.
-    if (project === initial.project) return;
+    if (project === initial) return;
     setLastSession(null);
     setSaved(false);
-    const timer = setTimeout(() => {
+    let active = true;
+    const timer = setTimeout(async () => {
+      const savedAt = Date.now();
+      let primarySaved = false;
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
-        setSaved(true);
-        setStorageError(false);
-      } catch {
-        setStorageError(true);
-      }
+        await autosaveProject(project, () => active);
+        if (active) {
+          primarySaved = true;
+          localStorage.setItem(SAVE_TIME_KEY, String(savedAt));
+        }
+      } catch { /* Large paint projects use the IndexedDB backup below. */ }
+      if (!active) return;
+      let backupSaved = false;
+      try { await writeSessionBackup(project, savedAt); backupSaved = true; }
+      catch { /* Either storage backend can independently preserve the session. */ }
+      if (!active || projectRef.current !== project) return;
+      setSaved(primarySaved || backupSaved);
+      setStorageError(!primarySaved && !backupSaved);
     }, 600);
-    return () => clearTimeout(timer);
-  }, [project, initial.project]);
+    return () => { active = false; clearTimeout(timer); };
+  }, [project, initial]);
   useEffect(() => {
     if (previewNodeId && !project.graph.nodes.some((n) => n.id === previewNodeId))
       setPreviewNodeId(undefined);
     if (selectedId && !project.graph.nodes.some((n) => n.id === selectedId)) setSelectedId(null);
-    if (editingSplineId && (editingSplineId !== selectedId || !project.graph.nodes.some((n) => n.id === editingSplineId)))
+    if (
+      editingSplineId &&
+      (editingSplineId !== selectedId || !project.graph.nodes.some((n) => n.id === editingSplineId))
+    )
       setEditingSplineId(null);
   }, [project, previewNodeId, selectedId, editingSplineId]);
   const updateGraph = useCallback(
@@ -279,18 +324,31 @@ export default function App() {
       apply({ ...projectRef.current, ...patch }, Object.keys(patch).join('-')),
     [apply],
   );
-  const paintMaterial = useCallback((strokes: MaterialStroke[]) => {
-    const current = projectRef.current;
-    const next = [...(current.materialPaint ?? [])];
-    for (const stroke of strokes) {
-      if (!canAppendMaterialStroke(next, stroke)) {
-        notify('This stroke exceeds the project paint limit. Undo a stroke or use a shorter drag.');
+  const paintMaterial = useCallback(
+    (strokes: MaterialStroke[], activeLayerId: string) => {
+      try {
+        return apply(applyPaintStrokes(projectRef.current, strokes, activeLayerId));
+      } catch (error) {
+        notify(error instanceof Error ? error.message : 'This stroke could not be saved.');
         return false;
       }
-      next.push(stroke);
+    },
+    [apply, notify],
+  );
+  const changePaintLayers = useCallback((layers: PaintLayer[]) => {
+    const previous = projectRef.current;
+    const next = { ...previous, materialPaint: undefined, paintLayers: layers };
+    const capacity = paintCapacity(next);
+    if (capacity.layers > capacity.maxLayers || capacity.strokes > capacity.maxStrokes || capacity.points > capacity.maxPoints) {
+      notify('That layer change exceeds paint storage. Remove an unused layer or shorten its stroke history first.');
+      return false;
     }
-    apply({ ...current, materialPaint: next });
-    return true;
+    const old = previous.paintLayers;
+    const opacityEdit = old && old.length === layers.length && layers.every((layer, index) =>
+      layer.id === old[index].id && layer.strokes === old[index].strokes &&
+      layer.name === old[index].name && layer.visible === old[index].visible &&
+      layer.locked === old[index].locked && layer.mask === old[index].mask);
+    return apply(next, opacityEdit ? 'paint-layer-opacity' : '');
   }, [apply, notify]);
   const updateNode = useCallback(
     (patch: Partial<NonNullable<typeof selected>>, group = '') => {
@@ -334,14 +392,13 @@ export default function App() {
           String(params.mode)
             .replace(/-/g, ' ')
             .replace(/^./, (s) => s.toUpperCase()) + ' noise';
-      if (kind === 'spline') {
-        // Insert the designer immediately before hydraulic erosion (or before
-        // the final output), preserving the existing procedural pipeline.
-        const target = p.graph.nodes.find((n) => n.kind === 'hydraulic') ??
+      if (kind === 'spline' || kind === 'coast') {
+        // Rivers feed downstream erosion. Shorelines follow the finished relief.
+        const target = (kind === 'spline' ? p.graph.nodes.find((n) => n.kind === 'hydraulic') : undefined) ??
           p.graph.nodes.find((n) => n.kind === 'output');
-        const inputEdge = target && p.graph.edges.find(
-          (e) => e.target === target.id && (e.targetHandle ?? 'in') === 'in',
-        );
+        const inputEdge =
+          target &&
+          p.graph.edges.find((e) => e.target === target.id && (e.targetHandle ?? 'in') === 'in');
         if (target && inputEdge && !target.parentId) {
           node.position = { ...target.position };
           const affected = p.graph.nodes.map((n) =>
@@ -367,10 +424,16 @@ export default function App() {
             },
           });
         } else apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
-        setEditingSplineId(node.id);
-        setViewMode('2d');
-        setChannel('terrain');
-        notify('River / ridge designer added. Drag points on the 2D map; click to insert a point.');
+        if (kind === 'spline') {
+          setEditingSplineId(node.id);
+          setViewMode('2d');
+          setChannel('terrain');
+          notify('River / ridge designer added. Drag points on the 2D map; click to insert a point.');
+        } else {
+          notify(target && inputEdge && !target.parentId
+            ? 'Coastal shelf connected before Terrain output.'
+            : 'Coastal shelf added. Connect its height input.');
+        }
       } else {
         apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
         notify(`${node.label} added. Connect its ports in the graph.`);
@@ -381,36 +444,52 @@ export default function App() {
     },
     [selectedId, apply, notify],
   );
-  const changeSplinePath = useCallback((path: SplinePoint[]) => {
-    const id = editingSplineId ?? (projectRef.current.graph.nodes.find(
-      (node) => node.id === selectedId && node.kind === 'spline',
-    )?.id);
-    if (!id) return;
-    const current = projectRef.current;
-    apply({
-      ...current,
-      graph: {
-        ...current.graph,
-        nodes: current.graph.nodes.map((node) =>
-          node.id === id ? { ...node, path: path.map((point) => ({ ...point })) } : node,
-        ),
-      },
-    });
-  }, [editingSplineId, selectedId, apply]);
+  const changeSplinePath = useCallback(
+    (path: SplinePoint[]) => {
+      const id =
+        editingSplineId ??
+        projectRef.current.graph.nodes.find(
+          (node) => node.id === selectedId && node.kind === 'spline',
+        )?.id;
+      if (!id) return;
+      const current = projectRef.current;
+      apply({
+        ...current,
+        graph: {
+          ...current.graph,
+          nodes: current.graph.nodes.map((node) =>
+            node.id === id ? { ...node, path: path.map((point) => ({ ...point })) } : node,
+          ),
+        },
+      });
+    },
+    [editingSplineId, selectedId, apply],
+  );
 
   const duplicate = useCallback(() => {
     const p = projectRef.current;
     const n = p.graph.nodes.find((n) => n.id === selectedId);
     if (!n || n.kind === 'output' || n.kind === 'group') return;
+    if (p.graph.nodes.length >= 128) {
+      notify('This project has reached the 128-node limit.');
+      return;
+    }
     const copy = {
-      ...structuredClone(n),
+      ...n,
+      params: { ...n.params },
+      ...(n.path ? { path: n.path.map((point) => ({ ...point })) } : {}),
       id: crypto.randomUUID(),
       label: `${n.label} copy`,
       position: { x: n.position.x + 35, y: n.position.y + 180 },
     };
-    apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, copy] } });
+    const nodes = [...p.graph.nodes, copy];
+    try { assertRasterBudget(nodes); } catch (error) {
+      notify((error as Error).message);
+      return;
+    }
+    apply({ ...p, graph: { ...p.graph, nodes } });
     setSelectedId(copy.id);
-  }, [selectedId, apply]);
+  }, [selectedId, apply, notify]);
   const remove = useCallback(() => {
     if (!selectedId) return;
     const p = projectRef.current;
@@ -440,7 +519,8 @@ export default function App() {
   }, [selectedId, apply]);
   const restoreLastSession = useCallback(() => {
     if (!lastSession) return;
-    apply(lastSession);
+    apply(lastSession, '', true, true);
+    setPaintSession(value => value + 1);
     setEditingSplineId(null);
     setPreviewNodeId(undefined);
     setSelectedId(
@@ -454,8 +534,14 @@ export default function App() {
     (id: string) => {
       const next = createProject(id);
       apply(next);
+      setPaintSession(value => value + 1);
       const designer = next.graph.nodes.find((node) => node.kind === 'spline');
-      setSelectedId(designer?.id ?? next.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ?? next.graph.nodes.find((node) => node.kind === 'noise')?.id ?? null);
+      setSelectedId(
+        designer?.id ??
+          next.graph.nodes.find((node) => node.kind === 'coast' || node.kind === 'hydraulic')?.id ??
+          next.graph.nodes.find((node) => node.kind === 'noise')?.id ??
+          null,
+      );
       setPreviewNodeId(undefined);
       setEditingSplineId(designer?.id ?? null);
       if (designer) {
@@ -470,22 +556,32 @@ export default function App() {
     [apply, notify],
   );
   const preview = useCallback(
-    (id: string) =>
-      setPreviewNodeId(
-        id === projectRef.current.graph.nodes.find((n) => n.kind === 'output')?.id ? undefined : id,
-      ),
+    (id: string) => {
+      const nodes = projectRef.current.graph.nodes;
+      if (nodes.find((n) => n.id === id)?.kind === 'maskOutput') {
+        setViewMode('2d');
+        setChannel('height');
+        setEditingSplineId(null);
+      }
+      setPreviewNodeId(id === nodes.find((n) => n.kind === 'output')?.id ? undefined : id);
+    },
     [],
   );
   const save = useCallback(() => {
-    saveProject(projectRef.current);
-    notify('Project downloaded. Your graph, parameters, and seeds are included.');
+    try {
+      saveProject(projectRef.current);
+      notify('Project downloaded with your graph, paint layers, masks, and material settings.');
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not save the project.');
+    }
   }, [notify]);
   const openFile = async (file: File) => {
     try {
-      if (file.size > 3_000_000)
-        throw new Error('This project is too large. The maximum file size is 3 MB.');
+      if (file.size > MAX_PROJECT_FILE_BYTES)
+        throw new Error('This project is too large. The maximum file size is 32 MiB.');
       const loaded = parseProject(JSON.parse(await file.text()));
-      apply(loaded);
+      apply(loaded, '', true, true);
+      setPaintSession(value => value + 1);
       setEditingSplineId(null);
       setPreviewNodeId(undefined);
       setSelectedId(
@@ -533,11 +629,16 @@ export default function App() {
               ?.focus(),
           0,
         );
-      } else if (event.key.toLowerCase() === 'f' && !command &&
-        event.target instanceof HTMLElement && event.target.closest('.nh-viewport')) {
+      } else if (
+        event.key.toLowerCase() === 'f' &&
+        !command &&
+        event.target instanceof HTMLElement &&
+        event.target.closest('.nh-viewport')
+      ) {
         event.preventDefault();
         setViewportFocus((v) => !v);
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId) {
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId &&
+        !(event.target instanceof HTMLElement && event.target.closest('.nh-viewport'))) {
         event.preventDefault();
         remove();
       } else if (event.key === 'Escape') {
@@ -672,7 +773,9 @@ export default function App() {
             className="icon-button theme-toggle"
             aria-label="Dark mode"
             aria-pressed={theme === 'dark'}
-            title={theme === 'dark' ? 'Switch to light stone theme' : 'Switch to dark charcoal theme'}
+            title={
+              theme === 'dark' ? 'Switch to light stone theme' : 'Switch to dark charcoal theme'
+            }
             onClick={toggleTheme}
           >
             {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
@@ -699,6 +802,14 @@ export default function App() {
           <ChevronDown size={10} />
         </div>
         <div className="workspace-build">
+          <button
+            className="world-open-button"
+            onClick={() => setModal('world')}
+            title="Continuous worlds, regional refinement, and tiled export"
+          >
+            <Globe2 size={14} />
+            <span>World Studio</span>
+          </button>
           <label className="working-resolution">
             <span>Working grid</span>
             <select
@@ -757,17 +868,29 @@ export default function App() {
         <main className="work-area" ref={centerRef} aria-label="Terrain workspace">
           <section className="preview-area">
             <TerrainViewport
+              paintSession={paintSession}
               spline={selectedSpline}
               splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
               onSplinePath={changeSplinePath}
               onPaint={paintMaterial}
+              onPaintLayersChange={changePaintLayers}
+              onPaintNotice={notify}
+              onUndo={undo}
+              onRedo={redo}
+              canUndo={past.current.length > 0}
+              canRedo={future.current.length > 0}
               onLayerColor={(layer, color) => {
                 const surface = resolveSurface(projectRef.current.surface);
-                updateProject({ surface: { ...surface, layerColors: { ...surface.layerColors, [layer]: color } } });
+                updateProject({
+                  surface: { ...surface, layerColors: { ...surface.layerColors, [layer]: color } },
+                });
               }}
               theme={theme}
               field={engine.result?.field ?? null}
               project={displayedProject}
+              maskPreview={engine.completedProject?.graph.nodes.some(
+                (node) => node.id === engine.result?.outputNodeId && node.kind === 'maskOutput',
+              ) ?? false}
               viewMode={viewMode}
               channel={channel}
               settings={settings}
@@ -788,7 +911,11 @@ export default function App() {
                   notify('Build the current terrain before pinning a comparison baseline.');
                   return;
                 }
-                setBaseline({ field: engine.result.field, project: structuredClone(project), label: previewLabel });
+                setBaseline({
+                  field: engine.result.field,
+                  project: structuredClone(project),
+                  label: previewLabel,
+                });
                 notify('Comparison baseline pinned. Change your terrain, then open Compare.');
               }}
               onClearBaseline={() => setBaseline(null)}
@@ -873,14 +1000,17 @@ export default function App() {
             onParam={(key, value) => {
               const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
               if (current)
-                updateNode(
-                  { params: { ...current.params, [key]: value } },
-                  `${current.id}-${key}`,
-                );
+                updateNode({ params: { ...current.params, [key]: value } }, `${current.id}-${key}`);
             }}
             onParams={(patch) => {
               const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
               if (current) updateNode({ params: { ...current.params, ...patch } });
+            }}
+            onImportRaster={(raster) => {
+              const nodes = projectRef.current.graph.nodes.map((node) =>
+                node.id === selectedId && node.kind === 'heightImport' ? { ...node, raster } : node);
+              assertRasterBudget(nodes);
+              apply({ ...projectRef.current, graph: { ...projectRef.current.graph, nodes } });
             }}
             onRename={(label) => updateNode({ label }, `${selectedId}-label`)}
             onBypass={() => selected && updateNode({ bypassed: !selected.bypassed })}
@@ -912,6 +1042,17 @@ export default function App() {
           )}
         </div>
         <div className="status-center">
+          <button
+            className="compute-status-button"
+            onClick={() => setModal('compute')}
+            title="Inspect stage timings and persistent cache"
+            aria-label="Compute diagnostics"
+          >
+            <Cpu size={11} />
+            {engine.result?.diagnostics
+              ? ` ${engine.result.diagnostics.cacheHits} cached`
+              : ' CPU reference'}
+          </button>
           <GitBranch size={11} />
           {project.graph.nodes.filter((n) => n.kind !== 'group' && n.kind !== 'note').length} nodes
           <span>·</span>
@@ -939,9 +1080,12 @@ export default function App() {
                   `Balance residual: ${sedimentBudget.balanceErrorM3.toLocaleString('en-US', { maximumFractionDigits: 2 })} m³`,
                 ].join('\n')}
               >
-                Sediment out {new Intl.NumberFormat('en-US', {
-                  notation: 'compact', maximumFractionDigits: 1,
-                }).format(sedimentBudget.exportedVolumeM3)} m³
+                Sediment out{' '}
+                {new Intl.NumberFormat('en-US', {
+                  notation: 'compact',
+                  maximumFractionDigits: 1,
+                }).format(sedimentBudget.exportedVolumeM3)}{' '}
+                m³
               </span>
             </>
           )}
@@ -983,6 +1127,25 @@ export default function App() {
       />
       {modal === 'export' && <ExportDialog project={project} onClose={() => setModal(null)} />}
       {modal === 'help' && <HelpDialog onClose={() => setModal(null)} />}
+      {modal === 'world' && (
+        <WorldStudio
+          project={project}
+          onSave={(world) => apply({ ...projectRef.current, version: 2, world })}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal === 'compute' && (
+        <ComputePanel
+          project={project}
+          result={engine.result}
+          stale={engine.stale}
+          onClear={() => {
+            engine.clearCache();
+            notify('Compute cache cleared. The current preview is retained.');
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === 'palette' && (
         <Modal
           title="Add to your process"
@@ -1025,7 +1188,7 @@ export default function App() {
             <div className="preset-dialog-list">
               {PRESETS.map((p) => (
                 <button key={p.id} onClick={() => loadPreset(p.id)}>
-                  <TerrainIcon name={PRESET_ICON_NAMES[p.id] ?? "mountain-range"} height={32} />
+                  <TerrainIcon name={PRESET_ICON_NAMES[p.id] ?? 'mountain-range'} height={32} />
                   <span>
                     <strong>{p.name}</strong>
                     <small>{p.description}</small>
