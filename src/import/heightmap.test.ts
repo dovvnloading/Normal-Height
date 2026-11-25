@@ -99,12 +99,16 @@ describe('Heightmap import', () => {
     const project = createProject();
     const source = createNode('heightImport');
     project.graph.nodes.push(source);
-    const empty = evaluationSignature(project);
+    // The imported source is disconnected from Terrain output. Only its own
+    // preview depends on the raster until it is wired into the active graph.
+    const terrainSignature = evaluationSignature(project);
+    const empty = evaluationSignature(project, source.id);
     expect(() => sampleImportedHeight(source, 64, 1000)).toThrow('Choose a heightmap');
     source.raster = await importHeightRaster(
       new File([new Uint8Array([0, 0, 0, 1, 255, 255, 1, 0])], 'grid.r16'),
     );
-    const first = evaluationSignature(project);
+    expect(evaluationSignature(project)).toBe(terrainSignature);
+    const first = evaluationSignature(project, source.id);
     expect(first).not.toBe(empty);
     expect(first).not.toContain(source.raster.data);
     expect(sampleImportedHeight(source, 2, 1000)[1]).toBeCloseTo(256 / 65535, 8);
@@ -119,7 +123,8 @@ describe('Heightmap import', () => {
     ).toThrow('dimensions');
     expect(() => parseHeightRaster(source.raster, 4)).toThrow('sample limit');
     source.raster = { ...source.raster, data: '//////////8=' };
-    expect(evaluationSignature(project)).not.toBe(first);
+    expect(evaluationSignature(project, source.id)).not.toBe(first);
+    expect(evaluationSignature(project)).toBe(terrainSignature);
     const full = {
       ...source,
       raster: { ...source.raster, width: 2048, height: 2048, format: 'f32le' as const },
