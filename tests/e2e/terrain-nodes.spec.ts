@@ -73,7 +73,11 @@ test('imports a survey, shapes a coast and exports a named water mask after sess
   await page.getByLabel('Import heightmap file', { exact: true }).setInputFiles({
     name: 'eastward.r16', mimeType: 'application/octet-stream', buffer: raw,
   });
-  await expect(page.getByRole('region', { name: 'Heightmap source file' })).toContainText('eastward.r16');
+  const sourceRegion = page.getByRole('region', { name: 'Heightmap source file' });
+  await expect(sourceRegion.getByLabel('Grid width')).toHaveValue('2');
+  await expect(sourceRegion.getByLabel('Grid height')).toHaveValue('2');
+  await sourceRegion.getByRole('button', { name: 'Import RAW grid' }).click();
+  await expect(sourceRegion.locator('.height-import-current')).toContainText('eastward.r16');
   await connect(page, 'Heightmap import: Height output', 'Terrain output: Height input');
   await expect(page.locator('.react-flow__edge')).toHaveCount(1);
   await library.getByRole('button', { name: /Coastal shelf/ }).click();
@@ -137,4 +141,102 @@ test('imports a survey, shapes a coast and exports a named water mask after sess
   row.fill(255, 1, 257);
   expect(rows.equals(Buffer.concat(Array<Buffer>(256).fill(row)))).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test('confirms RAW layout, preserves the active source on cancellation or failure and makes replacement undoable', async ({ page }) => {
+  // Hold one import in the reading state deterministically. Other worker requests
+  // are unchanged, so the subsequent successful and invalid imports use real decoding.
+  await page.addInitScript(() => {
+    window.Worker = new Proxy(window.Worker, {
+      construct(target, args) {
+        const worker = Reflect.construct(target, args) as Worker;
+        if (!String(args[0]).includes('heightmap.worker')) return worker;
+        const send = worker.postMessage;
+        worker.postMessage = ((message: { file?: File }, ...options: unknown[]) => {
+          if (message?.file?.name === 'cancelled.r16') return;
+          Reflect.apply(send, worker, [message, ...options]);
+        }) as Worker['postMessage'];
+        return worker;
+      },
+    });
+  });
+  await page.goto('/');
+  await page.locator('.auto-build input').uncheck();
+  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  const original = Buffer.from([0, 0, 1, 0, 2, 0, 3, 0]);
+  const project: TerrainProject = {
+    version: 1, name: 'RAW layout survey', presetId: 'custom', seed: 17,
+    resolution: 64, worldSize: 1000, heightScale: 100,
+    graph: {
+      nodes: [
+        { id: 'survey', kind: 'heightImport', label: 'Survey', params: { gain: 1, offsetMeters: 0, flipY: false }, position: { x: 0, y: 0 },
+          raster: { name: 'original.r16', width: 2, height: 2, format: 'u16le', data: original.toString('base64') } },
+        { id: 'out', kind: 'output', label: 'Terrain output', params: {}, position: { x: 300, y: 0 } },
+      ],
+      edges: [{ id: 'survey-out', source: 'survey', sourceHandle: 'height', target: 'out', targetHandle: 'in' }],
+    },
+  };
+  await page.getByLabel('Import terrain project file', { exact: true }).setInputFiles({
+    name: 'survey.nhterrain.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(project)),
+  });
+  const region = page.getByRole('region', { name: 'Heightmap source file' });
+  const current = region.locator('.height-import-current');
+  const file = region.getByLabel('Import heightmap file', { exact: true });
+  const submit = region.getByRole('button', { name: 'Import RAW grid' });
+  const width = region.getByLabel('Grid width');
+  const height = region.getByLabel('Grid height');
+  await expect(current).toContainText('original.r16');
+
+  await file.setInputFiles({ name: 'cancelled.r16', mimeType: 'application/octet-stream', buffer: original });
+  await submit.click();
+  await expect(region.getByRole('button', { name: 'Cancel import' })).toBeVisible();
+  await expect(current).toContainText('original.r16');
+  await region.getByRole('button', { name: 'Cancel import' }).click();
+  await expect(region.getByRole('status')).toContainText('Import cancelled');
+  await expect(current).toContainText('original.r16');
+  await expect(submit).toBeEnabled();
+  await region.getByRole('button', { name: 'Discard file' }).click();
+
+  // 3 × 2 samples, big-endian Float32; the generic extension is ambiguous.
+  const meters = [-125, 0.25, 12, 25, 100, 250];
+  const bigEndian = Buffer.alloc(meters.length * 4);
+  const littleEndian = Buffer.alloc(bigEndian.length);
+  meters.forEach((value, index) => {
+    bigEndian.writeFloatBE(value, index * 4);
+    littleEndian.writeFloatLE(value, index * 4);
+  });
+  await file.setInputFiles({ name: 'rectangular.raw', mimeType: 'application/octet-stream', buffer: bigEndian });
+  await expect(current).toContainText('original.r16');
+  await region.getByLabel('Sample type').selectOption('float32');
+  await region.getByLabel('Byte order').selectOption('big');
+  await width.fill('4');
+  await height.fill('2');
+  await expect(submit).toBeDisabled();
+  await expect(region.locator('.height-import-validation')).toContainText('32 bytes');
+  await width.fill('3');
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(current).toContainText('rectangular.raw');
+  await expect(region.locator('.spline-editor-heading')).toContainText('3 × 2');
+
+  // A failed replacement leaves the last committed source and its undo entry intact.
+  const invalid = Buffer.alloc(16);
+  invalid.writeFloatLE(NaN, 0);
+  await file.setInputFiles({ name: 'invalid.r32', mimeType: 'application/octet-stream', buffer: invalid });
+  await submit.click();
+  await expect(region.getByRole('alert')).toContainText('finite');
+  await expect(current).toContainText('rectangular.raw');
+  await region.getByRole('button', { name: 'Discard file' }).click();
+  await expect(submit).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(current).toContainText('original.r16');
+  await page.getByRole('button', { name: 'Redo', exact: true }).click();
+  await expect(current).toContainText('rectangular.raw');
+  const saving = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save project', exact: true }).click();
+  const saved = JSON.parse((await downloadBytes(page, await saving)).toString('utf8')) as TerrainProject;
+  expect(saved.graph.nodes[0].raster).toEqual({
+    name: 'rectangular.raw', width: 3, height: 2, format: 'f32le', data: littleEndian.toString('base64'),
+  });
 });
