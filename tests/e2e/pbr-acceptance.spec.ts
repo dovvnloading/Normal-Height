@@ -674,11 +674,17 @@ test('near-field material shader compiles, activates at close zoom, and toggles 
   await viewport.hover();
   await page.mouse.wheel(0, -4000);
   await expect(viewport).toHaveAttribute('data-near-field-detail', 'active', { timeout: 15_000 });
-  const enabledImage = await viewport.screenshot();
+  // Read the WebGL canvas directly, avoiding Playwright's layout-stability wait
+  // when SwiftShader is busy rendering extreme close-up terrain.
+  const capture = async () => Buffer.from(await viewport.evaluate(async (source: HTMLCanvasElement) => {
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    return source.toDataURL('image/png').split(',')[1];
+  }), 'base64');
+  const enabledImage = await capture();
   await testInfo.attach('nearfield-enabled.png', { body: enabledImage, contentType: 'image/png' });
   await toggle.uncheck();
   await expect(viewport).toHaveAttribute('data-near-field-detail', 'inactive', { timeout: 15_000 });
-  const disabledImage = await viewport.screenshot();
+  const disabledImage = await capture();
   await testInfo.attach('nearfield-disabled.png', { body: disabledImage, contentType: 'image/png' });
   expect(enabledImage.equals(disabledImage), 'Near-field shading must visibly affect the close-up terrain').toBe(false);
   await toggle.check();
