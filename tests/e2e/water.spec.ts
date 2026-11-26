@@ -4,6 +4,10 @@ import { createProject } from '../../src/model/presets';
 test('cinematic water is drawn, adjustable, coastline-linked, persistent, and optional', async ({
   page,
 }, testInfo) => {
+  // The scenario includes several actual WebGL captures plus a complete
+  // reload/restore. A single 90 s test budget cut off the final assertions
+  // even though the individual restoration wait already allowed 90 s.
+  test.setTimeout(180_000);
   const shaderErrors: string[] = [];
   page.on('pageerror', (error) => shaderErrors.push(error.message));
   page.on('console', (message) => {

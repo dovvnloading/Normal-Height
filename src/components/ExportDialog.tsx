@@ -4,6 +4,8 @@ import { Modal } from './Modal';
 import { TerrainIcon, EXPORT_ICON_NAMES } from './TerrainIcon';
 import { createTerrainWorker } from '../hooks/useTerrainEngine';
 import type { ExportFormat } from '../export/heightmap';
+import { detailTileMeters } from '../materials/detailTiles';
+import { resolveSurface } from '../materials/pbr';
 import { listMaskOutputs } from '../export/maskOutputs';
 import { pbrBudgetMiB, checkPBRExportBudget, isPBRExportFormat } from '../export/budget';
 import { TerrainExportClient, type ExportState } from '../export/exportClient';
@@ -37,7 +39,10 @@ export function ExportDialog({
   const busy = state.phase === 'generating' || state.phase === 'encoding';
   const memoryGiB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
   const preflight = pbrPreflight(format, resolution, bundle, memoryGiB);
-  const isBundle = format === 'pbr' || bundle;
+  const isTiles = format === 'detailTiles';
+  const isComplete = format === 'pbr' || isTiles;
+  const isBundle = isComplete || bundle;
+  const tileMeters = detailTileMeters(resolveSurface(project.surface).detailMeters);
   const resetStatus = () => setState({ phase: 'idle' });
   const chooseResolution = (value: number) => {
     setResolution(value);
@@ -83,7 +88,7 @@ export function ExportDialog({
           </span>
           <div>
             <strong>{project.name}</strong>
-            <small>{mask ? mask.displayName : 'Connected Terrain output'} · seed {project.seed}</small>
+            <small>{isTiles ? 'Local surface detail · ' + resolveSurface(project.surface).biome : mask ? mask.displayName : 'Connected Terrain output'} · seed {project.seed}</small>
           </div>
         </div>
         <div className="export-grid">
@@ -115,6 +120,7 @@ export function ExportDialog({
               <option value="wear">Erosion wear · 8-bit PNG</option>
               <option value="deposition">Deposition · 8-bit PNG</option>
               <option value="pbr">Complete PBR material set · ZIP</option>
+              <option value="detailTiles">Seamless material detail tiles · ZIP</option>
               <option value="basecolor">PBR base color · PNG</option>
               <option value="roughness">PBR roughness · PNG</option>
               <option value="ao">PBR ambient occlusion · PNG</option>
@@ -147,22 +153,22 @@ export function ExportDialog({
         <div className="export-detail">
           <ArrowUpRight size={16} />
           <p>
-            {mask ? 'The selected mask branch is evaluated at ' : 'The complete graph is simulated at '}
+            {isTiles ? 'Four repeatable local materials are synthesized at ' : mask ? 'The selected mask branch is evaluated at ' : 'The complete graph is simulated at '}
             <strong>
               {resolution.toLocaleString()} × {resolution.toLocaleString()}
             </strong>
-            . {mask ? 'Black is zero weight and white is full weight.' : 'Larger grids take longer and may change erosion detail.'}
+            . {isTiles ? 'No terrain simulation is needed. Use the local tiles with the landscape splat masks.' : mask ? 'Black is zero weight and white is full weight.' : 'Larger grids take longer and may change erosion detail.'}
           </p>
         </div>
         <label className="export-bundle">
           <Package size={19} />
           <span>
             <strong>
-              {format === 'pbr' ? 'Complete material bundle'
+              {isTiles ? 'Complete detail tile bundle' : format === 'pbr' ? 'Complete material bundle'
                 : mask ? 'Include project & mask metadata' : 'Include project & elevation metadata'}
             </strong>
             <small>
-              {format === 'pbr' ? 'Includes all PBR maps, height, metadata, and project.'
+              {isTiles ? 'Four material folders, six maps per folder and a physical-scale manifest.' : format === 'pbr' ? 'Includes all PBR maps, height, metadata, and project.'
                 : mask ? 'ZIP with mask PNG, source connection, and editable project.'
                 : 'ZIP bundle with map, reproducible graph and scale information.'}
             </small>
@@ -170,7 +176,7 @@ export function ExportDialog({
           <input
             type="checkbox"
             checked={isBundle}
-            disabled={busy || format === 'pbr'}
+            disabled={busy || isComplete}
             onChange={(e) => {
               setBundle(e.target.checked);
               resetStatus();
@@ -179,19 +185,19 @@ export function ExportDialog({
         </label>
         <dl className="export-spec">
           <div>
-            <dt>Terrain extent</dt>
+            <dt>{isTiles ? 'Repeat period' : 'Terrain extent'}</dt>
             <dd>
-              {(project.worldSize / 1000).toFixed(2)} × {(project.worldSize / 1000).toFixed(2)} km
+              {isTiles ? tileMeters.toFixed(2) + ' × ' + tileMeters.toFixed(2) + ' m' : (project.worldSize / 1000).toFixed(2) + ' × ' + (project.worldSize / 1000).toFixed(2) + ' km'}
             </dd>
           </div>
           <div>
             <dt>Sample spacing</dt>
-            <dd>{(project.worldSize / (resolution - 1)).toFixed(2)} m / sample</dd>
+            <dd>{isTiles ? (tileMeters / resolution * 100).toFixed(3) + ' cm / sample' : (project.worldSize / (resolution - 1)).toFixed(2) + ' m / sample'}</dd>
           </div>
           <div>
             <dt>Precision</dt>
             <dd>
-              {format === 'pbr'
+              {isTiles ? '16-bit local relief + 8-bit PBR maps' : format === 'pbr'
                 ? '16-bit terrain and relief + 8-bit PBR maps'
                 : format === 'mask16'
                   ? '65,536 weight levels · linear 0–1'

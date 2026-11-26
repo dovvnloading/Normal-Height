@@ -38,7 +38,11 @@ export class SurfaceFabric {
   private readonly textureBand: number;
   private readonly grainBand: number;
   private readonly fineBand: number;
+  private readonly faciesPeriod: number;
+  private readonly faciesBand: number;
 
+  /** Signed, resolved mineral/aggregate facies; independent of light and slope. */
+  facies = 0;
   formation = 0;
   patch = 0;
   fleck = 0;
@@ -76,6 +80,10 @@ export class SurfaceFabric {
     this.textureBand = bandVisibility(108, cell);
     this.grainBand = bandVisibility(this.grainPeriod, cell);
     this.fineBand = bandVisibility(this.grainPeriod * 0.35, cell);
+    // Outcrop-scale patches bridge the broad formation and individual grains.
+    // Never enlarge the requested pattern when the DEM is coarse.
+    this.faciesPeriod = Math.max(96, this.grainPeriod * 4);
+    this.faciesBand = bandVisibility(this.faciesPeriod, cell);
   }
 
   sample(x: number, z: number, h: number, gx: number, gz: number): void {
@@ -85,6 +93,15 @@ export class SurfaceFabric {
     const long = this.regionBand * noise.simplex(u / 1150 + 7.1, v / 1420 - 4.9);
     const patch = this.patchBand * noise.simplex(u / 310 + long * 0.75, v / 390 + 9.4);
     const fleck = this.textureBand * noise.simplex(u / 108 - patch * 0.25, v / 145 + 17.4);
+    // Bent, discontinuous facies instead of another isotropic octave of
+    // mottling. Arid beds are elongated; basalt and alpine rock have more
+    // equiaxed and folded inclusions, respectively.
+    const faciesScale = this.faciesPeriod;
+    const stretch = this.sedimentary ? 2.2 : this.basalt ? 1.1 : 1.55;
+    this.facies = this.faciesBand === 0 ? 0 : this.faciesBand * noise.simplex(
+      u / faciesScale + 0.95 * patch + 0.28 * fleck + 31.2,
+      v / (faciesScale * stretch) - 0.8 * long - 14.6,
+    );
     this.formation = long;
     this.patch = patch;
     this.fleck = fleck;
@@ -199,7 +216,7 @@ export class SurfaceFabric {
     // lighter inclusions surrounded by dark groundmass, sandstone shows pale
     // resistant laminae and iron-rich bands, gneiss alternates felsic/mafic rock.
     this.mineral = this.basalt
-      ? clamp(0.12 + 0.34 * long + 0.16 * patch + 0.32 * particles + 0.24 * crystals + 0.16 * fine)
+      ? clamp(0.12 + 0.34 * long + 0.16 * patch + 0.32 * particles + 0.24 * crystals + 0.16 * fine + 0.12 * this.facies)
       : clamp(
           (this.sedimentary ? 0.35 : 0.41) +
             0.24 * long +
@@ -207,7 +224,7 @@ export class SurfaceFabric {
             (this.sedimentary ? 0.22 : 0.32) * bedding +
             0.23 * lamina +
             0.24 * crystals +
-            0.11 * fine,
+            0.11 * fine + 0.15 * this.facies,
         );
     this.iron = clamp(
       0.28 +
@@ -216,7 +233,7 @@ export class SurfaceFabric {
         0.18 * fleck -
         0.18 * bedding +
         0.12 * crystals +
-        0.13 * this.joint,
+        0.13 * this.joint + 0.10 * this.facies,
     );
     this.rockHeight = this.basalt
       ? -this.joint * Math.min(1.55, spacing * 0.019) +
@@ -231,6 +248,12 @@ export class SurfaceFabric {
         0.13 * lamina * smoothstep(0.1, 0.4, grade) +
         fine * 0.12 +
         0.22 * crystals;
+    // Resistant aggregate, fractured faces and fine matrix have different
+    // relief even inside one substrate. Keep this term zero below its
+    // sampling limit, including flat, under-resolved terrain exports.
+    this.rockHeight += grainMask * (this.basalt
+      ? -0.18 * particles * (0.65 + 0.35 * this.facies) + 0.12 * chips
+      : 0.24 * particles * (0.72 + 0.28 * this.facies) + 0.14 * chips);
     this.grit = chips + 0.62 * fine;
     this.clasts = particles;
     // Deflated aeolian pavement grades into ripple sand. Scoria has angular
@@ -242,6 +265,8 @@ export class SurfaceFabric {
     this.soilHeight =
       (this.sedimentary ? 0.18 : 0.47) * particles + (this.sedimentary ? 0.17 * lee : 0.1 * fine);
     if (this.basalt) this.soilHeight += 0.35 * cinder - 0.16 * fine;
+    this.soilHeight += grainMask * particles * (this.sedimentary ? 0.08 : 0.17) *
+      (0.72 + 0.28 * this.facies);
     // Tussock, woody steppe and pioneer cushions respond differently at the
     // same wind exposure. Preserve a shared aggregate scale but change the
     // actual plant morphology as well as its pigment.

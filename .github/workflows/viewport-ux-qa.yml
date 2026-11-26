@@ -43,14 +43,20 @@ jobs:
   viewport:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         include:
           - suite: viewport
             name: Browser interaction and layout
-            specs: tests/e2e/viewport-ux.spec.ts tests/e2e/subpoly-displacement.spec.ts tests/e2e/water.spec.ts
+            specs: tests/e2e/viewport-ux.spec.ts
+          - suite: displacement
+            name: Displaced terrain silhouette
+            specs: tests/e2e/subpoly-displacement.spec.ts
+          - suite: water
+            name: Viewport water integration
+            specs: tests/e2e/water.spec.ts
           - suite: painting
             name: Painting studio acceptance
             specs: tests/e2e/painting-studio.spec.ts

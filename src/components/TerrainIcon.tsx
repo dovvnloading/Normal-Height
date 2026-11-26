@@ -99,6 +99,7 @@ export const EXPORT_ICON_NAMES: Record<ExportFormat, TerrainIconName> = {
   wear: 'erosion-map',
   deposition: 'deposition-map',
   pbr: 'material-weights',
+  detailTiles: 'pbr-base-color',
   basecolor: 'pbr-base-color',
   roughness: 'roughness-map',
   ao: 'ambient-occlusion',

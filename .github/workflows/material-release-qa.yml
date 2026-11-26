@@ -1,0 +1,124 @@
+name: Material quality release qualification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/materials/detail*'
+      - 'src/materials/materialContacts*'
+      - 'src/materials/surfaceFabric*'
+      - 'src/materials/layerSynthesis.ts'
+      - 'src/render/detail*'
+      - 'src/render/nearField*'
+      - 'src/render/TerrainScene.ts'
+      - 'src/export/**'
+      - 'tests/e2e/pbr-acceptance.spec.ts'
+      - '.github/workflows/material-release-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: material-release-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual:
+    name: Fixed-light material visual comparison
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Compare actual canvas against the unchanged visual golden
+        env:
+          PBR_VISUAL_GOLDEN: '1'
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep 'fixed-light 3D PBR' --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: material-visual-comparison
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+
+  hardware:
+    name: Accelerated GPU close-material performance
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install chromium
+      - name: Verify real Metal rendering and sustained close-up frame responsiveness
+        env:
+          PBR_BROWSER_BENCH: '1'
+          PBR_REAL_GPU: '1'
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep 'rapid material edits|texture-backed close terrain' --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: material-metal-performance
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+
+  detail-2k:
+    name: 2K local material export under measured 2 GiB memory
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+      options: --memory=2g --memory-swap=2g --shm-size=256m
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify real cgroup memory and export all 24 2K PNGs
+        shell: bash
+        env:
+          PBR_DETAIL_2K: '1'
+        run: |
+          set -euo pipefail
+          cap="$(cat /sys/fs/cgroup/memory.max)"
+          test "$cap" != "max"
+          test "$cap" -ge 1900000000
+          test "$cap" -le 2147483648
+          set +e
+          npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep '2K local detail tile export' --retries=0
+          status=$?
+          set -e
+          mkdir -p test-results
+          node -e "const fs=require('node:fs');const p='/sys/fs/cgroup/';const read=x=>fs.readFileSync(p+x,'utf8').trim();fs.writeFileSync('test-results/detail-tile-cgroup-memory.json',JSON.stringify({limitBytes:read('memory.max'),peakBytes:read('memory.peak'),events:read('memory.events'),testExitCode:Number(process.argv[1])},null,2))" "$status"
+          cat test-results/detail-tile-cgroup-memory.json
+          if [ "$(awk '$1=="oom_kill" {print $2}' /sys/fs/cgroup/memory.events)" != "0" ]; then
+            echo "The constrained export experienced an OOM kill."
+            exit 1
+          fi
+          exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: material-2k-memory-and-archive
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14

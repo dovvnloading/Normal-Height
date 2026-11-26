@@ -3,7 +3,7 @@ import { createProject } from '../model/presets';
 import { generatePBR, pbrPixels } from '../materials/pbr';
 import type { HeightField } from '../model/types';
 import { packPreviewPBR, unpackPreviewWeights } from './previewMaterial';
-import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
+import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender, middleDetailWeight, middleDetailWavelength, nearFieldShaderVariant } from './nearField';
 
 function heightField(n = 32): HeightField {
   const height = new Float32Array(n * n);
@@ -58,10 +58,47 @@ describe('close-range shader integration', () => {
     expect(nearFieldShouldRender(true, 1, 0, 36, metersPerUnit, 24)).toBe(false);
   });
 
+  it('fills an under-resolved intermediate band but does not double it on a fine bake', () => {
+    expect(middleDetailWavelength(24)).toBeCloseTo(33.6);
+    expect(middleDetailWeight(24, 32)).toBe(1);
+    expect(middleDetailWeight(24, 4)).toBe(0);
+    expect(middleDetailWeight(24, 12)).toBeGreaterThan(0);
+    expect(middleDetailWeight(24, 12)).toBeLessThan(1);
+    expect(middleDetailWeight(24, 0)).toBe(0);
+    const mpu = 8000 / 2.6;
+    expect(nearFieldShouldRender(true, 4, 900, 36, mpu, 24, 16)).toBe(true);
+    expect(nearFieldShouldRender(true, 4, 900, 36, mpu, 24, 4)).toBe(false);
+    expect(nearFieldShouldRender(false, 4, 900, 36, mpu, 24, 16)).toBe(false);
+  });
+
+  it('omits expensive detail code and array samplers from unused shader variants', () => {
+    expect(nearFieldShaderVariant(false, false)).toBe('off');
+    expect(nearFieldShaderVariant(false, true)).toBe('off');
+    expect(nearFieldShaderVariant(true, false)).toBe('analytic');
+    expect(nearFieldShaderVariant(true, true)).toBe('textured');
+    const source = '#include <map_fragment>\n#include <roughnessmap_fragment>\n#include <normal_fragment_maps>\n#include <aomap_fragment>';
+    const shared = createNearFieldUniforms();
+    const off = { fragmentShader: source, uniforms: {} as Record<string, {value:unknown}> };
+    installNearFieldShader(off, shared, 'off');
+    expect(off.uniforms.nhTileColor).toBe(shared.nhTileColor);
+    expect(off.fragmentShader).not.toContain('nhEvaluate');
+    expect(off.fragmentShader).not.toContain('sampler2DArray');
+    expect(off.fragmentShader).toContain('sqrt(clamp(roughnessFactor*roughnessFactor, 0.04, 1.0))');
+    const analytic = { fragmentShader: source, uniforms: {} };
+    installNearFieldShader(analytic, createNearFieldUniforms(), 'analytic');
+    expect(analytic.fragmentShader).toContain('nhEvaluate');
+    expect(analytic.fragmentShader).not.toContain('sampler2DArray');
+    expect(analytic.fragmentShader).not.toContain('#define NH_LOCAL_DETAIL');
+    const textured = { fragmentShader: source, uniforms: {} };
+    installNearFieldShader(textured, createNearFieldUniforms(), 'textured');
+    expect(textured.fragmentShader).toContain('#define NH_LOCAL_DETAIL');
+    expect(textured.fragmentShader).toContain('sampler2DArray');
+  });
+
   it('injects bounded world-space albedo, roughness and view-space micro-normal stages', () => {
     const uniforms = createNearFieldUniforms();
     const shader = {
-      fragmentShader: '#include <map_fragment>\n#include <roughnessmap_fragment>\n#include <normal_fragment_maps>\n',
+      fragmentShader: '#include <map_fragment>\n#include <roughnessmap_fragment>\n#include <normal_fragment_maps>\n#include <aomap_fragment>\n',
       uniforms: {} as Record<string, {value:number}>,
     };
     installNearFieldShader(shader, uniforms);
@@ -74,6 +111,15 @@ describe('close-range shader integration', () => {
     expect(shader.fragmentShader).toContain('sc.height-sa.height');
     expect(shader.fragmentShader).toContain('nhDetailStrength > 0.0001');
     expect(shader.fragmentShader).toContain('nhPulseIntegral');
+    expect(shader.uniforms.nhBakeCellMeters).toBe(uniforms.nhBakeCellMeters);
+    expect(shader.fragmentShader).toContain('NHSurface nhMiddle');
+    expect(shader.fragmentShader).toContain('midWavelength/nhBakeCellMeters');
+    expect(shader.fragmentShader).toContain('sampler2DArray nhTileColor');
+    expect(shader.fragmentShader).toContain('textureGrad(nhTileShape');
+    expect(shader.fragmentShader).toContain('nhTileTriplanar');
+    expect(shader.fragmentShader).toContain('transpose(turn)');
+    expect(shader.fragmentShader).toContain('visibility *= 1.0-tileVisibility');
+    expect(shader.fragmentShader).toContain('reflectedLight.indirectDiffuse *= nhTileOcclusion');
     expect(() => installNearFieldShader({ fragmentShader: 'unknown', uniforms: {} }, uniforms))
       .toThrow('shader does not contain');
   });

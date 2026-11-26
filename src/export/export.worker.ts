@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { makeExport } from './heightmap';
+import { makeDetailTileExport, makeExport } from './heightmap';
 import type { EncodeRequest, EncodeResponse } from './exportProtocol';
 import { encodingStage } from './exportClient';
 import { checkPBRExportBudget, isPBRExportFormat } from './budget';
@@ -9,16 +9,21 @@ const send = (message: EncodeResponse, transfer: Transferable[] = []) => worker.
 
 worker.addEventListener('message', (event: MessageEvent<EncodeRequest>) => {
   const request = event.data;
-  if (request.type !== 'encode') return;
+  if (request.type !== 'encode' && request.type !== 'encodeTiles') return;
   try {
     const stage = encodingStage(request.format, request.bundle);
     send({ type: 'progress', id: request.id, stage });
     if (isPBRExportFormat(request.format)) {
       checkPBRExportBudget(
-        request.field.resolution, request.memoryBudgetMiB ?? 512, request.format, request.bundle,
+        request.type === 'encodeTiles' ? request.resolution : request.field.resolution,
+        request.memoryBudgetMiB ?? 512, request.format, request.bundle,
       );
     }
-    const output = makeExport(request.field, request.project, request.format, request.bundle, request.outputNodeId);
+    const output = request.type === 'encodeTiles'
+      ? makeDetailTileExport(request.project, request.resolution, layer => send({
+        type: 'progress', id: request.id, stage: 'Synthesizing seamless ' + layer + ' tiles',
+      }))
+      : makeExport(request.field, request.project, request.format, request.bundle, request.outputNodeId);
     // fflate returns a full owned ArrayBuffer. Copy only when an encoder
     // returns a slice, which cannot safely transfer its shared backing buffer.
     const bytes = output.bytes;

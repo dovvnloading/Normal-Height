@@ -4,26 +4,50 @@
  * This pass describes finer surface morphology in object-space meters. Lighting
  * and shadowing still come from the MeshStandardMaterial BRDF.
  */
+import type { DataArrayTexture } from 'three';
+import { DETAIL_TEXTURE_GLSL } from './detailTextureShader';
+
 export interface NearFieldUniforms {
   nhMetersPerUnit: { value: number };
   nhDetailMeters: { value: number };
+  nhBakeCellMeters: { value: number };
   nhDetailStrength: { value: number };
   nhDetailSeed: { value: number };
   nhBiome: { value: number };
   nhFabricAzimuth: { value: number };
   nhNearFieldActive: { value: number };
+  nhTileColor: { value: DataArrayTexture | null };
+  nhTileShape: { value: DataArrayTexture | null };
+  nhTileMeters: { value: number };
+  nhTileReady: { value: number };
+  nhTileAO: { value: number };
 }
 
 export function createNearFieldUniforms(): NearFieldUniforms {
   return {
     nhMetersPerUnit: { value: 1 },
     nhDetailMeters: { value: 24 },
+    nhBakeCellMeters: { value: 0 },
     nhDetailStrength: { value: 0.65 },
     nhDetailSeed: { value: 0 },
     nhBiome: { value: 0 },
     nhFabricAzimuth: { value: 0 },
     nhNearFieldActive: { value: 0 },
+    nhTileColor: { value: null }, nhTileShape: { value: null },
+    nhTileMeters: { value: 6 }, nhTileReady: { value: 0 }, nhTileAO: { value: 0.7 },
   };
+}
+
+/** World-meter scale of the gap between the baked grain and close-up pass. */
+export function middleDetailWavelength(authoredDetailMeters: number): number {
+  return Math.max(0.4, authoredDetailMeters * 1.4);
+}
+
+/** Complement the bake's smooth 2–3.5 samples/period visibility ramp. */
+export function middleDetailWeight(authoredDetailMeters: number, bakeCellMeters: number): number {
+  if (!(bakeCellMeters > 0) || !Number.isFinite(bakeCellMeters)) return 0;
+  const t = Math.max(0, Math.min(1, (middleDetailWavelength(authoredDetailMeters) / bakeCellMeters - 2) / 1.5));
+  return 1 - t * t * (3 - 2 * t);
 }
 
 export function nearFieldShouldRender(
@@ -33,6 +57,7 @@ export function nearFieldShouldRender(
   cameraFovDegrees: number,
   metersPerUnit: number,
   authoredDetailMeters: number,
+  bakeCellMeters = 0,
 ): boolean {
   if (!enabled || !Number.isFinite(cameraDistance) || cameraDistance <= 0 ||
       viewportHeight <= 0 || metersPerUnit <= 0 || authoredDetailMeters <= 0) return false;
@@ -40,17 +65,28 @@ export function nearFieldShouldRender(
     2 * Math.tan(cameraFovDegrees * Math.PI / 360) / viewportHeight;
   // Longer material wavelengths are visible from further away. Start before
   // the per-pixel cutoff to keep a zoom gesture continuous.
-  return footprint < 0.65 * Math.max(0.4, authoredDetailMeters * 0.22);
+  const closeWavelength = Math.max(0.4, authoredDetailMeters * 0.22,
+    Math.min(16, Math.max(2, authoredDetailMeters*0.25)));
+  const wavelength = middleDetailWeight(authoredDetailMeters, bakeCellMeters) > 0
+    ? Math.max(closeWavelength, middleDetailWavelength(authoredDetailMeters)) : closeWavelength;
+  return footprint < 0.65 * wavelength;
+}
+
+export type NearFieldShaderVariant = 'off' | 'analytic' | 'textured';
+
+export function nearFieldShaderVariant(active: boolean, hasTextures: boolean): NearFieldShaderVariant {
+  return !active ? 'off' : hasTextures ? 'textured' : 'analytic';
 }
 
 interface ShaderTarget {
   fragmentShader: string;
-  uniforms: Record<string, { value: number }>;
+  uniforms: Record<string, { value: unknown }>;
 }
 
 const GLSL_PARS = `
 uniform float nhMetersPerUnit;
 uniform float nhDetailMeters;
+uniform float nhBakeCellMeters;
 uniform float nhDetailStrength;
 uniform float nhDetailSeed;
 // Alpine gneiss = 0, aeolian sandstone = 1, vesicular basalt = 2.
@@ -293,6 +329,67 @@ void nhAccumulate(inout NHSurface sum, NHSurface surface, float weight) {
   sum.height += weight*surface.height;
 }
 
+// A separate intermediate scale fills the otherwise blurry region between
+// a terrain texel and the existing close detail. All functions use physical
+// coordinates, so zoom and mesh LOD do not move or stretch the pattern.
+NHSurface nhMiddle(vec3 p, float footprint, vec4 layers) {
+  float warp = nhNoise(p*0.77);
+  float facet = nhNoise(p*2.1 + vec3(21.6,-8.3,17.1))
+    * nhResolved(1.0/(footprint*2.1));
+  float resolved = nhResolved(1.0/footprint);
+  NHSurface sum = NHSurface(vec3(0),0.0,0.0);
+  if (layers.x > 0.0) {
+    float bed = p.y + (nhBiome < 0.5 ? 0.46 : 0.14)*p.x + 0.85*warp;
+    float broken = nhJoint(dot(p,vec3(0.83,0.22,0.39)) + warp*0.65 + 0.2*facet,
+      0.07,footprint,71.0)*resolved;
+    float ledge = nhRib(bed-0.14,0.22,footprint)
+      * smoothstep(-0.32,0.26,warp+facet*0.4);
+    if (nhBiome > 1.5) {
+      // Dark dense lava and disrupted cooling crust, rather than sedimentary bands.
+      float crust = smoothstep(-0.14,0.25,warp+0.55*facet)*resolved;
+      nhAccumulate(sum, NHSurface((crust-0.45)*vec3(0.30,0.15,0.09)
+        + facet*vec3(0.25)-broken*vec3(0.23), 0.10*(crust-0.45)+0.09*broken,
+        0.012*crust-0.019*broken+0.012*facet), layers.x);
+    } else {
+      vec3 mineral = nhBiome < 0.5 ? vec3(0.29,0.30,0.33) : vec3(0.32,0.22,0.12);
+      nhAccumulate(sum, NHSurface(warp*mineral + (ledge-0.12)*vec3(0.31,0.28,0.23)
+        - broken*vec3(0.24,0.23,0.22)+facet*vec3(0.16),
+        -0.07*ledge+0.11*broken+0.05*facet,
+        0.018*ledge-0.018*broken+0.008*facet), layers.x);
+    }
+  }
+  if (layers.y > 0.0) {
+    vec2 ground = p.xz + vec2(warp,-warp)*0.25;
+    float aggregate = nhParticle(ground*1.35,1.45)*nhResolved(1.0/(footprint*1.8));
+    float sorting = nhBiome > 0.5 && nhBiome < 1.5
+      ? cos(6.2831853*(ground.x+0.35*warp+ground.y*0.17))*resolved : facet;
+    vec3 clast = nhBiome > 1.5 ? vec3(0.43,0.17,0.07) : vec3(0.34,0.32,0.28);
+    nhAccumulate(sum, NHSurface((aggregate-0.035)*clast
+      + sorting*vec3(0.17,0.14,0.10)+warp*vec3(0.23,0.19,0.16),
+      -0.13*aggregate+0.05*sorting,
+      0.033*aggregate+0.009*sorting+0.009*warp), layers.y);
+  }
+  if (layers.z > 0.0) {
+    float canopy = smoothstep(-0.18,0.19,warp+0.55*facet);
+    float cushion = nhParticle(p.xz*1.4+vec2(warp,0.2*warp),1.4)
+      * nhResolved(1.0/(footprint*1.9));
+    vec3 tint = nhBiome > 1.5 ? vec3(0.26,0.27,0.14)
+      : nhBiome > 0.5 ? vec3(-0.18,0.12,-0.20) : vec3(-0.22,0.19,-0.14);
+    nhAccumulate(sum, NHSurface((canopy-0.5)*tint
+      + (cushion-0.035)*vec3(0.12,0.24,0.08)+facet*vec3(0.21,0.17,0.09),
+      -0.09*cushion+0.055*(canopy-0.5),
+      (nhBiome > 1.5 ? 0.009 : 0.025)*cushion+0.012*canopy), layers.z);
+  }
+  if (layers.w > 0.0) {
+    float drift = nhRib(p.z*1.15+0.5*warp,0.24,footprint*1.15)
+      * smoothstep(-0.26,0.29,warp+facet*0.3);
+    nhAccumulate(sum, NHSurface((drift-0.12)*vec3(0.021,0.025,0.030)
+      + facet*vec3(0.018,0.022,0.025),
+      -0.10*drift+0.05*facet, 0.017*drift+0.003*facet), layers.w);
+  }
+  return sum;
+}
+
 NHSurface nhEvaluate(vec3 p, float footprint, vec4 layers) {
   float fold = nhNoise(p*0.69);
   float meso = nhNoise(p*2.51 + vec3(13.8, 7.3, 2.1)) *
@@ -319,6 +416,7 @@ const GLSL_ALBEDO = `
 #if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
   vec2 nhReliefDelta = vec2(0.0);
   float nhAlphaShift = 0.0;
+  float nhTileOcclusion = 1.0;
   if (nhNearFieldActive > 0.5 && nhDetailStrength > 0.0001) {
     vec3 nhMetersPosition = vNHPosition * nhMetersPerUnit;
     float wavelength = max(0.4, nhDetailMeters * 0.22);
@@ -335,7 +433,22 @@ const GLSL_ALBEDO = `
     vec2 ormDx = dFdx(vRoughnessMapUv), ormDy = dFdy(vRoughnessMapUv);
     vec2 normDx = dFdx(vNormalMapUv), normDy = dFdy(vNormalMapUv);
     float visibility = 1.0 - smoothstep(0.28, 0.52, footprint);
-    if (visibility > 0.0) {
+    float tileVisibility = 0.0;
+#ifdef NH_LOCAL_DETAIL
+    float tileRatio = wavelength/max(nhTileMeters,0.001);
+    float tileFootprint = footprint*tileRatio;
+    tileVisibility = nhTileReady*(1.0-smoothstep(0.18,0.42,tileFootprint));
+    // A texture-backed close pass replaces, rather than stacks on top of,
+    // the analytic close morphology. Mid-distance structure stays independent.
+    visibility *= 1.0-tileVisibility;
+#endif
+    float midWavelength = max(0.4, nhDetailMeters * 1.4);
+    float midRatio = wavelength/midWavelength;
+    float midFootprint = footprint*midRatio;
+    float missing = nhBakeCellMeters > 0.0
+      ? 1.0-smoothstep(2.0,3.5,midWavelength/nhBakeCellMeters) : 0.0;
+    float midVisibility = missing*(1.0-smoothstep(0.25,0.52,midFootprint));
+    if (visibility > 0.0 || midVisibility > 0.0 || tileVisibility > 0.0) {
       vec4 packedORM = textureGrad(roughnessMap, vRoughnessMapUv, ormDx, ormDy);
       float vegetation = textureGrad(normalMap, vNormalMapUv, normDx, normDy).a;
       vec3 rsv = vec3(packedORM.ba, vegetation);
@@ -346,15 +459,44 @@ const GLSL_ALBEDO = `
       // Hardware dFdx(height) duplicates a slope across a 2x2 fragment quad;
       // on a thin bright snow lip that produces alternating black/white steps.
       const float span = 0.90;
-      vec3 a = p - (pDx+pDy)*(span/3.0);
-      NHSurface sa = nhEvaluate(a, footprint, layers);
-      NHSurface sb = nhEvaluate(a+span*pDx, footprint, layers);
-      NHSurface sc = nhEvaluate(a+span*pDy, footprint, layers);
-      float gain = visibility * nhDetailStrength;
-      vec3 tint = (sa.tint + sb.tint + sc.tint)/3.0;
-      diffuseColor.rgb = clamp(diffuseColor.rgb*(1.0 + gain*tint), 0.0, 1.0);
-      nhAlphaShift = gain*(sa.alpha+sb.alpha+sc.alpha)/3.0;
-      nhReliefDelta = (gain*wavelength/span) * vec2(sb.height-sa.height, sc.height-sa.height);
+      vec3 tintDelta = vec3(0.0);
+      if (midVisibility > 0.0) {
+        // A distinct seed offset keeps the two bands decorrelated. Because p
+        // has a constant seed translation, scaling it does not affect gradients.
+        vec3 mid = p*midRatio + vec3(31.7,-9.6,12.2);
+        vec3 mdx = pDx*midRatio, mdy = pDy*midRatio;
+        vec3 a = mid - (mdx+mdy)*(span/3.0);
+        NHSurface sa = nhMiddle(a, midFootprint, layers);
+        NHSurface sb = nhMiddle(a+span*mdx, midFootprint, layers);
+        NHSurface sc = nhMiddle(a+span*mdy, midFootprint, layers);
+        float gain = midVisibility*nhDetailStrength;
+        tintDelta += gain*(sa.tint+sb.tint+sc.tint)/3.0;
+        nhAlphaShift += gain*(sa.alpha+sb.alpha+sc.alpha)/3.0;
+        nhReliefDelta += (gain*midWavelength/span)*vec2(sb.height-sa.height,sc.height-sa.height);
+      }
+      if (visibility > 0.0) {
+        vec3 a = p - (pDx+pDy)*(span/3.0);
+        NHSurface sa = nhEvaluate(a, footprint, layers);
+        NHSurface sb = nhEvaluate(a+span*pDx, footprint, layers);
+        NHSurface sc = nhEvaluate(a+span*pDy, footprint, layers);
+        float gain = visibility * nhDetailStrength;
+        tintDelta += gain*(sa.tint + sb.tint + sc.tint)/3.0;
+        nhAlphaShift += gain*(sa.alpha+sb.alpha+sc.alpha)/3.0;
+        nhReliefDelta += (gain*wavelength/span) * vec2(sb.height-sa.height, sc.height-sa.height);
+      }
+#ifdef NH_LOCAL_DETAIL
+      if (tileVisibility > 0.0) {
+        NHTileSurface local = nhTileTriplanar(p*tileRatio,pDx*tileRatio,pDy*tileRatio,layers);
+        float gain = tileVisibility*nhDetailStrength;
+        tintDelta += gain*local.tint;
+        nhAlphaShift += gain*local.alpha;
+        // Project the tile's metric surface gradient into screen derivatives
+        // and let the shared normal pass transform it to view space.
+        nhReliefDelta += gain*wavelength*vec2(dot(local.gradient,pDx),dot(local.gradient,pDy));
+        nhTileOcclusion = 1.0-clamp(local.cavity*tileVisibility*nhTileAO*min(1.0,nhDetailStrength),0.0,0.45);
+      }
+#endif
+      diffuseColor.rgb = clamp(diffuseColor.rgb*(1.0 + tintDelta), 0.0, 1.0);
     }
   }
 #endif
@@ -363,6 +505,14 @@ const GLSL_ALBEDO = `
 const GLSL_ROUGHNESS = `
 #if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
   roughnessFactor = sqrt(clamp(roughnessFactor*roughnessFactor + nhAlphaShift, 0.04, 1.0));
+#endif
+`;
+
+const GLSL_TILE_AO = `
+#if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
+  // Local cavities affect indirect illumination, never the unlit albedo or direct sun.
+  reflectedLight.indirectDiffuse *= nhTileOcclusion;
+  reflectedLight.indirectSpecular *= mix(1.0,nhTileOcclusion,roughnessFactor);
 #endif
 `;
 
@@ -379,7 +529,7 @@ const GLSL_NORMAL = `
       vec3 gradient = (nhReliefDelta.x*rx + nhReliefDelta.y*ry)/determinant;
       // Smoothly limit the added near-field relief to a 33-degree
       // tilt. A grazing view cannot turn a subpixel grain into a black spike.
-      const float limit = 0.65;
+      float limit = mix(0.65,0.90,nhTileReady);
       gradient *= limit*inversesqrt(limit*limit + dot(gradient,gradient));
       normal = normalize(normal - gradient);
     }
@@ -387,16 +537,32 @@ const GLSL_NORMAL = `
 #endif
 `;
 
-export function installNearFieldShader(shader: ShaderTarget, uniforms: NearFieldUniforms) {
-  for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
+export function installNearFieldShader(
+  shader: ShaderTarget, uniforms: NearFieldUniforms, variant: NearFieldShaderVariant = 'textured',
+) {
   const replace = (marker: string, code: string) => {
     if (!shader.fragmentShader.includes(marker)) {
       throw new Error(`Terrain PBR shader does not contain ${marker}.`);
     }
     shader.fragmentShader = shader.fragmentShader.replace(marker, marker + '\n' + code);
   };
-  shader.fragmentShader = GLSL_PARS + '\n' + shader.fragmentShader;
+  // Keep identical uniform objects in all variants: Three can reuse a cached
+  // program after switching variants without invoking onBeforeCompile again.
+  for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
+  if (variant === 'off') {
+    // Keep the existing PBR roughness floor without compiling any procedural
+    // detail code (or allocating array sampler slots) for an overview.
+    replace('#include <roughnessmap_fragment>', `
+#if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
+  roughnessFactor = sqrt(clamp(roughnessFactor*roughnessFactor, 0.04, 1.0));
+#endif
+`);
+    return;
+  }
+  const local = variant === 'textured' ? '#define NH_LOCAL_DETAIL\n' + DETAIL_TEXTURE_GLSL : 'uniform float nhTileReady;';
+  shader.fragmentShader = GLSL_PARS + '\n' + local + '\n' + shader.fragmentShader;
   replace('#include <map_fragment>', GLSL_ALBEDO);
   replace('#include <roughnessmap_fragment>', GLSL_ROUGHNESS);
   replace('#include <normal_fragment_maps>', GLSL_NORMAL);
+  replace('#include <aomap_fragment>', GLSL_TILE_AO);
 }

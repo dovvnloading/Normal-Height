@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/components/ExportDialog.tsx'
       - 'src/export/**'
+      - 'src/materials/**'
+      - 'src/render/**'
       - 'tests/e2e/pbr-acceptance.spec.ts'
       - '.github/workflows/pbr-export-memory-qa.yml'
   workflow_dispatch:
@@ -16,7 +18,7 @@ permissions:
 jobs:
   pbr-export-memory:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,6 +32,8 @@ jobs:
         env:
           PBR_BROWSER_BENCH: '1'
         run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep "1K browser export decodes|2K PBR preflight|standalone 2K material maps" --workers=1
+      - name: Verify material shader and new tile archive in Chromium
+        run: npx playwright test tests/e2e/pbr-acceptance.spec.ts --grep "near-field material shader|seamless detail tile ZIP|texture-backed close terrain" --workers=1 --retries=0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
