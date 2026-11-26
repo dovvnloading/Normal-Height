@@ -738,7 +738,7 @@ test('seamless detail tile ZIP exports four local materials with correct channel
 
 
 test('texture-backed close terrain shading loads lazily, visibly changes material and releases GPU arrays', async ({ page }, testInfo) => {
-  test.setTimeout(150_000);
+  test.setTimeout(process.env.PBR_REAL_GPU ? 240_000 : 150_000);
   const errors:string[]=[];
   page.on('console',message=>{
     if(message.type()==='error' && /WebGLProgram|shader|GLSL|VALIDATE_STATUS|GL_INVALID_OPERATION/i.test(message.text())) errors.push(message.text());
@@ -808,7 +808,128 @@ test('texture-backed close terrain shading loads lazily, visibly changes materia
   await viewport.evaluate(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));});
   const reenabled=await readPixels();
   expect(reenabled).not.toEqual(disabled);
+  if (process.env.PBR_REAL_GPU) {
+    // Exercise actual continuous close-camera movement after the shader and
+    // texture uploads have settled. RAF gaps include UI scheduling and GPU
+    // backpressure; optional timer-query samples are recorded separately.
+    const profile = await viewport.evaluate(async (canvas: HTMLCanvasElement) => {
+      const gl = canvas.getContext('webgl2')!;
+      const debug = gl.getExtension('WEBGL_debug_renderer_info');
+      const webglRenderer = String(gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      const hooks = (window as typeof window & { __nhMeshBenchmark?: {
+        heightAt(x: number, z: number): number | null;
+        setCamera(position: [number, number, number], target: [number, number, number]): void;
+      } }).__nhMeshBenchmark!;
+      const x = 0.21, z = 0.19, y = hooks.heightAt(x, z);
+      if (y === null) throw new Error('Terrain surface not available');
+      const gaps: number[] = [];
+      const startSamples = Number(canvas.dataset.meshGpuSampleCount ?? 0);
+      let last = 0;
+      for (let i = 0; i < 90; i++) {
+        const t = await new Promise<number>(resolve => requestAnimationFrame(resolve));
+        if (i >= 12) gaps.push(t - last);
+        last = t;
+        const angle = i * 0.035;
+        hooks.setCamera([x + 0.002 * Math.cos(angle), y + 0.009, z + 0.002 * Math.sin(angle)], [x, y, z]);
+      }
+      // Allow the final asynchronous timer queries to publish without a
+      // synchronous GPU readback during the measured camera motion.
+      await new Promise<void>(resolve => setTimeout(resolve, 1100));
+      const sorted = [...gaps].sort((a, b) => a - b);
+      const gpu = JSON.parse(canvas.dataset.meshGpuSamples ?? '[]') as number[];
+      const endSamples = Number(canvas.dataset.meshGpuSampleCount ?? 0);
+      return {
+        webglRenderer, frames: gaps.length,
+        p50FrameGapMs: sorted[Math.floor((sorted.length - 1) * 0.5)],
+        p95FrameGapMs: sorted[Math.floor((sorted.length - 1) * 0.95)],
+        maxFrameGapMs: sorted.at(-1),
+        gpuFrameMs: gpu.slice(Math.max(0, gpu.length - Math.max(0, endSamples - startSamples))),
+        variant: canvas.dataset.nearFieldShaderVariant,
+      };
+    });
+    await testInfo.attach('close-textured-hardware-profile.json', {
+      body: JSON.stringify(profile, null, 2), contentType: 'application/json',
+    });
+    expect(profile.webglRenderer).toMatch(/Apple|Metal|Paravirtual/i);
+    expect(profile.webglRenderer).not.toMatch(/SwiftShader|llvmpipe|Software/i);
+    expect(profile.variant).toBe('textured');
+    expect(profile.frames).toBeGreaterThan(60);
+    // Match the existing real-GPU PBR responsiveness guard, rather than
+    // assert that a hosted virtual GPU represents all target hardware.
+    expect(profile.p95FrameGapMs).toBeLessThan(120);
+    expect(profile.maxFrameGapMs).toBeLessThan(1000);
+  }
   expect(await viewport.getAttribute('data-pbr-request-count')).toBe(pbrRequests);
   expect(await viewport.getAttribute('data-pbr-upload-count')).toBe(pbrUploads);
+  expect(errors).toEqual([]);
+});
+
+test('2K local detail tile export decodes all four material sets under a qualified memory budget', async ({ page }, testInfo) => {
+  test.skip(!process.env.PBR_DETAIL_2K,
+    'Large local tile qualification runs in the dedicated memory-capped workflow.');
+  test.setTimeout(720_000);
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await loadFastProject(page, 512);
+  // Isolate the export Worker from continuous 3D rendering. The production
+  // export path must still create the full ZIP at the requested resolution.
+  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'deviceMemory', { value: 8, configurable: true });
+  });
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('detailTiles');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('2048');
+  await expect(dialog).toContainText('6.00 × 6.00 m');
+  const began = Date.now();
+  const downloading = page.waitForEvent('download', { timeout: 600_000 });
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toMatch(/alpine-2048-detail-tiles\.zip$/);
+  const path = testInfo.outputPath('detail-tiles-2048-verified.zip');
+  await download.saveAs(path);
+  const durationMs = Date.now() - began;
+  const zip = new Uint8Array(await readFile(path));
+  const names: string[] = [];
+  const manifestOnly = unzipSync(zip, { filter: file => {
+    names.push(file.name);
+    return file.name === 'material-tiles.json';
+  } });
+  const meta = JSON.parse(new TextDecoder().decode(manifestOnly['material-tiles.json']));
+  const layers = ['rock', 'soil', 'vegetation', 'snow'];
+  const channels = ['basecolor', 'height16', 'normal-gl', 'normal-dx', 'orm', 'roughness'];
+  expect(names.sort()).toEqual(['material-tiles.json', ...layers.flatMap(layer =>
+    channels.map(channel => layer + '/' + channel + '.png'))].sort());
+  expect(meta.resolution).toEqual([2048, 2048]);
+  expect(meta.tileSizeMeters).toEqual([6, 6]);
+  expect(meta.sampleSpacingMeters).toBe(6 / 2048);
+  expect(meta.materials.map((m: { layer: string }) => m.layer)).toEqual(layers);
+  await testInfo.attach('detail-tiles-2048-elapsed.json', {
+    body: JSON.stringify({ durationMs, archiveBytes: zip.byteLength, resolution: 2048 }, null, 2),
+    contentType: 'application/json',
+  });
+  // Decode one layer at a time to avoid retaining all 24 expanded images.
+  for (const layer of layers) {
+    const selected = unzipSync(zip, { filter: file => file.name.startsWith(layer + '/') });
+    const decoded = Object.fromEntries(channels.map(channel => [
+      channel, decodePNG(selected[layer + '/' + channel + '.png']),
+    ]));
+    for (const channel of channels) {
+      const image = decoded[channel];
+      expect([image.width, image.height, image.depth, image.type])
+        .toEqual([2048, 2048, channel === 'height16' ? 16 : 8, channel === 'height16' ? 0 : 6]);
+    }
+    const gl = decoded['normal-gl'].pixels, dx = decoded['normal-dx'].pixels;
+    const orm = decoded.orm.pixels, rough = decoded.roughness.pixels;
+    let mismatches = 0;
+    for (let i = 0; i < gl.length; i += 4099 * 4) {
+      if (gl[i] !== dx[i] || gl[i+1] + dx[i+1] !== 255 || gl[i+2] !== dx[i+2] ||
+          gl[i+3] !== 255 || dx[i+3] !== 255 || orm[i+1] !== rough[i] ||
+          orm[i+2] !== 0 || orm[i+3] !== 255 || decoded.basecolor.pixels[i+3] !== 255)
+        mismatches++;
+    }
+    expect(mismatches, layer + ' channel contract').toBe(0);
+  }
   expect(errors).toEqual([]);
 });
