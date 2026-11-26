@@ -613,7 +613,7 @@ export function Inspector({
                   type: 'toggle',
                   default: true,
                   description:
-                    'Adds meter-scaled world-space rock joints, sediment grain and snow/vegetation micro-normal shading only when zoomed close enough to resolve them. Preview only; exported PBR maps are unchanged.',
+                    'Adds adaptive outcrop shading and seamless local rock, soil, vegetation and snow textures at close range. Double-click a surface point and zoom in to inspect the material. Use the separate detail-tile export for portable local textures.',
                 }}
                 value={settings.nearFieldDetail}
                 onChange={(v) => onSettingsChange({ ...settings, nearFieldDetail: Boolean(v) })}

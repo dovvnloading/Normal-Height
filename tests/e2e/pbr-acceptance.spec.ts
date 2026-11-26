@@ -24,12 +24,12 @@ function fastProject(resolution: 512 | 1024): TerrainProject {
   };
 }
 
-async function loadFastProject(page: Page, n: 512 | 1024) {
-  await page.goto('/');
+async function loadFastProject(page: Page, n: 512 | 1024, url = '/', scene = fastProject(n)) {
+  await page.goto(url);
   await page.getByLabel('Import terrain project file', { exact: true }).setInputFiles({
     name: 'pbr-acceptance.nhterrain.json',
     mimeType: 'application/json',
-    buffer: Buffer.from(JSON.stringify(fastProject(n))),
+    buffer: Buffer.from(JSON.stringify(scene)),
   });
   await expect(page.locator('.project-name')).toContainText(`PBR acceptance ${n}`);
   await expect(page.locator('.status-bar')).toContainText('Terrain ready', { timeout: 90_000 });
@@ -728,4 +728,73 @@ test('seamless detail tile ZIP exports four local materials with correct channel
       expect(orm[i+2]).toBe(0);
     }
   }
+});
+
+
+test('texture-backed close terrain shading loads lazily, visibly changes material and releases GPU arrays', async ({ page }, testInfo) => {
+  test.setTimeout(150_000);
+  const errors:string[]=[];
+  page.on('console',message=>{
+    if(message.type()==='error' && /WebGLProgram|shader|GLSL|VALIDATE_STATUS|GL_INVALID_OPERATION/i.test(message.text())) errors.push(message.text());
+  });
+  page.on('pageerror',error=>errors.push(error.message));
+  const scene=fastProject(512);
+  // A pure exposed-rock specimen with a real mountain underneath. Avoid
+  // comparing two different weight maps or seeds when testing local shading.
+  scene.materialPaint=[{layer:'rock',strength:1,hardness:1,radius:0.2,fullTile:true,points:[{u:0.5,v:0.5}]}];
+  await loadFastProject(page,512,'/?meshBenchmark=local-detail',scene);
+  const viewport=page.getByRole('img',{name:/^Interactive 3D terrain/});
+  await expect(viewport).toHaveAttribute('data-material-status','ready',{timeout:60_000});
+  await expect(viewport).toHaveAttribute('data-local-detail-status','idle');
+  await expect(viewport).toHaveAttribute('data-local-detail-texture-count','0');
+  const pbrRequests=await viewport.getAttribute('data-pbr-request-count');
+  const pbrUploads=await viewport.getAttribute('data-pbr-upload-count');
+  await page.getByRole('button',{name:'Scene',exact:true}).click();
+  const toggle=page.getByRole('checkbox',{name:/Live close-up microdetail/});
+  await expect(toggle).toBeChecked();
+  await page.evaluate(()=>{
+    const hooks=(window as typeof window & {__nhMeshBenchmark?:{
+      heightAt(x:number,z:number):number|null;
+      setCamera(position:[number,number,number],target:[number,number,number]):void;
+    }}).__nhMeshBenchmark;
+    if(!hooks)throw new Error('Missing camera benchmark hook');
+    const x=0.21,z=0.19,y=hooks.heightAt(x,z);
+    if(y===null)throw new Error('Terrain surface not available');
+    hooks.setCamera([x+0.0015,y+0.009,z+0.0015],[x,y,z]);
+  });
+  await expect(viewport).toHaveAttribute('data-near-field-detail','active',{timeout:15_000});
+  await expect(viewport).toHaveAttribute('data-local-detail-status','ready',{timeout:65_000});
+  await expect(viewport).toHaveAttribute('data-local-detail-texture-count','2');
+  await expect(viewport).toHaveAttribute('data-pbr-texture-count','3');
+  await expect(viewport).toHaveAttribute('data-local-detail-uploads','1');
+  const readPixels=()=>viewport.evaluate((source:HTMLCanvasElement)=>{
+    const scratch=document.createElement('canvas');
+    scratch.width=128;scratch.height=128;
+    const ctx=scratch.getContext('2d',{willReadFrequently:true})!;
+    ctx.drawImage(source,0,0,128,128);
+    return Array.from(ctx.getImageData(0,0,128,128).data);
+  });
+  await viewport.evaluate(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));});
+  const enabled=await readPixels();
+  await testInfo.attach('texture-backed-close-rock.png',{body:await viewport.screenshot(),contentType:'image/png'});
+  await toggle.uncheck();
+  await expect(viewport).toHaveAttribute('data-local-detail-status','idle');
+  await expect(viewport).toHaveAttribute('data-local-detail-texture-count','0');
+  await viewport.evaluate(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));});
+  const disabled=await readPixels();
+  await testInfo.attach('same-camera-without-close-detail.png',{body:await viewport.screenshot(),contentType:'image/png'});
+  let changed=0,mean=0;
+  for(let p=0;p<enabled.length;p+=4){
+    const difference=(Math.abs(enabled[p]-disabled[p])+Math.abs(enabled[p+1]-disabled[p+1])+Math.abs(enabled[p+2]-disabled[p+2]))/3;
+    mean+=difference;
+    if(difference>2)changed++;
+  }
+  await testInfo.attach('texture-backed-close-delta.json',{body:JSON.stringify({changedFraction:changed/(128*128),meanRGBDifference:mean/(128*128)},null,2),contentType:'application/json'});
+  expect(changed).toBeGreaterThan(128*128*0.02);
+  await toggle.check();
+  await expect(viewport).toHaveAttribute('data-local-detail-status','ready',{timeout:20_000});
+  await expect(viewport).toHaveAttribute('data-local-detail-uploads','2');
+  expect(await viewport.getAttribute('data-pbr-request-count')).toBe(pbrRequests);
+  expect(await viewport.getAttribute('data-pbr-upload-count')).toBe(pbrUploads);
+  expect(errors).toEqual([]);
 });
