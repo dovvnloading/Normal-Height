@@ -759,6 +759,7 @@ export default function App() {
   const sedimentBudget = engine.result?.stats.sedimentBudget;
   const inspector = (
     <Inspector
+      projectSession={paintSession}
       worldMode={workspace === 'world'}
       splineEditing={
         workspace === 'terrain' && Boolean(selectedSpline && editingSplineId === selectedSpline.id)
@@ -786,12 +787,17 @@ export default function App() {
         const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
         if (current) updateNode({ params: { ...current.params, ...patch } });
       }}
-      onImportRaster={(raster) => {
-        const nodes = projectRef.current.graph.nodes.map((node) =>
-          node.id === selectedId && node.kind === 'heightImport' ? { ...node, raster } : node,
+      onImportRaster={(raster, previous) => {
+        const current = projectRef.current;
+        const source = current.graph.nodes.find((node) => node.id === selectedId);
+        if (!source || source.kind !== 'heightImport' || source.raster !== previous)
+          throw new Error('The heightmap source changed. Choose the file again.');
+        const nodes = current.graph.nodes.map((node) =>
+          node.id === source.id ? { ...node, raster } : node,
         );
         assertRasterBudget(nodes);
-        apply({ ...projectRef.current, graph: { ...projectRef.current.graph, nodes } });
+        if (!apply({ ...current, graph: { ...current.graph, nodes } }))
+          throw new Error(PROJECT_STORAGE_ERROR);
       }}
       onRename={(label) => updateNode({ label }, `${selectedId}-label`)}
       onBypass={() => selected && updateNode({ bypassed: !selected.bypassed })}

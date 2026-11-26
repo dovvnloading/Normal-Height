@@ -6,6 +6,14 @@ import {
   type HeightRaster,
 } from '../model/heightRaster';
 import { crc32 } from '../model/pngCrc';
+import {
+  defaultRawEncoding,
+  isRawHeightmap,
+  normalizeRawByteOrder,
+  rawSampleBytes,
+  validateRawLayout,
+  type RawLayout,
+} from './rawLayout';
 
 const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 
@@ -129,29 +137,35 @@ async function decodePng(file: Uint8Array<ArrayBuffer>) {
   return { width, height, format: 'u16le' as const, samples };
 }
 
-export async function importHeightRaster(file: File): Promise<HeightRaster> {
+export async function importHeightRaster(file: File, rawLayout?: RawLayout): Promise<HeightRaster> {
   if (file.size > MAX_PROJECT_RASTER_BYTES)
     throw new Error('Choose a heightmap file of 16 MiB or less.');
   const name = file.name.slice(0, 160);
   if (/\.png$/i.test(file.name)) {
+    if (rawLayout) throw new Error('PNG dimensions and sample type are stored in the image.');
     const { width, height, format, samples } = await decodePng(
       new Uint8Array(await file.arrayBuffer()),
     );
     return { name, width, height, format, data: encodeSamples(samples) };
   }
-  if (!/\.(r16|r32|raw)$/i.test(file.name))
+  if (!isRawHeightmap(file.name))
     throw new Error('Choose a grayscale PNG, R16, R32, or RAW file.');
-  const float = /(?:\.r32|f32le\.raw)$/i.test(file.name);
-  const side = Math.sqrt(file.size / (float ? 4 : 2));
-  if (!Number.isInteger(side))
-    throw new Error('RAW heightmaps must be headerless square sample grids.');
-  checkRasterDimensions(side, side);
+  // Keep the historical square-grid convention for programmatic callers that
+  // omit a layout. The inspector always confirms the actual layout explicitly.
+  const encoding = defaultRawEncoding(file.name);
+  const side = Math.sqrt(file.size / rawSampleBytes(encoding.sampleType));
+  if (!rawLayout && !Number.isInteger(side))
+    throw new Error('RAW heightmaps must be headerless square sample grids unless a layout is specified.');
+  const layout = rawLayout ?? { ...encoding, width: side, height: side };
+  validateRawLayout(file.size, layout);
   const samples = new Uint8Array(await file.arrayBuffer());
+  normalizeRawByteOrder(samples, layout);
+  const float = layout.sampleType === 'float32';
   if (float) checkFloatSamples(samples);
   return {
     name,
-    width: side,
-    height: side,
+    width: layout.width,
+    height: layout.height,
     format: float ? 'f32le' : 'u16le',
     data: encodeSamples(samples),
   };
