@@ -97,6 +97,7 @@ describe('terrain export lifecycle', () => {
     expect(post.message).toMatchObject({
       project, format: 'mask16', outputNodeId: 'mask-output', bundle: true, memoryBudgetMiB: 512,
     });
+    if (post.message.type !== 'encode') throw new Error('Expected terrain encode');
     expect(post.transfer).toEqual([post.message.field.height.buffer, post.message.field.flow.buffer]);
     h.complete(id);
     expect(h.encoders[0].terminated).toBe(1);
@@ -193,6 +194,26 @@ describe('terrain export lifecycle', () => {
       expect(w.terminated).toBe(1);
       expect(h.downloads).toHaveLength(0);
     }
+  });
+
+  it('generates seamless assets directly in the cancellable encoding worker without evaluating terrain', () => {
+    const h = harness();
+    h.client.start({ ...options, format: 'detailTiles', bundle: true, previewNodeId: undefined });
+    expect(h.terrains).toHaveLength(0);
+    expect(h.encoders).toHaveLength(1);
+    expect(h.last()?.phase).toBe('encoding');
+    const post = h.encoders[0].posts[0];
+    expect(post.message).toMatchObject({ type: 'encodeTiles', resolution: 256, format: 'detailTiles' });
+    expect(post.transfer).toEqual([]);
+    const id = post.message.id;
+    h.client.cancel();
+    expect(h.encoders[0].terminated).toBe(1);
+    h.complete(id);
+    expect(h.downloads).toHaveLength(0);
+    h.client.start({ ...options, format: 'detailTiles' });
+    h.complete(h.encoders[1].posts[0].message.id);
+    expect(h.last()?.phase).toBe('success');
+    expect(h.downloads).toHaveLength(1);
   });
 
   it('disposes silently on close and suppresses queued download callbacks', () => {

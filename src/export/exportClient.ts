@@ -28,6 +28,7 @@ export interface ExportOptions {
 }
 
 export function encodingStage(format: ExportFormat, bundle: boolean): string {
+  if (format === 'detailTiles') return 'Synthesizing seamless substrate tiles and packing ZIP';
   if (format === 'pbr') return 'Synthesizing material maps and packing ZIP';
   if (format === 'mask16') return bundle ? 'Encoding mask and packing ZIP' : 'Encoding 16-bit mask';
   if (format === 'raw32') return bundle ? 'Writing Float32 elevation and packing ZIP' : 'Writing Float32 elevation';
@@ -57,6 +58,11 @@ export class TerrainExportClient {
     if (this.active) return;
     const id = ++this.generation;
     this.active = true;
+    // Local surface assets do not require an erosion run or a terrain raster.
+    if (options.format === 'detailTiles') {
+      this.encode(id, options);
+      return;
+    }
     let progress = 0;
     this.publish({
       phase: 'generating',
@@ -112,7 +118,7 @@ export class TerrainExportClient {
     this.releaseWorker();
   }
 
-  private encode(id: number, options: ExportOptions, result: Extract<WorkerResponse, { type: 'result' }>['result']): void {
+  private encode(id: number, options: ExportOptions, result?: Extract<WorkerResponse, { type: 'result' }>['result']): void {
     this.publish({ phase: 'encoding', stage: encodingStage(options.format, options.bundle) });
     try {
       const encoder = this.createEncoder();
@@ -140,6 +146,13 @@ export class TerrainExportClient {
       encoder.onmessageerror = () => {
         if (this.isCurrent(id, encoder)) this.fail('Could not read the encoded export.');
       };
+      if (options.format === 'detailTiles') {
+        encoder.postMessage({ type: 'encodeTiles', id, project: options.project,
+          resolution: options.resolution, format: 'detailTiles', bundle: true,
+          memoryBudgetMiB: options.memoryBudgetMiB });
+        return;
+      }
+      if (!result) throw new Error('Missing terrain export result.');
       const field = result.field;
       // Source-only graphs can share zero-filled diagnostics. Every transferable
       // must be unique; SharedArrayBuffer is not transferable.

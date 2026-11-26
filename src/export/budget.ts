@@ -5,14 +5,14 @@ const SINGLE_PBR_FORMATS = [
   'normalGL', 'normalDX', 'detailNormal',
 ] as const;
 type SinglePBRFormat = (typeof SINGLE_PBR_FORMATS)[number];
-type PBRExportFormat = 'pbr' | SinglePBRFormat;
+type PBRExportFormat = 'pbr' | 'detailTiles' | SinglePBRFormat;
 
 export function isSinglePBRExportFormat(format: ExportFormat): format is SinglePBRFormat {
   return SINGLE_PBR_FORMATS.some((channel) => channel === format);
 }
 
 export function isPBRExportFormat(format: ExportFormat): format is PBRExportFormat {
-  return format === 'pbr' || isSinglePBRExportFormat(format);
+  return format === 'pbr' || format === 'detailTiles' || isSinglePBRExportFormat(format);
 }
 
 /**
@@ -36,7 +36,9 @@ export function estimatePBRPeakMiB(
   // material field, overlapping UI/transfer buffers, RGBA, PNG scratch/copies,
   // and runtime allocation headroom. One PNG needs less retained encoding
   // memory than the full ZIP, but still requires the same synthesis workspace.
-  const bytesPerPixel = format === 'pbr' ? 156 : bundle ? 132 : 120;
+  // Four tile assets × 22 decoded bytes/pixel, retained PNGs and ZIP
+  // copies. Tiles encode one substrate at a time and do not allocate a DEM.
+  const bytesPerPixel = format === 'detailTiles' ? 288 : format === 'pbr' ? 156 : bundle ? 132 : 120;
   return Math.ceil((64 * MiB + resolution * resolution * bytesPerPixel) / MiB);
 }
 

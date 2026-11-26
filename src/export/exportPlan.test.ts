@@ -10,13 +10,14 @@ describe('export planning', () => {
     expect(mapPayloadBytes('raw32', 1024)).toBe(4 * 1024 ** 2);
     expect(mapPayloadBytes('normal', 1024)).toBe(4 * 1024 ** 2);
     expect(mapPayloadBytes('pbr', 1024)).toBe(48 * 1024 ** 2);
+    expect(mapPayloadBytes('detailTiles', 1024)).toBe(88 * 1024 ** 2);
     expect(formatExportSize(256 * 256 * 2)).toBe('128.0 KiB');
     expect(formatExportSize(4 * 1024 ** 2)).toBe('4.0 MiB');
   });
 
   it('uses the same memory gate as the encoder and suggests the largest smaller safe grid', () => {
     const formats: ExportFormat[] = ['png16', 'mask16', 'raw32', 'normal', 'flow', 'wear', 'deposition',
-      'pbr', 'basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalGL',
+      'pbr', 'detailTiles', 'basecolor', 'roughness', 'ao', 'metallic', 'orm', 'splat', 'curvature', 'normalGL',
       'normalDX', 'detailNormal'];
     for (const format of formats) {
       expect(exportDescription(format).length).toBeGreaterThan(20);

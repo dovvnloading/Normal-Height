@@ -11,6 +11,7 @@ const descriptions: Record<ExportFormat, string> = {
   flow: 'Colorized flow visualization, not raw flow accumulation or water depth.',
   wear: 'Colorized erosion wear visualization, not a physical sediment-depth raster.',
   deposition: 'Colorized deposition visualization, not a physical sediment-depth raster.',
+  detailTiles: 'Four seamless substrate sets for the active biome: albedo, 16-bit local relief, GL/DX normals, roughness and ORM. Independent of terrain extent; repeat at the supplied meter scale.',
   pbr: '13 maps: height and relief (16-bit), base color, OpenGL and DirectX normals, micro-normal, roughness, AO, metallic, ORM, Unity HDRP mask, layer weights and curvature. Includes project and metadata.',
   basecolor: 'sRGB material color without lighting or ambient occlusion baked in.',
   roughness: 'Linear data: black is smooth, white is rough.',
@@ -32,7 +33,7 @@ export function exportDescription(format: ExportFormat): string {
  * Complete PBR contains eleven RGBA8 and two grayscale16 maps.
  */
 export function mapPayloadBytes(format: ExportFormat, resolution: number): number {
-  const bytesPerPixel = format === 'pbr' ? 48 : format === 'png16' || format === 'mask16' ? 2 : 4;
+  const bytesPerPixel = format === 'detailTiles' ? 88 : format === 'pbr' ? 48 : format === 'png16' || format === 'mask16' ? 2 : 4;
   return resolution * resolution * bytesPerPixel;
 }
 

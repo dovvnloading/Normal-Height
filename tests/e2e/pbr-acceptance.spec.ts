@@ -686,3 +686,40 @@ test('near-field material shader compiles, activates at close zoom, and toggles 
   expect(await viewport.getAttribute('data-pbr-worker-ms')).toBe(initialWorkerMs);
   expect(shaderErrors).toEqual([]);
 });
+
+
+test('seamless detail tile ZIP exports four local materials with correct channel contracts', async ({ page }) => {
+  test.setTimeout(120_000);
+  await loadFastProject(page, 512);
+  await page.getByRole('button', { name: 'Export maps', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('combobox', { name: 'Export format' }).selectOption('detailTiles');
+  await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
+  await expect(dialog).toContainText('6.00 × 6.00 m');
+  const downloading = page.waitForEvent('download', { timeout: 90_000 });
+  await dialog.getByRole('button', { name: /Export/i }).last().click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toMatch(/alpine-256-detail-tiles\.zip$/);
+  const path = await download.path();
+  expect(path).not.toBeNull();
+  const files = unzipSync(new Uint8Array(await readFile(path!)));
+  const meta = JSON.parse(new TextDecoder().decode(files['material-tiles.json']));
+  expect(meta.tileSizeMeters).toEqual([6,6]);
+  expect(meta.materials.map((m: { layer: string }) => m.layer)).toEqual(['rock','soil','vegetation','snow']);
+  expect(Object.keys(files)).toHaveLength(25);
+  for (const layer of ['rock','soil','vegetation','snow']) {
+    for (const name of ['basecolor','roughness','orm','normal-gl','normal-dx','height16']) {
+      const image = decodePNG(files[layer + '/' + name + '.png']);
+      expect([image.width,image.height,image.depth]).toEqual([256,256,name === 'height16' ? 16 : 8]);
+    }
+    const gl = decodePNG(files[layer + '/normal-gl.png']).pixels;
+    const dx = decodePNG(files[layer + '/normal-dx.png']).pixels;
+    const orm = decodePNG(files[layer + '/orm.png']).pixels;
+    const rough = decodePNG(files[layer + '/roughness.png']).pixels;
+    for (let i = 0; i < gl.length; i += 508) {
+      expect(gl[i+1] + dx[i+1]).toBe(255);
+      expect(orm[i+1]).toBe(rough[i]);
+      expect(orm[i+2]).toBe(0);
+    }
+  }
+});

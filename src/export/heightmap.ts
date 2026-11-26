@@ -3,6 +3,7 @@ import { zlibSync, zipSync, strToU8 } from 'fflate';
 import { normalMapPixels, colorizeMap } from '../render/maps';
 import { generatePBR, pbrPixels, SPLAT_LAYERS, resolveSurface, AO_RADII_METERS } from '../materials/pbr';
 import type { PBRChannel } from '../materials/pbr';
+import { DETAIL_TILE_MODEL_VERSION, detailTileMeters, generateDetailTile } from '../materials/detailTiles';
 import type { HeightField, TerrainProject } from '../model/types';
 import { slug } from '../model/project';
 import { serializeProjectFile } from '../model/projectStorage';
@@ -95,8 +96,55 @@ export function encodeRawHeight(field: HeightField, heightScale: number) {
   return bytes;
 }
 export type ExportFormat = 'png16' | 'mask16' | 'raw32' | 'normal' | 'flow' | 'wear' | 'deposition'
-  | 'pbr' | 'basecolor' | 'roughness' | 'ao' | 'metallic' | 'orm'
+  | 'pbr' | 'detailTiles' | 'basecolor' | 'roughness' | 'ao' | 'metallic' | 'orm'
   | 'splat' | 'curvature' | 'normalGL' | 'normalDX' | 'detailNormal';
+/** A separate portable set: four tileable surface assets, no DEM simulation. */
+export function makeDetailTileExport(project: TerrainProject, resolution: number, onLayer?: (layer: string) => void) {
+  const name = slug(project.name);
+  const surface = resolveSurface(project.surface);
+  const files: Record<string, Uint8Array> = {};
+  const materials: { layer: string; path: string; minReliefMeters: number; maxReliefMeters: number }[] = [];
+  for (const layer of SPLAT_LAYERS) {
+    onLayer?.(layer);
+    const tile = generateDetailTile(layer, surface, project.seed, resolution);
+    const root = layer + '/';
+    const range = heightRange(tile.relief);
+    materials.push({ layer, path: root, minReliefMeters: range.min, maxReliefMeters: range.max });
+    files[root + 'basecolor.png'] = encodeRGBA(tile.basecolor, resolution);
+    files[root + 'height16.png'] = encodeHeightPNG({ height: tile.relief, resolution }, range);
+    files[root + 'normal-gl.png'] = encodeRGBA(tile.normal, resolution);
+    // Encode OpenGL first, then reuse the owned normal buffer for DirectX.
+    for (let i = 1; i < tile.normal.length; i += 4) tile.normal[i] = 255 - tile.normal[i];
+    files[root + 'normal-dx.png'] = encodeRGBA(tile.normal, resolution);
+    files[root + 'orm.png'] = encodeRGBA(tile.orm, resolution);
+    // Reuse normal storage for standalone grayscale roughness to bound peak RAM.
+    for (let i = 0; i < tile.normal.length; i += 4) {
+      tile.normal[i] = tile.normal[i+1] = tile.normal[i+2] = tile.orm[i+1];
+      tile.normal[i+3] = 255;
+    }
+    files[root + 'roughness.png'] = encodeRGBA(tile.normal, resolution);
+  }
+  const meters = detailTileMeters(surface.detailMeters);
+  files['material-tiles.json'] = strToU8(JSON.stringify({
+    application: 'Normal Height', materialTileModelVersion: DETAIL_TILE_MODEL_VERSION,
+    resolution: [resolution, resolution], tileSizeMeters: [meters, meters],
+    sampleSpacingMeters: meters / resolution, seed: project.seed, surface,
+    sampling: 'Repeat U and V; pixel centers are (index+0.5)/resolution. No duplicated border texels.',
+    orientation: 'North at top; column increases east. OpenGL +Y and DirectX -Y normals provided.',
+    channelContract: {
+      basecolor: 'sRGB, unlit reflectance, opaque alpha',
+      height16: 'Linear 16-bit UNORM. relief_m = minReliefMeters + code/65535*(maxReliefMeters-minReliefMeters)',
+      'normal-gl': 'Linear RGB tangent normal, +Y',
+      'normal-dx': 'Linear RGB tangent normal, -Y',
+      orm: 'Linear R=approximate local cavity AO, G=perceptual roughness, B=0 metallic, A=255',
+      roughness: 'Linear grayscale perceptual roughness',
+    },
+    usage: 'Independent surface assets for repeat sampling and layer blending using terrain splat masks. Not pixel-identical to the live analytic terrain shader. Local cavity AO is not terrain horizon AO. Blend or layer detail normals with the terrain normal; do not overwrite terrain slope.',
+    materials,
+  }, null, 2));
+  return { bytes: zipSync(files, { level: 0 }), filename: name + '-' + surface.biome + '-' + resolution + '-detail-tiles.zip', mime: 'application/zip' };
+}
+
 export function makeExport(
   field: HeightField,
   project: TerrainProject,
@@ -104,6 +152,7 @@ export function makeExport(
   bundle: boolean,
   outputNodeId?: string,
 ) {
+  if (format === 'detailTiles') return makeDetailTileExport(project, field.resolution);
   const name = slug(project.name);
   const range = heightRange(field.height);
   if (format === 'mask16') {
@@ -146,7 +195,7 @@ export function makeExport(
     const metadata = {
       application: 'Normal Height',
       version: 1,
-      materialVersion: 3,
+      materialVersion: 4,
       surfaceSchemaVersion: 1,
       resolution: [field.resolution, field.resolution],
       worldSizeMeters: [project.worldSize, project.worldSize],
@@ -167,7 +216,7 @@ export function makeExport(
         unity_hdrp_mask: 'R=metallic (0), G=AO, B=detail mask (255), A=smoothness (1-roughness)',
         splat_rgba: SPLAT_LAYERS,
       },
-      materialModel: 'Seeded biome-specific substrates mixed in linear light using terrain evidence and authored layer coverage.',
+      materialModel: 'Seeded biome-specific facies and natural substrate contacts, mixed in linear light using terrain evidence and authored layer coverage.',
       materialRelief: {
         minMeters: reliefRange.min, maxMeters: reliefRange.max,
         decoding: 'vertical relief in meters = minMeters + sample/65535 * (maxMeters-minMeters)',

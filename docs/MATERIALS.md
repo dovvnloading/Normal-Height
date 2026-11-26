@@ -136,3 +136,35 @@ Export metadata now includes resolved, versioned surface parameters, per-map col
 - The reproducible fixed-studio-light 512² 3D PBR golden records the actual canvas image and compares an 8 × 6 RGB grid with a versioned reference. The recorded mean and p95 color errors were both **zero** under pinned Chromium/SwiftShader, guarding major changes in terrain shading and texture orientation.
 - The positive **2048² full PBR ZIP** test now runs under a verified **2 GiB Linux cgroup memory+swap cap**, rather than a simulated browser memory hint alone. A representative successful run peaked at **1,986,625,536 bytes**, with no OOM or OOM-kill events. A second scenario cancels a 2K export, observes Worker termination, and then verifies a smaller export can succeed under the same cap.
 - The large verification jobs are **manual / feature-branch opt-in**, not mandatory for every routine PR. The normal CI still runs TypeScript, unit tests and standard Chromium behavior. Large PBR export failures remain possible on actual hardware with less than this measured memory footprint.
+
+
+## Material quality model 4: facies and adaptive detail
+
+The terrain bake now adds a seeded, anisotropic outcrop-scale facies field (at least 96 m, or four times the authored grain period). The field alters mineral pigment, sediment sorting, vegetation and roughness; resolved particles also alter material relief. Natural rock/soil/vegetation contacts compete for coverage before paint compositing. Snow coverage is preserved; zero-weight materials stay absent and packed weights still sum to 255. Paint, diagnostic AO, terrain height, and channel conventions are unchanged. Existing projects re-bake with the revised material response, so their visual appearance is intentionally updated.
+
+The live shader has two independently filtered bands. The intermediate wavelength is 1.4 × detailMeters, while the close band remains 0.22 × detailMeters. The intermediate band fades out as the worker bake resolves it (2–3.5 samples per period), and both fade at screen sampling limits. It changes reflectance, GGX alpha and surface gradients, not heightfield geometry. No new terrain GPU textures are allocated. The existing Live close-up microdetail toggle controls both bands.
+
+## Export seamless material detail tiles
+
+Choose **Export maps → Seamless material detail tiles · ZIP**. Unlike a whole-landscape bake, each material fills its own periodic texture and repeats over a compact physical surface. The bundle follows the active biome, seed, authored reference colors, detail strength and AO strength. It does not evaluate the terrain graph. The resolution selector applies separately to each of the four substrates. At 1024² and the default 6 m repeat period, one texel covers about 5.86 mm; an 8 km-wide 1024² terrain bake covers 7.82 m per sample instead.
+
+Each rock, soil, vegetation and snow folder contains:
+
+| File | Meaning |
+| --- | --- |
+| basecolor.png | Unlit sRGB reflectance |
+| normal-gl.png | OpenGL +Y tangent normals from local relief |
+| normal-dx.png | Exact green-channel inverse of GL |
+| roughness.png | Linear perceptual roughness |
+| orm.png | Linear R=local cavity AO, G=roughness, B=0 metallic, A=255 |
+| height16.png | 16-bit local relief, decoded with the per-material min/max in material-tiles.json |
+
+All lattice sites, warps, particle morphology, and derivative neighbors repeat on both UV axes. Textures use pixel-center sampling, not duplicated first/last rows. The tiles are local material assets, not an exact bake of the terrain shader: use terrain splat weights to layer them and combine local normals with the existing terrain normal. Do not replace the terrain's macro albedo/normal or treat tile cavity AO as terrain horizon AO. Large repeat fields should use terrain-scale variation or stochastic tiling to conceal periodic repetition.
+
+The separate memory budget accounts for 24 encoded PNGs and the ZIP. Export one substrate at a time into the archive, with cancellation terminating the encoder worker. High-resolution export timing and peak memory need device qualification. The procedural tiles are authored approximations, not scanned ground truth.
+
+### Visual qualification before release
+
+- Capture matched alpine/arid/volcanic views at overview, mid-distance and close zoom, with lighting, camera and seed held fixed. Inspect all four pure painted substrates and their boundaries; verify no black normal spikes, aliasing or visible zoom pops.
+- Inspect base color under neutral and grazing light and review repeated tiles at 2×2 and 4×4. Confirm correct texture color spaces and normal conventions in a target engine.
+- Run unit/build checks and existing PBR browser tests, compare the fixed-light golden, and measure the new mid/near shader frame time. Do not change visual golden tolerances merely to hide regressions. Recapture goldens only after reviewing actual approved images.
