@@ -40,8 +40,9 @@ const midpoint = (a: ScreenPoint, b: ScreenPoint) => ({ x: (a.x + b.x) / 2, y: (
 const CLICK_SLOP = 6;
 const HANDLE_SLOP = 3;
 
-/** The overlay owns its gestures, not the canvas underneath. Pointer capture
- * keeps edits local; only a completed click or handle drag changes the project. */
+/** One gesture surface covers the entire map during editing, including the
+ * margins outside the tile. Pointer capture keeps edits local; only a completed
+ * click inside the tile or a handle drag changes the project. */
 export function SplineMapOverlay({
   points, editing, ridge, width, falloff, strength, left, top, size, frame,
   onFrameChange, onPathChange,
@@ -133,7 +134,10 @@ export function SplineMapOverlay({
       gesture.current = { kind: 'point', pointer: event.pointerId, index,
         start: position, original: points[index], size: Math.max(1, size), moved: false };
     } else {
-      gesture.current = { kind: event.button === 0 ? 'background' : 'pan',
+      // A click can insert only if it starts on the tile. The surrounding map
+      // belongs to the same pointer registry, but is navigation-only.
+      const inTile = event.target instanceof Node && layer.current?.contains(event.target);
+      gesture.current = { kind: event.button === 0 && inTile ? 'background' : 'pan',
         pointer: event.pointerId, start: position, frame };
     }
   };
@@ -162,8 +166,8 @@ export function SplineMapOverlay({
     if (!g) return;
     if (g.kind === 'pinch') {
       const [a, b] = g.pointers.map((id) => captures.current.get(id)?.position);
-      const bounds = layer.current?.parentElement?.getBoundingClientRect();
-      if (!a || !b || !bounds) return;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      if (!a || !b || bounds.width <= 0 || bounds.height <= 0) return;
       const zoom = Math.max(0.35, Math.min(12, g.frame.zoom * distance(a, b) / g.distance));
       const middle = midpoint(a, b);
       const cx = bounds.left + bounds.width / 2, cy = bounds.top + bounds.height / 2;
@@ -246,10 +250,7 @@ export function SplineMapOverlay({
 
   return (
     <div
-      ref={layer}
-      className={`nh-spline-layer ${editing ? 'is-editing' : ''} ${ridge ? 'is-ridge' : 'is-river'}`}
-      style={{ left, top, width: size, height: size }}
-      aria-label="Spline path overlay"
+      className={`nh-spline-gesture-surface ${editing ? 'is-editing' : ''}`}
       onPointerDown={pointerDown}
       onPointerMove={pointerMove}
       onPointerUp={pointerUp}
@@ -258,48 +259,55 @@ export function SplineMapOverlay({
       onContextMenu={(event) => event.preventDefault()}
       onWheel={() => { if (captures.current.size) cancel(); }}
     >
-      <svg className="nh-spline-drawing" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
-        {editing && strength > 0 && (
-          <svg className="nh-spline-footprint" viewBox="0 0 1000 1000" width="1000" height="1000">
-            <polyline className="nh-spline-outer" points={polyline} strokeWidth={2000 * footprint.outer} />
-            <polyline className="nh-spline-core" points={polyline} strokeWidth={2000 * footprint.core} />
-          </svg>
+      <div
+        ref={layer}
+        className={`nh-spline-layer ${editing ? 'is-editing' : ''} ${ridge ? 'is-ridge' : 'is-river'}`}
+        style={{ left, top, width: size, height: size }}
+        aria-label="Spline path overlay"
+      >
+        <svg className="nh-spline-drawing" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
+          {editing && strength > 0 && (
+            <svg className="nh-spline-footprint" viewBox="0 0 1000 1000" width="1000" height="1000">
+              <polyline className="nh-spline-outer" points={polyline} strokeWidth={2000 * footprint.outer} />
+              <polyline className="nh-spline-core" points={polyline} strokeWidth={2000 * footprint.core} />
+            </svg>
+          )}
+          <polyline className="nh-spline-outline" points={polyline} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={5} />
+          <polyline className="nh-spline-centerline" points={polyline} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={2.5} />
+          {arrows.map((arrow, index) => (
+            <g key={index} transform={`translate(${arrow.x * 1000} ${arrow.y * 1000}) rotate(${arrow.angle}) scale(${markerScale})`}>
+              <path className="nh-spline-arrow-shadow" d="M -5 -5 L 2 0 L -5 5" />
+              <path className="nh-spline-arrow" d="M -5 -5 L 2 0 L -5 5" />
+            </g>
+          ))}
+        </svg>
+        {editing && displayed.map((point, index) => {
+          const role = index === 0 ? (ridge ? 'Start' : 'Headwater') : index === displayed.length - 1 ? (ridge ? 'End' : 'Outlet') : 'Control point';
+          return (
+            <button
+              key={index}
+              type="button"
+              data-spline-index={index}
+              className={`nh-spline-handle ${index === displayed.length - 1 ? 'is-end' : ''} ${draft && gesture.current?.kind === 'point' && gesture.current.index === index ? 'is-dragging' : ''}`}
+              aria-label={`Move spline point ${index + 1}`}
+              aria-description={`${role}. X ${(point.x * 100).toFixed(1)}%, Y ${(point.y * 100).toFixed(1)}%. Arrow keys move by 0.1%, Shift plus arrow by 1%. Delete removes the point when more than two remain.`}
+              aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown Delete Backspace"
+              title={`${role} ${index + 1} · ${(point.x * 100).toFixed(1)}% E, ${(point.y * 100).toFixed(1)}% S. Double-click to remove.`}
+              style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+              onKeyDown={(event) => handleKey(event, index)}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                if (lastHandleClick.current === index && !captures.current.size) removePoint(index);
+              }}
+            ><span>{index + 1}</span></button>
+          );
+        })}
+        {editing && (
+          <span className="nh-spline-edit-hint">
+            {ridge ? 'RIDGE' : 'RIVER'} · {displayed.length >= MAX_SPLINE_POINTS ? 'Point limit reached' : 'Click to add'} · Drag map to pan · Esc cancels drag
+          </span>
         )}
-        <polyline className="nh-spline-outline" points={polyline} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={5} />
-        <polyline className="nh-spline-centerline" points={polyline} fill="none" vectorEffect="non-scaling-stroke" strokeWidth={2.5} />
-        {arrows.map((arrow, index) => (
-          <g key={index} transform={`translate(${arrow.x * 1000} ${arrow.y * 1000}) rotate(${arrow.angle}) scale(${markerScale})`}>
-            <path className="nh-spline-arrow-shadow" d="M -5 -5 L 2 0 L -5 5" />
-            <path className="nh-spline-arrow" d="M -5 -5 L 2 0 L -5 5" />
-          </g>
-        ))}
-      </svg>
-      {editing && displayed.map((point, index) => {
-        const role = index === 0 ? (ridge ? 'Start' : 'Headwater') : index === displayed.length - 1 ? (ridge ? 'End' : 'Outlet') : 'Control point';
-        return (
-          <button
-            key={index}
-            type="button"
-            data-spline-index={index}
-            className={`nh-spline-handle ${index === displayed.length - 1 ? 'is-end' : ''} ${draft && gesture.current?.kind === 'point' && gesture.current.index === index ? 'is-dragging' : ''}`}
-            aria-label={`Move spline point ${index + 1}`}
-            aria-description={`${role}. X ${(point.x * 100).toFixed(1)}%, Y ${(point.y * 100).toFixed(1)}%. Arrow keys move by 0.1%, Shift plus arrow by 1%. Delete removes the point when more than two remain.`}
-            aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown Delete Backspace"
-            title={`${role} ${index + 1} · ${(point.x * 100).toFixed(1)}% E, ${(point.y * 100).toFixed(1)}% S. Double-click to remove.`}
-            style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
-            onKeyDown={(event) => handleKey(event, index)}
-            onDoubleClick={(event) => {
-              event.stopPropagation();
-              if (lastHandleClick.current === index && !captures.current.size) removePoint(index);
-            }}
-          ><span>{index + 1}</span></button>
-        );
-      })}
-      {editing && (
-        <span className="nh-spline-edit-hint">
-          {ridge ? 'RIDGE' : 'RIVER'} · {displayed.length >= MAX_SPLINE_POINTS ? 'Point limit reached' : 'Click to add'} · Drag map to pan · Esc cancels drag
-        </span>
-      )}
+      </div>
     </div>
   );
 }

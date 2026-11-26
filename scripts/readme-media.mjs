@@ -135,36 +135,80 @@ const worldShot = async () => {
   });
 };
 await page.getByRole('button', { name: 'World Studio', exact: true }).click();
-const world = page.getByRole('dialog', { name: 'World Studio', exact: true });
+const world = page.getByRole('region', { name: 'World Studio', exact: true });
 await world.getByText('World overview ready', { exact: true }).waitFor({ timeout: 180_000 });
+await world.getByLabel('Automatic world previews', { exact: true }).uncheck();
+await world.getByText('Preview behaviour', { exact: true }).click();
+await world.getByLabel('Automatic regional refinement', { exact: true }).uncheck();
+await world.getByText('Preview behaviour', { exact: true }).click();
 await worldShot();
-await world.getByLabel('East intervals', { exact: true }).fill('2048');
-await world.getByLabel('South intervals', { exact: true }).fill('2048');
+await world.getByRole('tab', { name: 'Setup', exact: true }).click();
+await world.getByText('Coordinates & exact cell counts', { exact: true }).click();
+for (const label of ['Cells X', 'Cells Z']) {
+  await world.getByLabel(label, { exact: true }).fill('2048');
+  await world.getByLabel(label, { exact: true }).press('Enter');
+}
+await world.getByRole('tab', { name: 'Simulate', exact: true }).click();
+await world.getByLabel('Global reference', { exact: true }).selectOption('256');
 await world.getByRole('button', { name: 'Build world', exact: true }).click();
 await world.getByText('World overview ready', { exact: true }).waitFor({ timeout: 180_000 });
+await world.getByRole('tab', { name: 'Explore', exact: true }).click();
+await world
+  .getByRole('group', { name: 'World view mode', exact: true })
+  .getByRole('button', { name: 'Map', exact: true })
+  .click();
 await worldShot();
-const worldMap = world.getByRole('button', { name: /^World region map/ });
+const worldMap = world.getByRole('region', { name: 'Interactive world map', exact: true });
 await worldMap.focus();
 await page.keyboard.press('ArrowRight');
 await page.keyboard.press('ArrowDown');
 await worldShot();
 await page.screenshot({ path: join(OUT, 'world-studio.png') });
-await world.getByRole('button', { name: 'Refine region', exact: true }).click();
-await world.getByText('Region ready', { exact: true }).waitFor({ timeout: 180_000 });
+await worldMap.press('Enter');
+await world.getByText('Region preview ready', { exact: true }).waitFor({ timeout: 180_000 });
 await worldShot();
-await world.getByLabel('World map channel').selectOption('height');
+const showWorldLayer = async (label) => {
+  await world.locator('.wv-layer-trigger').click();
+  await world
+    .getByRole('group', { name: 'Terrain layers', exact: true })
+    .getByText(label, { exact: true })
+    .click();
+  await page.waitForTimeout(200); // Let the completed field's new raster paint.
+};
+await showWorldLayer('Elevation');
 await worldShot();
-await world.getByLabel('World map channel').selectOption('flow');
+await showWorldLayer('Flow');
 await worldShot();
-await world.getByLabel('World map channel').selectOption('relief');
-await world.getByRole('tab', { name: 'Compute', exact: true }).click();
-await world.locator('summary').click();
+await showWorldLayer('Shaded relief');
+await world
+  .getByRole('group', { name: 'World view mode', exact: true })
+  .getByRole('button', { name: 'Split', exact: true })
+  .click();
+await world
+  .getByRole('img', { name: 'Three-dimensional sampled world terrain', exact: true })
+  .waitFor();
+await page.waitForTimeout(600);
+await worldShot();
+await world
+  .getByRole('group', { name: 'World view mode', exact: true })
+  .getByRole('button', { name: 'Map', exact: true })
+  .click();
+await world.getByRole('tab', { name: 'Analyze', exact: true }).click();
+const stageReport = world
+  .locator('#we-panel-analyze summary')
+  .filter({ hasText: /evaluated stages/ });
+await stageReport.click();
+await world.locator('#we-panel-analyze .we-stage').first().scrollIntoViewIfNeeded();
 await worldShot();
 await page.screenshot({ path: join(OUT, 'world-stage-report.png') });
-await world.getByRole('button', { name: 'Overview', exact: true }).click();
+await world.getByRole('button', { name: 'World overview', exact: true }).click();
 await world.getByText('World overview ready', { exact: true }).waitFor({ timeout: 180_000 });
-await world.locator('summary').click();
-await world.getByRole('tab', { name: 'Export', exact: true }).click();
+await world.getByRole('tab', { name: 'Deliver', exact: true }).click();
+await world
+  .locator('.we-export-action-dock')
+  .getByRole('button', { name: 'Review', exact: true })
+  .click();
+await page.waitForTimeout(250);
 await worldShot();
 await page.screenshot({ path: join(OUT, 'world-export.png') });
 await world.getByRole('button', { name: 'Close World Studio', exact: true }).click();
@@ -194,7 +238,9 @@ mkdirSync(FRAMES, { recursive: true });
 let frame = 0;
 for (const name of TOUR) {
   const landscapeStarted = Date.now();
-  console.log(`Capturing ${FRAMES_PER_LANDSCAPE} real ${software ? 'cardinal views' : 'orbit frames'}: ${name}`);
+  console.log(
+    `Capturing ${FRAMES_PER_LANDSCAPE} real ${software ? 'cardinal views' : 'orbit frames'}: ${name}`,
+  );
   if (frame > 0) await loadLandscape(name);
   await page.getByRole('button', { name: 'Focus viewport' }).click();
   await page.waitForTimeout(1500);
@@ -228,7 +274,9 @@ for (const name of TOUR) {
       .locator('.nh-three-pane')
       .screenshot({ path: join(FRAMES, `f${String(frame++).padStart(4, '0')}.png`) });
     if (software || (i + 1) % 6 === 0) {
-      console.log(`${name}: ${i + 1}/${FRAMES_PER_LANDSCAPE} frames in ${((Date.now() - landscapeStarted) / 1000).toFixed(1)} s`);
+      console.log(
+        `${name}: ${i + 1}/${FRAMES_PER_LANDSCAPE} frames in ${((Date.now() - landscapeStarted) / 1000).toFixed(1)} s`,
+      );
     }
   }
   if (software) {
@@ -252,14 +300,19 @@ writeFileSync(
       landscapes: TOUR,
       landscapeViewport: { width: 960, height: 640 },
       landscapeMeshFidelity: software ? 'balanced' : 'high',
-      landscapeCameraMode: software ? 'Four cardinal views through the camera bookmarks' : 'Continuous orbit',
+      landscapeCameraMode: software
+        ? 'Four cardinal views through the camera bookmarks'
+        : 'Continuous orbit',
       landscapeFrameCount: frame,
       landscapeFramesPerSecond: GIF_FPS,
       worldFrameCount: worldFrame,
-      staticLighting: 'Screenshots and World walkthrough: golden hour preset; wind speed set to zero through the display controls',
-      landscapeLighting: software ? 'Neutral studio lighting; sky dome disabled through the display controls' : 'Golden hour preset; wind speed zero',
+      staticLighting:
+        'Terrain workspace screenshots: golden hour preset with wind speed zero. World maps and Split terrain use their native workspace lighting.',
+      landscapeLighting: software
+        ? 'Neutral studio lighting; sky dome disabled through the display controls'
+        : 'Golden hour preset; wind speed zero',
       world:
-        'Alpine graph, 2048 interval domain, 256 sample global reference; reconstructed global stages disclosed in UI',
+        'Alpine graph, 2048 interval domain, 256 sample global reference; persistent Explore/Setup/Simulate/Analyze/Deliver workspace, real Map/Split views and reconstructed global stages disclosed in UI',
       script: 'scripts/readme-media.mjs',
     },
     null,

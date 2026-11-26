@@ -1,34 +1,48 @@
 # World Engine implementation and verification
 
-World Studio is the working implementation following [RFC #62](WORLD_ENGINE_PLAN.md).
-It preserves the original single-tile studio and adds a distinct World workflow.
+The World Engine workspace, opened through **World Studio**, is the working
+implementation following [RFC #62](WORLD_ENGINE_PLAN.md). It preserves the
+original single-tile studio and adds a persistent World authoring workflow.
 The release is an engineering preview: implemented capabilities are listed here
 separately from hardware and production-import qualification that still needs
 external evidence.
 
-## Using the studio
+## Using the World workspace
 
 1. Open any landscape and choose **World Studio** in the workspace toolbar.
-2. Set width/depth, local east/south origin, vertical scale and datum. Dimensions
-   and elevations use meters. Sample counts are intervals plus one: 1024
-   intervals contain 1025 vertex samples.
-3. Choose a tile interval size and **Build world**. The overview is deliberately
-   bounded; it does not allocate the entire logical grid.
-4. Click one tile, drag across several, or use arrow keys to select a region.
-   **Refine region** (or Enter on the map) samples that region independently.
-   Use **Overview** to return. Height, shaded relief, flow, wear and deposition
-   display the generated data.
-5. Inspect **Compute** and the expandable stage report. Global reference grids
-   and numerical backend choices are recorded explicitly.
-6. **Enable World project / Save world setup** writes the opt-in World v2
-   configuration into the ordinary project history. Undo restores the prior
-   project. A portable project contains the original graph and the World domain.
-7. Under **Export**, select the whole world or the current region, a format and
-   exact output sample count. Additional diagnostic, normal and authored mask
-   maps share the same coordinates. Download a bounded archive or use
-   **Save directly to file** where the File System Access API is available.
+2. In **Setup**, set width/depth, target spacing, local east/south origin, height
+   scale and datum. Dimensions and elevations use meters. Exact cell counts are
+   available under **Coordinates & exact cell counts**: 1024 intervals contain
+   1025 vertex samples.
+3. Choose a tile interval size and **Build preview**, or enable **Auto preview**.
+   The overview is bounded to at most 385 samples on its longest axis. The main
+   view offers **Map**, **Terrain** and **Split** presentations of World data.
+4. In **Explore**, pan or zoom continuously, select tiles with a click, drag or
+   arrow keys, then choose **Refine region** (or Enter on the map). Regional
+   detail is bounded to at most 513 samples per axis. The whole-world navigator
+   and retained overview preserve context. Layers include relief, elevation,
+   contours, physical slope/aspect and relative flow/wear/deposition diagnostics.
+5. Use **Simulate** for reference quality, optional transport and compute/cache
+   controls. **Analyze** shows sample probes, an elevation histogram and section,
+   pinned before/after comparisons and the expandable stage provenance report.
+6. **Enable world in project** links the initial definition. Committing valid
+   World settings also writes the World v2 configuration through normal project
+   history. Undo restores the prior project. Save failures retain a visible
+   draft and report the problem; portable projects retain the original graph
+   and World domain.
+7. In **Deliver**, choose a full-world or selected-region footprint, profile,
+   encoding and exact output sample count. Inspect independent browser-download
+   and direct-file memory checks. Diagnostic, normal and authored mask maps share
+   the same coordinates. The captured export job remains active when returning
+   to Terrain; **Cancel export** stops it explicitly. Completion records the
+   actual filename, bytes, dimensions and manifest in a persistent session receipt.
 
-![World overview and region selection](images/world-studio.png)
+See [the World workspace guide](WORLD_WORKSPACE.md) for navigation shortcuts,
+truthful progress/resolution semantics, comparison behavior, delivery recovery
+and the verification commands. The following sections describe the numerical
+engine and its qualification evidence.
+
+![World overview with physical coordinates and a continuous tile grid in the persistent workspace](images/world-studio.png)
 
 ### Two evaluations, with explicit roles
 
@@ -38,10 +52,10 @@ that legacy viewport. World Studio's overview, regional previews, optional
 transport and world export use the new spatial contract. Returning to the
 original editor remains useful for shaping the graph and materials.
 
-Version-1 projects remain version 1 until the explicit World save action. Old
-noise nodes retain legacy/v2 sampling. Moving nodes, editing labels, opening a
-panel, changing theme or selecting display settings does not alter numerical
-input identities.
+Viewing a World preview keeps a version-1 project intact. Enabling the World
+definition or committing valid World settings writes version 2. Old noise nodes
+retain legacy/v2 sampling. Moving nodes, editing labels, opening a panel, changing
+theme or selecting display settings does not alter numerical input identities.
 
 ## Spatial and numerical contracts
 
@@ -76,7 +90,7 @@ their original boundary rules. The application refuses rectangular legacy
 graphs and periodic global simulations with an actionable error. Native
 rectangular graphs and the new rectangular transport reference are supported.
 
-![Per-stage execution, backend and spacing in the running application](images/world-stage-report.png)
+![Earlier stage-report capture recording per-stage execution, backend and spacing](images/world-stage-report.png)
 
 ## Persistent CPU computation
 
@@ -143,7 +157,8 @@ hardware evidence remain release gates.
 See [World transport equations, validation and CPU evidence](WORLD_HYDROLOGY.md)
 for the numerical contract and reproducible open/closed-domain measurements.
 
-**Enable conservative transport** adds an optional, versioned post-graph stage.
+**World transport** in **Simulate** adds an optional, versioned post-graph stage
+(the checkbox is labeled **Enable world transport**).
 It uses a bounded global reference grid with physical rectangular sample
 spacing, deterministic priority-flood drainage and synchronized water/sediment
 face exchange. Interior faces are processed once with opposite signed updates;
@@ -167,7 +182,7 @@ or a proven multirate coarse/fine coupling scheme.
 
 ## Export packages
 
-![World export controls](images/world-export.png)
+![Deliver mode with output checks, destination budgets, and reachable export actions](images/world-export.png)
 
 The exporter samples and encodes bounded tiles and streams ZIP chunks with
 consumer acknowledgments. File saves apply backpressure after each write.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
   Download,
@@ -31,7 +31,6 @@ import { TerrainViewport } from './components/TerrainViewport';
 import { ExportDialog } from './components/ExportDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
-import { WorldStudio } from './components/WorldStudio';
 import { ComputePanel } from './components/ComputePanel';
 import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
@@ -60,6 +59,10 @@ import type {
   ViewSettings,
 } from './model/types';
 
+const WorldStudio = lazy(() =>
+  import('./components/WorldStudio').then((module) => ({ default: module.WorldStudio })),
+);
+
 type ThemeMode = 'light' | 'dark';
 const THEME_STORAGE_KEY = 'normal-height.theme.v1';
 const SAVE_TIME_KEY = 'normal-height.project-saved-at.v1';
@@ -73,7 +76,9 @@ function savedTheme(): ThemeMode | null {
 }
 
 function projectSnapshot(project: TerrainProject) {
-  return JSON.stringify(project, (key, value) => key === 'raster' && value ? rasterIdentity(value) : value);
+  return JSON.stringify(project, (key, value) =>
+    key === 'raster' && value ? rasterIdentity(value) : value,
+  );
 }
 
 const isEditing = (element: EventTarget | null) =>
@@ -91,6 +96,10 @@ export default function App() {
   const [previewNodeId, setPreviewNodeId] = useState<string | undefined>();
   const [editingSplineId, setEditingSplineId] = useState<string | null>(null);
   const [paintSession, setPaintSession] = useState(0);
+  const [workspace, setWorkspace] = useState<'terrain' | 'world'>('terrain');
+  const [worldOpened, setWorldOpened] = useState(false);
+  const [deliverRequest, setDeliverRequest] = useState(0);
+  const [worldActivity, setWorldActivity] = useState<{ busy: boolean; stage: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('3d');
   const [channel, setChannel] = useState<MapChannel>('height');
   const [settings, setSettings] = useState<ViewSettings>(loadViewSettings);
@@ -101,9 +110,9 @@ export default function App() {
     () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
   );
   const theme: ThemeMode = themeChoice ?? (systemDark ? 'dark' : 'light');
-  const [modal, setModal] = useState<
-    'export' | 'help' | 'palette' | 'presets' | 'world' | 'compute' | null
-  >(null);
+  const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | 'compute' | null>(
+    null,
+  );
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   // Sidebars become temporary overlays at different breakpoints. Close each
@@ -149,7 +158,26 @@ export default function App() {
   const lastEdit = useRef({ group: '', time: 0 });
   const fileInput = useRef<HTMLInputElement>(null);
   const centerRef = useRef<HTMLElement>(null);
-  const engine = useTerrainEngine(project, previewNodeId, automatic);
+  const engine = useTerrainEngine(project, previewNodeId, automatic, workspace === 'terrain');
+  const openWorld = useCallback(() => {
+    setWorldOpened(true);
+    setViewportFocus(false);
+    setToast('');
+    setWorkspace('world');
+  }, []);
+  const previousWorkspace = useRef(workspace);
+  useEffect(() => {
+    if (previousWorkspace.current === workspace) return;
+    previousWorkspace.current = workspace;
+    const frame = requestAnimationFrame(() => {
+      const destination =
+        workspace === 'world'
+          ? document.querySelector<HTMLElement>('.we-shell')
+          : document.getElementById('terrain-workspace-switch');
+      destination?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [workspace]);
   // Editor settings can change while the last valid Float32 field remains on
   // screen. Keep its original physical extent, height scale and seed until a
   // matching worker result arrives. Visual-only surface controls stay live.
@@ -210,39 +238,43 @@ export default function App() {
     const timer = setTimeout(() => setToast(''), 6500);
     return () => clearTimeout(timer);
   }, [toast]);
-  const apply = useCallback((next: TerrainProject, group = '', record = true, recovering = false) => {
-    const previous = projectRef.current;
-    const bytes = projectStorageBytes(next);
-    // Permit recovery and shrinking of older oversized sessions, but not
-    // edits that increase an already oversized project.
-    if (!recovering && bytes > MAX_PROJECT_FILE_BYTES && bytes >= projectStorageBytes(previous)) {
-      notify(PROJECT_STORAGE_ERROR);
-      return false;
-    }
-    const paintChanged = next.materialPaint !== previous.materialPaint || next.paintLayers !== previous.paintLayers;
-    const changed = paintChanged || projectSnapshot(next) !== projectSnapshot(previous);
-    if (!changed && !pendingMove.current) return true;
-    if (!record) {
-      pendingMove.current ??= previous;
-    } else {
-      const now = performance.now();
-      if (
-        pendingMove.current ||
-        !group ||
-        lastEdit.current.group !== group ||
-        now - lastEdit.current.time > 900
-      ) {
-        past.current = appendUndoSnapshot(past.current, pendingMove.current ?? previous, next);
-        future.current = [];
-        setHistoryTick((n) => n + 1);
+  const apply = useCallback(
+    (next: TerrainProject, group = '', record = true, recovering = false) => {
+      const previous = projectRef.current;
+      const bytes = projectStorageBytes(next);
+      // Permit recovery and shrinking of older oversized sessions, but not
+      // edits that increase an already oversized project.
+      if (!recovering && bytes > MAX_PROJECT_FILE_BYTES && bytes >= projectStorageBytes(previous)) {
+        notify(PROJECT_STORAGE_ERROR);
+        return false;
       }
-      pendingMove.current = null;
-      lastEdit.current = { group, time: now };
-    }
-    projectRef.current = next;
-    setProject(next);
-    return true;
-  }, [notify]);
+      const paintChanged =
+        next.materialPaint !== previous.materialPaint || next.paintLayers !== previous.paintLayers;
+      const changed = paintChanged || projectSnapshot(next) !== projectSnapshot(previous);
+      if (!changed && !pendingMove.current) return true;
+      if (!record) {
+        pendingMove.current ??= previous;
+      } else {
+        const now = performance.now();
+        if (
+          pendingMove.current ||
+          !group ||
+          lastEdit.current.group !== group ||
+          now - lastEdit.current.time > 900
+        ) {
+          past.current = appendUndoSnapshot(past.current, pendingMove.current ?? previous, next);
+          future.current = [];
+          setHistoryTick((n) => n + 1);
+        }
+        pendingMove.current = null;
+        lastEdit.current = { group, time: now };
+      }
+      projectRef.current = next;
+      setProject(next);
+      return true;
+    },
+    [notify],
+  );
   const undo = useCallback(() => {
     const previous = past.current.pop();
     if (!previous) return;
@@ -265,18 +297,28 @@ export default function App() {
   }, []);
   useEffect(() => {
     let active = true;
-    void Promise.allSettled([loadLastSession(), readSessionBackup()]).then(([primary, storedBackup]) => {
-      if (!active || projectRef.current !== initial) return;
-      const previous = primary.status === 'fulfilled' ? primary.value : null;
-      const backup = storedBackup.status === 'fulfilled' ? storedBackup.value : null;
-      let primaryTime = 0;
-      try { primaryTime = Number(localStorage.getItem(SAVE_TIME_KEY)) || 0; } catch { /* optional */ }
-      // Imported raster sessions may use an IndexedDB pointer. The independent
-      // backup also recovers painted projects when publishing that pointer or a
-      // normal JSON session fails because localStorage has reached its quota.
-      setLastSession(backup && (!previous || backup.savedAt >= primaryTime) ? backup.project : previous);
-    });
-    return () => { active = false; };
+    void Promise.allSettled([loadLastSession(), readSessionBackup()]).then(
+      ([primary, storedBackup]) => {
+        if (!active || projectRef.current !== initial) return;
+        const previous = primary.status === 'fulfilled' ? primary.value : null;
+        const backup = storedBackup.status === 'fulfilled' ? storedBackup.value : null;
+        let primaryTime = 0;
+        try {
+          primaryTime = Number(localStorage.getItem(SAVE_TIME_KEY)) || 0;
+        } catch {
+          /* optional */
+        }
+        // Imported raster sessions may use an IndexedDB pointer. The independent
+        // backup also recovers painted projects when publishing that pointer or a
+        // normal JSON session fails because localStorage has reached its quota.
+        setLastSession(
+          backup && (!previous || backup.savedAt >= primaryTime) ? backup.project : previous,
+        );
+      },
+    );
+    return () => {
+      active = false;
+    };
   }, [initial]);
   useEffect(() => {
     // The untouched starting landscape is not saved over the last session;
@@ -294,16 +336,25 @@ export default function App() {
           primarySaved = true;
           localStorage.setItem(SAVE_TIME_KEY, String(savedAt));
         }
-      } catch { /* Large paint projects use the IndexedDB backup below. */ }
+      } catch {
+        /* Large paint projects use the IndexedDB backup below. */
+      }
       if (!active) return;
       let backupSaved = false;
-      try { await writeSessionBackup(project, savedAt); backupSaved = true; }
-      catch { /* Either storage backend can independently preserve the session. */ }
+      try {
+        await writeSessionBackup(project, savedAt);
+        backupSaved = true;
+      } catch {
+        /* Either storage backend can independently preserve the session. */
+      }
       if (!active || projectRef.current !== project) return;
       setSaved(primarySaved || backupSaved);
       setStorageError(!primarySaved && !backupSaved);
     }, 600);
-    return () => { active = false; clearTimeout(timer); };
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [project, initial]);
   useEffect(() => {
     if (previewNodeId && !project.graph.nodes.some((n) => n.id === previewNodeId))
@@ -335,21 +386,38 @@ export default function App() {
     },
     [apply, notify],
   );
-  const changePaintLayers = useCallback((layers: PaintLayer[]) => {
-    const previous = projectRef.current;
-    const next = { ...previous, materialPaint: undefined, paintLayers: layers };
-    const capacity = paintCapacity(next);
-    if (capacity.layers > capacity.maxLayers || capacity.strokes > capacity.maxStrokes || capacity.points > capacity.maxPoints) {
-      notify('That layer change exceeds paint storage. Remove an unused layer or shorten its stroke history first.');
-      return false;
-    }
-    const old = previous.paintLayers;
-    const opacityEdit = old && old.length === layers.length && layers.every((layer, index) =>
-      layer.id === old[index].id && layer.strokes === old[index].strokes &&
-      layer.name === old[index].name && layer.visible === old[index].visible &&
-      layer.locked === old[index].locked && layer.mask === old[index].mask);
-    return apply(next, opacityEdit ? 'paint-layer-opacity' : '');
-  }, [apply, notify]);
+  const changePaintLayers = useCallback(
+    (layers: PaintLayer[]) => {
+      const previous = projectRef.current;
+      const next = { ...previous, materialPaint: undefined, paintLayers: layers };
+      const capacity = paintCapacity(next);
+      if (
+        capacity.layers > capacity.maxLayers ||
+        capacity.strokes > capacity.maxStrokes ||
+        capacity.points > capacity.maxPoints
+      ) {
+        notify(
+          'That layer change exceeds paint storage. Remove an unused layer or shorten its stroke history first.',
+        );
+        return false;
+      }
+      const old = previous.paintLayers;
+      const opacityEdit =
+        old &&
+        old.length === layers.length &&
+        layers.every(
+          (layer, index) =>
+            layer.id === old[index].id &&
+            layer.strokes === old[index].strokes &&
+            layer.name === old[index].name &&
+            layer.visible === old[index].visible &&
+            layer.locked === old[index].locked &&
+            layer.mask === old[index].mask,
+        );
+      return apply(next, opacityEdit ? 'paint-layer-opacity' : '');
+    },
+    [apply, notify],
+  );
   const updateNode = useCallback(
     (patch: Partial<NonNullable<typeof selected>>, group = '') => {
       if (!selectedId) return;
@@ -394,7 +462,8 @@ export default function App() {
             .replace(/^./, (s) => s.toUpperCase()) + ' noise';
       if (kind === 'spline' || kind === 'coast') {
         // Rivers feed downstream erosion. Shorelines follow the finished relief.
-        const target = (kind === 'spline' ? p.graph.nodes.find((n) => n.kind === 'hydraulic') : undefined) ??
+        const target =
+          (kind === 'spline' ? p.graph.nodes.find((n) => n.kind === 'hydraulic') : undefined) ??
           p.graph.nodes.find((n) => n.kind === 'output');
         const inputEdge =
           target &&
@@ -428,11 +497,15 @@ export default function App() {
           setEditingSplineId(node.id);
           setViewMode('2d');
           setChannel('terrain');
-          notify('River / ridge designer added. Drag points on the 2D map; click to insert a point.');
+          notify(
+            'River / ridge designer added. Drag points on the 2D map; click to insert a point.',
+          );
         } else {
-          notify(target && inputEdge && !target.parentId
-            ? 'Coastal shelf connected before Terrain output.'
-            : 'Coastal shelf added. Connect its height input.');
+          notify(
+            target && inputEdge && !target.parentId
+              ? 'Coastal shelf connected before Terrain output.'
+              : 'Coastal shelf added. Connect its height input.',
+          );
         }
       } else {
         apply({ ...p, graph: { ...p.graph, nodes: [...p.graph.nodes, node] } });
@@ -483,7 +556,9 @@ export default function App() {
       position: { x: n.position.x + 35, y: n.position.y + 180 },
     };
     const nodes = [...p.graph.nodes, copy];
-    try { assertRasterBudget(nodes); } catch (error) {
+    try {
+      assertRasterBudget(nodes);
+    } catch (error) {
       notify((error as Error).message);
       return;
     }
@@ -520,7 +595,7 @@ export default function App() {
   const restoreLastSession = useCallback(() => {
     if (!lastSession) return;
     apply(lastSession, '', true, true);
-    setPaintSession(value => value + 1);
+    setPaintSession((value) => value + 1);
     setEditingSplineId(null);
     setPreviewNodeId(undefined);
     setSelectedId(
@@ -534,7 +609,7 @@ export default function App() {
     (id: string) => {
       const next = createProject(id);
       apply(next);
-      setPaintSession(value => value + 1);
+      setPaintSession((value) => value + 1);
       const designer = next.graph.nodes.find((node) => node.kind === 'spline');
       setSelectedId(
         designer?.id ??
@@ -555,22 +630,21 @@ export default function App() {
     },
     [apply, notify],
   );
-  const preview = useCallback(
-    (id: string) => {
-      const nodes = projectRef.current.graph.nodes;
-      if (nodes.find((n) => n.id === id)?.kind === 'maskOutput') {
-        setViewMode('2d');
-        setChannel('height');
-        setEditingSplineId(null);
-      }
-      setPreviewNodeId(id === nodes.find((n) => n.kind === 'output')?.id ? undefined : id);
-    },
-    [],
-  );
+  const preview = useCallback((id: string) => {
+    const nodes = projectRef.current.graph.nodes;
+    if (nodes.find((n) => n.id === id)?.kind === 'maskOutput') {
+      setViewMode('2d');
+      setChannel('height');
+      setEditingSplineId(null);
+    }
+    setPreviewNodeId(id === nodes.find((n) => n.kind === 'output')?.id ? undefined : id);
+  }, []);
   const save = useCallback(() => {
     try {
       saveProject(projectRef.current);
-      notify('Project downloaded with your graph, paint layers, masks, and material settings.');
+      notify(
+        'Project downloaded with your graph, World settings, paint layers, masks, and materials.',
+      );
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Could not save the project.');
     }
@@ -581,7 +655,7 @@ export default function App() {
         throw new Error('This project is too large. The maximum file size is 32 MiB.');
       const loaded = parseProject(JSON.parse(await file.text()));
       apply(loaded, '', true, true);
-      setPaintSession(value => value + 1);
+      setPaintSession((value) => value + 1);
       setEditingSplineId(null);
       setPreviewNodeId(undefined);
       setSelectedId(
@@ -613,10 +687,21 @@ export default function App() {
       if (command && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         event.shiftKey ? redo() : undo();
-      } else if (command && event.key.toLowerCase() === 'y') {
+        return;
+      }
+      if (command && event.key.toLowerCase() === 'y') {
         event.preventDefault();
         redo();
-      } else if (command && event.key.toLowerCase() === 'd') {
+        return;
+      }
+      // World owns its spatial and graph shortcuts. App-level history, Save,
+      // and the node palette above remain available in either workspace.
+      if (
+        workspace === 'world' ||
+        (event.target instanceof HTMLElement && event.target.closest('.we-shell'))
+      )
+        return;
+      if (command && event.key.toLowerCase() === 'd') {
         event.preventDefault();
         duplicate();
       } else if (event.key === '/' && !command) {
@@ -637,8 +722,11 @@ export default function App() {
       ) {
         event.preventDefault();
         setViewportFocus((v) => !v);
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selectedId &&
-        !(event.target instanceof HTMLElement && event.target.closest('.nh-viewport'))) {
+      } else if (
+        (event.key === 'Delete' || event.key === 'Backspace') &&
+        selectedId &&
+        !(event.target instanceof HTMLElement && event.target.closest('.nh-viewport'))
+      ) {
         event.preventDefault();
         remove();
       } else if (event.key === 'Escape') {
@@ -650,7 +738,7 @@ export default function App() {
     };
     window.addEventListener('keydown', listener);
     return () => window.removeEventListener('keydown', listener);
-  }, [modal, undo, redo, duplicate, remove, save, selectedId, viewportFocus]);
+  }, [modal, undo, redo, duplicate, remove, save, selectedId, viewportFocus, workspace]);
   const resizeGraph = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const handle = event.currentTarget;
@@ -669,9 +757,55 @@ export default function App() {
   };
   const graphHeight = useMemo(() => `${graphRatio}%`, [graphRatio]);
   const sedimentBudget = engine.result?.stats.sedimentBudget;
+  const inspector = (
+    <Inspector
+      worldMode={workspace === 'world'}
+      splineEditing={
+        workspace === 'terrain' && Boolean(selectedSpline && editingSplineId === selectedSpline.id)
+      }
+      onSplinePath={changeSplinePath}
+      onSplineEdit={() => {
+        if (!selectedSpline) return;
+        const editing = workspace === 'terrain' && editingSplineId === selectedSpline.id;
+        setEditingSplineId(editing ? null : selectedSpline.id);
+        if (!editing) {
+          setWorkspace('terrain');
+          setViewMode('2d');
+          setChannel('terrain');
+        }
+      }}
+      node={selected}
+      project={project}
+      previewNodeId={previewNodeId ?? output?.id}
+      onParam={(key, value) => {
+        const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
+        if (current)
+          updateNode({ params: { ...current.params, [key]: value } }, `${current.id}-${key}`);
+      }}
+      onParams={(patch) => {
+        const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
+        if (current) updateNode({ params: { ...current.params, ...patch } });
+      }}
+      onImportRaster={(raster) => {
+        const nodes = projectRef.current.graph.nodes.map((node) =>
+          node.id === selectedId && node.kind === 'heightImport' ? { ...node, raster } : node,
+        );
+        assertRasterBudget(nodes);
+        apply({ ...projectRef.current, graph: { ...projectRef.current.graph, nodes } });
+      }}
+      onRename={(label) => updateNode({ label }, `${selectedId}-label`)}
+      onBypass={() => selected && updateNode({ bypassed: !selected.bypassed })}
+      onPreview={preview}
+      onDuplicate={duplicate}
+      onDelete={remove}
+      onProjectChange={updateProject}
+      settings={settings}
+      onSettingsChange={setSettings}
+    />
+  );
   return (
     <div
-      className={`app-shell ${!leftOpen ? 'library-collapsed' : ''} ${!rightOpen ? 'inspector-collapsed' : ''} ${viewportFocus ? 'viewport-focus' : ''}`}
+      className={`app-shell workspace-${workspace} ${workspace === 'terrain' && !leftOpen ? 'library-collapsed' : ''} ${workspace === 'terrain' && !rightOpen ? 'inspector-collapsed' : ''} ${workspace === 'terrain' && viewportFocus ? 'viewport-focus' : ''}`}
     >
       <header className="app-header">
         <a
@@ -722,6 +856,32 @@ export default function App() {
               Restore last session
             </button>
           )}
+        </div>
+        <div className="workspace-switch" role="group" aria-label="Workspace">
+          <button
+            id="terrain-workspace-switch"
+            type="button"
+            className={workspace === 'terrain' ? 'active' : ''}
+            aria-pressed={workspace === 'terrain'}
+            aria-label="Terrain workspace"
+            onClick={() => setWorkspace('terrain')}
+          >
+            Terrain
+          </button>
+          <button
+            type="button"
+            className={workspace === 'world' ? 'active' : ''}
+            aria-pressed={workspace === 'world'}
+            aria-label="World workspace"
+            title={worldActivity?.busy ? worldActivity.stage : 'Open World Engine'}
+            onClick={openWorld}
+          >
+            <Globe2 size={13} />
+            World
+            {worldActivity?.busy && (
+              <span className="workspace-export-dot" aria-label="World export running" />
+            )}
+          </button>
         </div>
         <div className="header-actions">
           <button
@@ -781,326 +941,344 @@ export default function App() {
             {theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}
           </button>
           <span className="toolbar-separator" />
-          <button className="button primary export-button" onClick={() => setModal('export')}>
+          <button
+            className="button primary export-button"
+            onClick={() => {
+              if (workspace === 'world') setDeliverRequest((value) => value + 1);
+              else setModal('export');
+            }}
+          >
             <Download size={15} />
-            <span>Export maps</span>
+            <span>{workspace === 'world' ? 'Deliver world' : 'Export maps'}</span>
             <ChevronDown size={12} />
           </button>
         </div>
       </header>
-      <div className="workspace-toolbar">
-        <div className="workspace-title">
-          <button
-            className="icon-button small"
-            aria-label={leftOpen ? 'Hide node library' : 'Show node library'}
-            title="Toggle node library"
-            onClick={() => setLeftOpen(!leftOpen)}
-          >
-            {leftOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
-          </button>
-          <span className="workspace-label">Terrain workspace</span>
-          <ChevronDown size={10} />
-        </div>
-        <div className="workspace-build">
-          <button
-            className="world-open-button"
-            onClick={() => setModal('world')}
-            title="Continuous worlds, regional refinement, and tiled export"
-          >
-            <Globe2 size={14} />
-            <span>World Studio</span>
-          </button>
-          <label className="working-resolution">
-            <span>Working grid</span>
-            <select
-              aria-label="Working resolution"
-              value={project.resolution}
-              onChange={(e) => updateProject({ resolution: Number(e.target.value) })}
-            >
-              {[128, 256, 512, 768, 1024].map((n) => (
-                <option key={n} value={n}>
-                  {n} × {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="auto-build">
-            <input
-              type="checkbox"
-              checked={automatic}
-              onChange={(e) => setAutomatic(e.target.checked)}
-            />
-            <span className="auto-indicator" />
-            Auto build
-          </label>
-          <button
-            className="button build-button"
-            onClick={engine.busy ? engine.cancel : engine.build}
-          >
-            {engine.busy ? (
-              <LoaderCircle size={13} className="spin" />
-            ) : (
-              <Play size={12} fill="currentColor" />
-            )}
-            {engine.busy ? 'Cancel' : 'Build terrain'}
-          </button>
-          <button
-            className={`icon-button small ${rightOpen ? 'active' : ''}`}
-            aria-label={rightOpen ? 'Hide inspector' : 'Show inspector'}
-            title="Toggle inspector"
-            onClick={() => setRightOpen(!rightOpen)}
-          >
-            <SlidersHorizontal size={15} />
-          </button>
-        </div>
-      </div>
-      <div className="workspace-body">
-        {leftOpen && (
-          <Library
-            seed={project.seed}
-            worldSize={project.worldSize}
-            onSeed={(seed) => updateProject({ seed })}
-            onAdd={addNode}
-            onPreset={loadPreset}
-            activePreset={project.presetId}
-          />
-        )}
-        <main className="work-area" ref={centerRef} aria-label="Terrain workspace">
-          <section className="preview-area">
-            <TerrainViewport
-              paintSession={paintSession}
-              spline={selectedSpline}
-              splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
-              onSplinePath={changeSplinePath}
-              onPaint={paintMaterial}
-              onPaintLayersChange={changePaintLayers}
-              onPaintNotice={notify}
-              onUndo={undo}
-              onRedo={redo}
-              canUndo={past.current.length > 0}
-              canRedo={future.current.length > 0}
-              onLayerColor={(layer, color) => {
-                const surface = resolveSurface(projectRef.current.surface);
-                updateProject({
-                  surface: { ...surface, layerColors: { ...surface.layerColors, [layer]: color } },
-                });
-              }}
-              theme={theme}
-              field={engine.result?.field ?? null}
-              project={displayedProject}
-              maskPreview={engine.completedProject?.graph.nodes.some(
-                (node) => node.id === engine.result?.outputNodeId && node.kind === 'maskOutput',
-              ) ?? false}
-              viewMode={viewMode}
-              channel={channel}
-              settings={settings}
-              busy={engine.busy}
-              progress={engine.progress}
-              stage={engine.stage}
-              stale={engine.stale}
-              previewLabel={displayedPreviewLabel}
-              onViewModeChange={setViewMode}
-              onChannelChange={setChannel}
-              onSettingsChange={setSettings}
-              onCancel={engine.cancel}
-              focusMode={viewportFocus}
-              onFocusModeChange={setViewportFocus}
-              baseline={baseline}
-              onCaptureBaseline={() => {
-                if (!engine.result || engine.stale || engine.busy) {
-                  notify('Build the current terrain before pinning a comparison baseline.');
-                  return;
-                }
-                setBaseline({
-                  field: engine.result.field,
-                  project: structuredClone(project),
-                  label: previewLabel,
-                });
-                notify('Comparison baseline pinned. Change your terrain, then open Compare.');
-              }}
-              onClearBaseline={() => setBaseline(null)}
-            />
-            {previewNodeId && (
-              <button className="return-output" onClick={() => setPreviewNodeId(undefined)}>
-                <ArrowOutput />
-                Return to Terrain output
-                <X size={12} />
-              </button>
-            )}
-            {engine.error && (
-              <div className="graph-error" role="alert">
-                <AlertCircle size={16} />
-                <div>
-                  <strong>Check your graph</strong>
-                  <p>{engine.error}</p>
-                  {engine.result && <small>The last successful terrain remains visible.</small>}
-                </div>
-              </div>
-            )}
-          </section>
-          <div
-            className="workspace-divider"
-            role="separator"
-            aria-label="Resize graph"
-            aria-orientation="horizontal"
-            aria-valuemin={22}
-            aria-valuemax={65}
-            aria-valuenow={Math.round(graphRatio)}
-            tabIndex={0}
-            onPointerDown={resizeGraph}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setGraphRatio((v) => Math.min(65, v + 3));
-              }
-              if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setGraphRatio((v) => Math.max(22, v - 3));
-              }
-            }}
-          >
-            <span />
-          </div>
-          <section
-            className="graph-area"
-            style={{ height: graphHeight }}
-            aria-label="Procedural node graph"
-          >
-            <NodeGraph
-              theme={theme}
-              graph={project.graph}
-              onChange={updateGraph}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
-              previewNodeId={previewNodeId ?? output?.id}
-              onPreview={preview}
-              thumbnails={engine.result?.thumbnails}
-              nodeTimings={engine.result?.nodeTimings}
-              onAdd={() => setModal('palette')}
-              onError={notify}
-            />
-          </section>
-        </main>
-        {rightOpen && (
-          <Inspector
-            splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
-            onSplinePath={changeSplinePath}
-            onSplineEdit={() => {
-              if (!selectedSpline) return;
-              const editing = editingSplineId === selectedSpline.id;
-              setEditingSplineId(editing ? null : selectedSpline.id);
-              if (!editing) {
-                setViewMode('2d');
-                setChannel('terrain');
-              }
-            }}
-            node={selected}
-            project={project}
-            previewNodeId={previewNodeId ?? output?.id}
-            onParam={(key, value) => {
-              const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
-              if (current)
-                updateNode({ params: { ...current.params, [key]: value } }, `${current.id}-${key}`);
-            }}
-            onParams={(patch) => {
-              const current = projectRef.current.graph.nodes.find((node) => node.id === selectedId);
-              if (current) updateNode({ params: { ...current.params, ...patch } });
-            }}
-            onImportRaster={(raster) => {
-              const nodes = projectRef.current.graph.nodes.map((node) =>
-                node.id === selectedId && node.kind === 'heightImport' ? { ...node, raster } : node);
-              assertRasterBudget(nodes);
-              apply({ ...projectRef.current, graph: { ...projectRef.current.graph, nodes } });
-            }}
-            onRename={(label) => updateNode({ label }, `${selectedId}-label`)}
-            onBypass={() => selected && updateNode({ bypassed: !selected.bypassed })}
-            onPreview={preview}
-            onDuplicate={duplicate}
-            onDelete={remove}
-            onProjectChange={updateProject}
-            settings={settings}
-            onSettingsChange={setSettings}
-          />
-        )}
-      </div>
-      <footer className="status-bar">
-        <div>
-          <span
-            className={`status-dot ${engine.busy ? 'working' : engine.error ? 'error' : engine.stale ? 'stale' : ''}`}
-          />
-          <span>
-            {engine.busy
-              ? engine.stage
-              : engine.error
-                ? 'Graph needs attention'
-                : engine.stale
-                  ? 'Preview out of date'
-                  : 'Terrain ready'}
-          </span>
-          {engine.busy && (
-            <span className="status-progress">{Math.round(engine.progress * 100)}%</span>
-          )}
-        </div>
-        <div className="status-center">
-          <button
-            className="compute-status-button"
-            onClick={() => setModal('compute')}
-            title="Inspect stage timings and persistent cache"
-            aria-label="Compute diagnostics"
-          >
-            <Cpu size={11} />
-            {engine.result?.diagnostics
-              ? ` ${engine.result.diagnostics.cacheHits} cached`
-              : ' CPU reference'}
-          </button>
-          <GitBranch size={11} />
-          {project.graph.nodes.filter((n) => n.kind !== 'group' && n.kind !== 'note').length} nodes
-          <span>·</span>
-          {project.graph.edges.length} connections
-        </div>
-        <div>
-          <span>
-            {engine.result ? `${engine.result.field.resolution}² samples` : 'Float32 terrain'}
-          </span>
-          <span>·</span>
-          <span>
-            {engine.result ? `${(engine.result.duration / 1000).toFixed(2)} s` : 'Worker ready'}
-          </span>
-          {sedimentBudget && (
-            <>
-              <span>·</span>
-              <span
-                className="status-budget"
-                title={[
-                  'Simulation sediment transport (approximate physical volume):',
-                  `Eroded: ${sedimentBudget.erodedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                  `Deposited: ${sedimentBudget.depositedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                  `Boundary export: ${sedimentBudget.exportedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                  `Still suspended: ${sedimentBudget.suspendedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
-                  `Balance residual: ${sedimentBudget.balanceErrorM3.toLocaleString('en-US', { maximumFractionDigits: 2 })} m³`,
-                ].join('\n')}
+      {workspace === 'terrain' && (
+        <>
+          <div className="workspace-toolbar">
+            <div className="workspace-title">
+              <button
+                className="icon-button small"
+                aria-label={leftOpen ? 'Hide node library' : 'Show node library'}
+                title="Toggle node library"
+                onClick={() => setLeftOpen(!leftOpen)}
               >
-                Sediment out{' '}
-                {new Intl.NumberFormat('en-US', {
-                  notation: 'compact',
-                  maximumFractionDigits: 1,
-                }).format(sedimentBudget.exportedVolumeM3)}{' '}
-                m³
+                {leftOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+              </button>
+              <span className="workspace-label">Terrain workspace</span>
+              <ChevronDown size={10} />
+            </div>
+            <div className="workspace-build">
+              <button
+                className="world-open-button"
+                onClick={openWorld}
+                title="Continuous worlds, regional refinement, and tiled export"
+              >
+                <Globe2 size={14} />
+                <span>World Studio</span>
+              </button>
+              <label className="working-resolution">
+                <span>Working grid</span>
+                <select
+                  aria-label="Working resolution"
+                  value={project.resolution}
+                  onChange={(e) => updateProject({ resolution: Number(e.target.value) })}
+                >
+                  {[128, 256, 512, 768, 1024].map((n) => (
+                    <option key={n} value={n}>
+                      {n} × {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="auto-build">
+                <input
+                  type="checkbox"
+                  checked={automatic}
+                  onChange={(e) => setAutomatic(e.target.checked)}
+                />
+                <span className="auto-indicator" />
+                Auto build
+              </label>
+              <button
+                className="button build-button"
+                onClick={engine.busy ? engine.cancel : engine.build}
+              >
+                {engine.busy ? (
+                  <LoaderCircle size={13} className="spin" />
+                ) : (
+                  <Play size={12} fill="currentColor" />
+                )}
+                {engine.busy ? 'Cancel' : 'Build terrain'}
+              </button>
+              <button
+                className={`icon-button small ${rightOpen ? 'active' : ''}`}
+                aria-label={rightOpen ? 'Hide inspector' : 'Show inspector'}
+                title="Toggle inspector"
+                onClick={() => setRightOpen(!rightOpen)}
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+            </div>
+          </div>
+          <div className="workspace-body">
+            {leftOpen && (
+              <Library
+                seed={project.seed}
+                worldSize={project.worldSize}
+                onSeed={(seed) => updateProject({ seed })}
+                onAdd={addNode}
+                onPreset={loadPreset}
+                activePreset={project.presetId}
+              />
+            )}
+            <main className="work-area" ref={centerRef} aria-label="Terrain workspace">
+              <section className="preview-area">
+                <TerrainViewport
+                  paintSession={paintSession}
+                  spline={selectedSpline}
+                  splineEditing={Boolean(selectedSpline && editingSplineId === selectedSpline.id)}
+                  onSplinePath={changeSplinePath}
+                  onPaint={paintMaterial}
+                  onPaintLayersChange={changePaintLayers}
+                  onPaintNotice={notify}
+                  onUndo={undo}
+                  onRedo={redo}
+                  canUndo={past.current.length > 0}
+                  canRedo={future.current.length > 0}
+                  onLayerColor={(layer, color) => {
+                    const surface = resolveSurface(projectRef.current.surface);
+                    updateProject({
+                      surface: {
+                        ...surface,
+                        layerColors: { ...surface.layerColors, [layer]: color },
+                      },
+                    });
+                  }}
+                  theme={theme}
+                  field={engine.result?.field ?? null}
+                  project={displayedProject}
+                  maskPreview={
+                    engine.completedProject?.graph.nodes.some(
+                      (node) =>
+                        node.id === engine.result?.outputNodeId && node.kind === 'maskOutput',
+                    ) ?? false
+                  }
+                  viewMode={viewMode}
+                  channel={channel}
+                  settings={settings}
+                  busy={engine.busy}
+                  progress={engine.progress}
+                  stage={engine.stage}
+                  stale={engine.stale}
+                  previewLabel={displayedPreviewLabel}
+                  onViewModeChange={setViewMode}
+                  onChannelChange={setChannel}
+                  onSettingsChange={setSettings}
+                  onCancel={engine.cancel}
+                  focusMode={viewportFocus}
+                  onFocusModeChange={setViewportFocus}
+                  baseline={baseline}
+                  onCaptureBaseline={() => {
+                    if (!engine.result || engine.stale || engine.busy) {
+                      notify('Build the current terrain before pinning a comparison baseline.');
+                      return;
+                    }
+                    setBaseline({
+                      field: engine.result.field,
+                      project: structuredClone(project),
+                      label: previewLabel,
+                    });
+                    notify('Comparison baseline pinned. Change your terrain, then open Compare.');
+                  }}
+                  onClearBaseline={() => setBaseline(null)}
+                />
+                {previewNodeId && (
+                  <button className="return-output" onClick={() => setPreviewNodeId(undefined)}>
+                    <ArrowOutput />
+                    Return to Terrain output
+                    <X size={12} />
+                  </button>
+                )}
+                {engine.error && (
+                  <div className="graph-error" role="alert">
+                    <AlertCircle size={16} />
+                    <div>
+                      <strong>Check your graph</strong>
+                      <p>{engine.error}</p>
+                      {engine.result && <small>The last successful terrain remains visible.</small>}
+                    </div>
+                  </div>
+                )}
+              </section>
+              <div
+                className="workspace-divider"
+                role="separator"
+                aria-label="Resize graph"
+                aria-orientation="horizontal"
+                aria-valuemin={22}
+                aria-valuemax={65}
+                aria-valuenow={Math.round(graphRatio)}
+                tabIndex={0}
+                onPointerDown={resizeGraph}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setGraphRatio((v) => Math.min(65, v + 3));
+                  }
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setGraphRatio((v) => Math.max(22, v - 3));
+                  }
+                }}
+              >
+                <span />
+              </div>
+              <section
+                className="graph-area"
+                style={{ height: graphHeight }}
+                aria-label="Procedural node graph"
+              >
+                <NodeGraph
+                  theme={theme}
+                  graph={project.graph}
+                  onChange={updateGraph}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  previewNodeId={previewNodeId ?? output?.id}
+                  onPreview={preview}
+                  thumbnails={engine.result?.thumbnails}
+                  nodeTimings={engine.result?.nodeTimings}
+                  onAdd={() => setModal('palette')}
+                  onError={notify}
+                />
+              </section>
+            </main>
+            {rightOpen && inspector}
+          </div>
+          <footer className="status-bar">
+            <div>
+              <span
+                className={`status-dot ${engine.busy ? 'working' : engine.error ? 'error' : engine.stale ? 'stale' : ''}`}
+              />
+              <span>
+                {engine.busy
+                  ? engine.stage
+                  : engine.error
+                    ? 'Graph needs attention'
+                    : engine.stale
+                      ? 'Preview out of date'
+                      : 'Terrain ready'}
               </span>
-            </>
-          )}
-          <span>·</span>
-          <span>{(project.worldSize / 1000).toFixed(1)} km tile</span>
-          <button
-            className="status-help"
-            aria-label="Keyboard shortcuts"
-            title="Keyboard shortcuts"
-            onClick={() => setModal('help')}
+              {engine.busy && (
+                <span className="status-progress">{Math.round(engine.progress * 100)}%</span>
+              )}
+            </div>
+            <div className="status-center">
+              <button
+                className="compute-status-button"
+                onClick={() => setModal('compute')}
+                title="Inspect stage timings and persistent cache"
+                aria-label="Compute diagnostics"
+              >
+                <Cpu size={11} />
+                {engine.result?.diagnostics
+                  ? ` ${engine.result.diagnostics.cacheHits} cached`
+                  : ' CPU reference'}
+              </button>
+              <GitBranch size={11} />
+              {
+                project.graph.nodes.filter((n) => n.kind !== 'group' && n.kind !== 'note').length
+              }{' '}
+              nodes
+              <span>·</span>
+              {project.graph.edges.length} connections
+            </div>
+            <div>
+              <span>
+                {engine.result ? `${engine.result.field.resolution}² samples` : 'Float32 terrain'}
+              </span>
+              <span>·</span>
+              <span>
+                {engine.result ? `${(engine.result.duration / 1000).toFixed(2)} s` : 'Worker ready'}
+              </span>
+              {sedimentBudget && (
+                <>
+                  <span>·</span>
+                  <span
+                    className="status-budget"
+                    title={[
+                      'Simulation sediment transport (approximate physical volume):',
+                      `Eroded: ${sedimentBudget.erodedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                      `Deposited: ${sedimentBudget.depositedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                      `Boundary export: ${sedimentBudget.exportedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                      `Still suspended: ${sedimentBudget.suspendedVolumeM3.toLocaleString('en-US', { maximumFractionDigits: 0 })} m³`,
+                      `Balance residual: ${sedimentBudget.balanceErrorM3.toLocaleString('en-US', { maximumFractionDigits: 2 })} m³`,
+                    ].join('\n')}
+                  >
+                    Sediment out{' '}
+                    {new Intl.NumberFormat('en-US', {
+                      notation: 'compact',
+                      maximumFractionDigits: 1,
+                    }).format(sedimentBudget.exportedVolumeM3)}{' '}
+                    m³
+                  </span>
+                </>
+              )}
+              <span>·</span>
+              <span>{(project.worldSize / 1000).toFixed(1)} km tile</span>
+              <button
+                className="status-help"
+                aria-label="Keyboard shortcuts"
+                title="Keyboard shortcuts"
+                onClick={() => setModal('help')}
+              >
+                ?
+              </button>
+            </div>
+          </footer>
+        </>
+      )}
+      {worldOpened && (
+        <div className="world-workspace-host" hidden={workspace !== 'world'}>
+          <Suspense
+            fallback={
+              <div className="world-workspace-loading" role="status">
+                <LoaderCircle className="spin" size={22} />
+                <span>Opening World Engine…</span>
+              </div>
+            }
           >
-            ?
-          </button>
+            <WorldStudio
+              key={paintSession}
+              project={project}
+              active={workspace === 'world'}
+              onSave={(world, group) => apply({ ...projectRef.current, version: 2, world }, group)}
+              onClose={() => setWorkspace('terrain')}
+              previewNodeId={previewNodeId}
+              onReturnOutput={() => setPreviewNodeId(undefined)}
+              onSelectNode={setSelectedId}
+              deliverRequest={deliverRequest}
+              onExportActivity={setWorldActivity}
+              graphEditor={
+                <NodeGraph
+                  theme={theme}
+                  graph={project.graph}
+                  onChange={updateGraph}
+                  selectedId={selectedId}
+                  onSelect={setSelectedId}
+                  previewNodeId={previewNodeId ?? output?.id}
+                  onPreview={preview}
+                  onAdd={() => setModal('palette')}
+                  onError={notify}
+                />
+              }
+              graphInspector={inspector}
+            />
+          </Suspense>
         </div>
-      </footer>
+      )}
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={16} />
@@ -1127,13 +1305,6 @@ export default function App() {
       />
       {modal === 'export' && <ExportDialog project={project} onClose={() => setModal(null)} />}
       {modal === 'help' && <HelpDialog onClose={() => setModal(null)} />}
-      {modal === 'world' && (
-        <WorldStudio
-          project={project}
-          onSave={(world) => apply({ ...projectRef.current, version: 2, world })}
-          onClose={() => setModal(null)}
-        />
-      )}
       {modal === 'compute' && (
         <ComputePanel
           project={project}

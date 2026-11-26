@@ -14,22 +14,37 @@ _The current application, rendered live. Regenerate the screenshots and GIFs wit
 
 ## World Engine
 
-This engineering preview implements the continuous-world workflow. The release
-qualification limits below remain explicit in the app, guides, and exports.
+The persistent **World Engine workspace** brings continuous map navigation,
+World-native 3D, regional refinement, analysis and delivery into one authoring
+flow. Its numerical engine remains an engineering preview; release
+qualification is recorded in the app, guides and exported manifests.
 
-![World Studio with a continuous terrain overview, shared tile grid, physical dimensions, and a selected region](docs/images/world-studio.png)
+![World Engine with a continuous terrain map and physical 3D terrain in the persistent Split workspace](docs/images/world-workspace-split.png)
 
-Open **World Studio** in the workspace toolbar. Set the physical extent and
-sample intervals, build an overview, then click or drag across tiles and choose
-**Refine region**. The same coordinates identify a sample in every tile; edge
-tiles crop to the exact domain. A rectangular world works with native World
-stages. Legacy square-domain sources and solvers explicitly require a square
-domain.
+_The persistent workspace, captured from the production build in Chromium. See the
+[World workspace guide](docs/WORLD_WORKSPACE.md) for controls, feedback, and delivery._
 
-![Actual World Studio workflow: overview, tile selection, regional detail, height and flow maps, stage report, and export](docs/images/world-workflow.gif)
+Open **World Studio** in the workspace toolbar. **Explore** provides a continuous
+map with cursor-centered zoom, pan, a navigator and physical probes; switch to
+**Terrain** or **Split** to inspect the same completed World samples in 3D.
+**Setup** defines physical extent and sampling, **Simulate** controls reference
+quality and optional transport, and **Analyze** exposes distributions, elevation
+sections, pinned comparisons and stage provenance. Select tiles and refine their
+detail while retaining the world overview.
+
+**Deliver** captures the chosen project and settings in an independent export
+job. Its sticky actions, separate download/file memory checks, counted work
+phases and completion receipt keep delivery visible and recoverable. Exporting
+continues while switching workspaces. The same coordinates identify samples in
+every tile; edge tiles crop to the exact domain. Native World stages support
+rectangular worlds; legacy square-domain solvers explicitly require a square
+physical extent.
+
+![Recorded World Studio terrain workflow: overview, tile selection, regional detail, height and flow maps, stage report, and export](docs/images/world-workflow.gif)
 
 | Capability           | Current implementation                                                                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| World workspace      | Persistent Explore/Setup/Simulate/Analyze/Deliver modes; continuous map, bounded World 3D, regional refinement, layers, probes, elevation profiles, pinned comparison and named regions |
 | Persistent compute   | Immutable, byte-bounded per-node cache; downstream edits reuse valid upstream fields; diagnostics show hits, misses, timings and memory estimates                                       |
 | World coordinates    | Explicit project v2, rectangular local Cartesian meters, independent origins and dimensions, canonical shared samples, partial tiles, region builds                                     |
 | Native graph detail  | Noise Studio v3, remap, terrace, blend, height/slope masks and bounded warp; global stages share one reference solution and reconstruct their displacement over the native input        |
@@ -56,6 +71,7 @@ Actual Chromium downloads of that native CPU graph completed at **4096² in
 86.9 s** and **8192² in 345.1 s** on a separate Xeon CI runner; every PNG tile
 and shared border was independently verified. These are fixture measurements,
 not general browser/GPU speed promises. See the
+[World workspace flow and shortcuts](docs/WORLD_WORKSPACE.md),
 [World Engine guide, evidence and limitations](docs/WORLD_ENGINE.md),
 [cache measurements](docs/benchmarks/world-engine-cpu.json), and
 [export measurements](docs/benchmarks/world-engine-cpu-export.json), and
@@ -80,6 +96,8 @@ npm run test:e2e    # Optional full browser suite; run npm run build first
 ```
 
 **Fast terrain checks run `npm test` and `npm run build`.** Pull requests that touch viewport, noise, PBR export, or World Engine code also run their targeted browser acceptance workflows. World correctness checks verify the selected commit without changing the branch. **GitHub Actions → World Studio media (manual) → Run workflow** captures the actual app as downloadable artifacts; publishing changed captures to the selected branch requires its explicit `publish` option. Extended browser QA and mesh benchmarks remain available through **GitHub Actions → Extended terrain QA (manual only) → Run workflow**. Locally, build first, install Chromium with `npx playwright install chromium`, then run `npm run test:e2e`. Hardware benchmarking instructions are in [docs/MESH_PERFORMANCE.md](docs/MESH_PERFORMANCE.md).
+
+**Single-tile exports:** the Export maps dialog shows format-specific encoding, uncompressed map payload, physical sample spacing and a conservative PBR memory estimate before running. If a PBR selection exceeds the device budget, choose the suggested smaller grid; the worker still validates the budget. Terrain generation reports measured engine progress; encoding is indeterminate. Cancel or close to terminate the isolated export worker without changing the project, then retry. A completed result shows the actual byte size and starts a browser download (the browser controls where it is saved). Keep the ZIP metadata with normalized 16-bit elevation PNGs to reconstruct heights in meters.
 
 ## What the studio does
 
@@ -180,17 +198,17 @@ or wave patterns). Fine detail can resolve as export resolution increases.
 
 ### Imported terrain, coastlines and placement masks
 
-Open **Landscapes → Volcanic island** for a wired example. Change **Sea level** on *Grade the coast*, then open **Export → Format → Named masks** and choose *Shore band* or *Open water*. Both masks follow the same coastline as the exported terrain.
+Open **Landscapes → Volcanic island** for a wired example. Change **Sea level** on _Grade the coast_, then open **Export → Format → Named masks** and choose _Shore band_ or _Open water_. Both masks follow the same coastline as the exported terrain.
 
 ![Volcanic island terrain and its two aligned grayscale masks](docs/images/volcanic-island-outputs.webp)
 
-*Three outputs from the same 512 × 512 graph. Shaded relief uses elevation colors to show the submerged shelf. The mask panels show the exported weight range from black (0) to white (1).*
+_Three outputs from the same 512 × 512 graph. Shaded relief uses elevation colors to show the submerged shelf. The mask panels show the exported weight range from black (0) to white (1)._
 
-| Node | How to use it |
-| --- | --- |
-| **Heightmap import** | Choose a source file in the inspector and connect **Height** to a shaping node or Terrain output. It embeds the samples in the project, fits the raster edge to edge with bilinear interpolation, and offers vertical gain, offset in meters, and a north/south flip. |
-| **Coastal shelf** | Set sea level as a fraction of the project height scale. Set beach and shelf widths in meters and their angles in degrees. By default water must reach a tile edge through side-adjacent cells. **Include inland lakes** also grades enclosed shorelines. **Profile strength** at zero keeps elevations and still produces both masks. |
-| **Mask output** | Connect any scalar port, then rename the node in the inspector. Export its branch as a 16-bit grayscale PNG at the selected grid size. Values are clamped to a fixed linear 0–1 range, so a constant 25% weight stays 25%. The optional ZIP includes the editable project and source connection. |
+| Node                 | How to use it                                                                                                                                                                                                                                                                                                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Heightmap import** | Choose a source file in the inspector and connect **Height** to a shaping node or Terrain output. It embeds the samples in the project, fits the raster edge to edge with bilinear interpolation, and offers vertical gain, offset in meters, and a north/south flip.                                                                  |
+| **Coastal shelf**    | Set sea level as a fraction of the project height scale. Set beach and shelf widths in meters and their angles in degrees. By default water must reach a tile edge through side-adjacent cells. **Include inland lakes** also grades enclosed shorelines. **Profile strength** at zero keeps elevations and still produces both masks. |
+| **Mask output**      | Connect any scalar port, then rename the node in the inspector. Export its branch as a 16-bit grayscale PNG at the selected grid size. Values are clamped to a fixed linear 0–1 range, so a constant 25% weight stays 25%. The optional ZIP includes the editable project and source connection.                                       |
 
 Heightmap import accepts non-interlaced 8- or 16-bit grayscale PNGs up to 2048 samples per side. Headerless RAW grids must be square and little-endian. Use `.r16` or `.raw` for unsigned 16-bit samples and `.r32` or `*-f32le.raw` for Float32 elevations in meters. Integer samples span the project height scale. To restore a height PNG exported by this studio, set **Vertical gain** to its metadata elevation range divided by the project height scale and **Elevation offset** to its minimum elevation in meters. A Float32 RAW export carries meter values directly. Projects can embed up to 16 MiB of decoded samples across import nodes.
 
@@ -201,7 +219,7 @@ Heightmap import accepts non-interlaced 8- or 16-bit grayscale PNGs up to 2048 s
 - The map displays direction arrows for rivers, distinct headwater/outlet handles, and a shaded core/outer-influence guide while editing (hidden at zero relief). The inspector reports approximate centerline length, core radius, and outer reach in project meters. The guide depicts authored influence, not simulated channel width or the exact rasterized cut.
 - Switch **Path operation** between **Carve river and valley** and **Raise mountain ridge**. Change core width, relief and bank/flank spread to adjust the actual geometry. River mode never deposits material, and **Keep river bed downhill** creates a continuous descending bed from point 1 (headwater) to the last point (outlet).
 - Switch to **3D terrain** to inspect the sculpted relief and selected spline guide. The terrain is generated as real Float32 samples and continues through subsequent erosion/weathering nodes. The curve is saved non-destructively in portable project files and reevaluated for 16-bit/RAW exports.
-- Drag empty map space (or middle/right-drag) to pan, use the wheel to zoom, or pinch with two fingers on the map. A second finger cancels the uncommitted draft and hands off to navigation. Handle drags commit only on release; Escape, an undo shortcut during the gesture, pointer cancellation, or loss of browser focus cancels the draft without adding an undo entry. Use **Finish editing** to return to map inspection.
+- Drag empty map space (including the margin around the tile, or middle/right-drag) to pan, use the wheel to zoom, or pinch with two fingers anywhere on the map. Only clicks within the tile insert points. A second finger cancels the uncommitted draft and hands off to navigation. Handle drags commit only on release; Escape, an undo shortcut during the gesture, pointer cancellation, or loss of browser focus cancels the draft without adding an undo entry. Use **Finish editing** to return to map inspection.
 
 Paths contain 2–24 tile-normalized control points. At high export resolutions, the spline is rasterized using the closest curve segment per pixel rather than accumulating brush stamps, preventing control-point mounds. The river-bed grade is an artistic constraint, not a globally solved hydrological drainage network; automatic spline placement from basins, groundwater and GPU fluid solvers remain future work. World Studio now provides separate whole-domain drainage analysis and optional conservative transport; that does not automatically reroute an authored spline.
 

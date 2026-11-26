@@ -3,7 +3,7 @@ import { Modal } from './Modal';
 import { downloadBlob } from '../model/project';
 import { BUILD_INFO } from '../model/buildInfo';
 import type { EvaluationResult, TerrainProject } from '../model/types';
-import './WorldStudio.css';
+import './ComputePanel.css';
 
 const memory = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MiB`;
 

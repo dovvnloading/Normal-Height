@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'src/components/TerrainViewport.*'
+      - 'src/components/SplineMapOverlay.tsx'
+      - 'src/components/Inspector.tsx'
+      - 'src/model/splines.ts'
       - 'src/components/PaintWorkspace.*'
       - 'src/components/MaterialBrush.tsx'
       - 'src/hooks/useBrushInput.ts'

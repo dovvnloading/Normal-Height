@@ -329,6 +329,57 @@ test.describe('terrain viewport UX', () => {
     await client.send('Emulation.setTouchEmulationEnabled', { enabled: false });
   });
 
+  test('spline pinch across the tile boundary never commits a point', async ({ page }) => {
+    await page.locator('.auto-build input').uncheck();
+    await page.getByRole('complementary', { name: 'Node library' })
+      .getByRole('button', { name: /River \/ ridge spline/ }).click();
+    const layer = page.locator('.nh-spline-layer');
+    const handles = layer.locator('.nh-spline-handle');
+    const zoom = page.locator('.nh-map-controls > span');
+    const snapshot = () => handles.evaluateAll(elements =>
+      elements.map(element => element.getAttribute('style')));
+    await expect(handles).toHaveCount(5);
+    const original = await snapshot();
+    const client = await page.context().newCDPSession(page);
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    try {
+      // Cover both orders: tile-first (a pending insertion) and margin-first.
+      for (const tileFirst of [true, false]) {
+        await page.getByRole('button', { name: 'Fit map', exact: true }).click();
+        await page.getByRole('button', { name: 'Zoom map out', exact: true }).click();
+        await page.getByRole('button', { name: 'Zoom map out', exact: true }).click();
+        await expect(zoom).toHaveText('64%');
+        const map = (await page.locator('.nh-map').boundingBox())!;
+        const tile = (await layer.boundingBox())!;
+        const margin = tile.x - map.x;
+        expect(margin).toBeGreaterThan(25);
+        const y = Math.round(tile.y + tile.height * 0.5);
+        const inside = { x: Math.round(tile.x + tile.width * 0.15), y, id: 1 };
+        const outside = { x: Math.round(tile.x - margin * 0.35), y, id: 2 };
+        const farther = { ...outside, x: Math.round(tile.x - margin * 0.85) };
+        const ordered = (a: typeof inside, b: typeof outside) => tileFirst ? [a, b] : [b, a];
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchStart', touchPoints: [ordered(inside, outside)[0]],
+        });
+        await expect(handles).toHaveCount(5);
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchStart', touchPoints: ordered(inside, outside),
+        });
+        // Keep the tile finger still: its release would otherwise be a click.
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchMove', touchPoints: ordered(inside, farther),
+        });
+        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await expect.poll(() => zoom.innerText()).not.toBe('64%');
+        await expect(handles).toHaveCount(5);
+        expect(await snapshot()).toEqual(original);
+      }
+    } finally {
+      await client.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await client.detach();
+    }
+  });
+
   test('spline editing disables competing terrain inspection tools', async ({ page }) => {
     const library = page.getByRole('complementary', { name: 'Node library', exact: true });
     await library.getByRole('button', { name: /River \/ ridge spline/ }).click();
