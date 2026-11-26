@@ -752,6 +752,8 @@ test('texture-backed close terrain shading loads lazily, visibly changes materia
   const viewport=page.getByRole('img',{name:/^Interactive 3D terrain/});
   await expect(viewport).toHaveAttribute('data-material-status','ready',{timeout:60_000});
   await expect(viewport).toHaveAttribute('data-local-detail-status','idle');
+  // The intermediate band may be visible even before local textures load.
+  await expect(viewport).toHaveAttribute('data-near-field-shader-variant', /^(off|analytic)$/);
   await expect(viewport).toHaveAttribute('data-local-detail-texture-count','0');
   const pbrRequests=await viewport.getAttribute('data-pbr-request-count');
   const pbrUploads=await viewport.getAttribute('data-pbr-upload-count');
@@ -770,6 +772,7 @@ test('texture-backed close terrain shading loads lazily, visibly changes materia
   });
   await expect(viewport).toHaveAttribute('data-near-field-detail','active',{timeout:15_000});
   await expect(viewport).toHaveAttribute('data-local-detail-status','ready',{timeout:65_000});
+  await expect(viewport).toHaveAttribute('data-near-field-shader-variant','textured');
   await expect(viewport).toHaveAttribute('data-local-detail-texture-count','2');
   await expect(viewport).toHaveAttribute('data-pbr-texture-count','3');
   await expect(viewport).toHaveAttribute('data-local-detail-uploads','1');
@@ -784,6 +787,7 @@ test('texture-backed close terrain shading loads lazily, visibly changes materia
   const enabled=await readPixels();
   await testInfo.attach('texture-backed-close-rock.png',{body:await viewport.screenshot(),contentType:'image/png'});
   await toggle.uncheck();
+  await expect(viewport).toHaveAttribute('data-near-field-shader-variant','off');
   await expect(viewport).toHaveAttribute('data-local-detail-status','idle');
   await expect(viewport).toHaveAttribute('data-local-detail-texture-count','0');
   await viewport.evaluate(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));});
@@ -800,6 +804,10 @@ test('texture-backed close terrain shading loads lazily, visibly changes materia
   await toggle.check();
   await expect(viewport).toHaveAttribute('data-local-detail-status','ready',{timeout:20_000});
   await expect(viewport).toHaveAttribute('data-local-detail-uploads','2');
+  await expect(viewport).toHaveAttribute('data-near-field-shader-variant','textured');
+  await viewport.evaluate(async()=>{await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));});
+  const reenabled=await readPixels();
+  expect(reenabled).not.toEqual(disabled);
   expect(await viewport.getAttribute('data-pbr-request-count')).toBe(pbrRequests);
   expect(await viewport.getAttribute('data-pbr-upload-count')).toBe(pbrUploads);
   expect(errors).toEqual([]);

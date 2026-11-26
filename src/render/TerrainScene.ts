@@ -12,7 +12,7 @@ import { createDisplacedTerrainSampler } from './terrainDisplacement';
 import { resolveSurface, type PBRMaps } from '../materials/pbr';
 import { fabricFrame } from '../materials/surfaceFabric';
 import { packPreviewPBR } from './previewMaterial';
-import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
+import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender, nearFieldShaderVariant, type NearFieldShaderVariant } from './nearField';
 import { detailTileMeters } from '../materials/detailTiles';
 import type { DetailPreviewRequest } from '../materials/detailPreview';
 import { detailPreviewKey, requestDetailPreview } from '../materials/detailPreviewClient';
@@ -164,6 +164,7 @@ export class TerrainScene {
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
   private readonly nearField = createNearFieldUniforms();
+  private nearFieldVariant: NearFieldShaderVariant = 'off';
   private localDetailSpec: DetailPreviewRequest | null = null;
   private localDetailTextures: DetailTextures | null = null;
   private localDetailRelease: (() => void) | null = null;
@@ -369,6 +370,7 @@ export class TerrainScene {
     this.renderer.domElement.dataset.projection = 'perspective';
     this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
+    this.renderer.domElement.dataset.nearFieldShaderVariant = 'off';
     this.renderer.domElement.dataset.localDetailStatus = 'idle';
     this.renderer.domElement.dataset.localDetailTextureCount = '0';
     this.renderer.domElement.dataset.localDetailRequests = '0';
@@ -488,9 +490,13 @@ export class TerrainScene {
           diffuseColor.rgb *= 1.0 - line * 0.46;
         }`,
       );
-      installNearFieldShader(shader, this.nearField);
+      installNearFieldShader(shader, this.nearField, this.nearFieldVariant);
       installSourceNormals(shader, this.sourceNormals);
     };
+    // Three caches programs by shader source and this key. Include the live
+    // variant as well as the current callback (cloud shadows wrap it).
+    this.material.customProgramCacheKey = () =>
+      this.material.onBeforeCompile.toString() + ':' + this.nearFieldVariant;
 
     this.camera.position.set(3.25, 2.4, 3.55);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -641,6 +647,7 @@ export class TerrainScene {
     // can influence screen pixels. This is a display-only uniform; orbit/zoom
     // never invalidates the erosion field or regenerates the PBR worker maps.
     const activeMicro = !!this.project && this.settings.material === 'pbr' &&
+      this.nearField.nhDetailStrength.value > 0.0001 &&
       nearFieldShouldRender(
         this.settings.nearFieldDetail,
         orbitDistance,
@@ -657,6 +664,13 @@ export class TerrainScene {
       this.needsRender = true;
     }
     this.syncLocalDetail(orbitDistance, lodNow);
+    const variant = nearFieldShaderVariant(activeMicro, !!this.localDetailTextures);
+    if (variant !== this.nearFieldVariant) {
+      this.nearFieldVariant = variant;
+      this.material.needsUpdate = true;
+      this.renderer.domElement.dataset.nearFieldShaderVariant = variant;
+      this.needsRender = true;
+    }
     const seconds = performance.now() / 1000;
     this.atmosphere?.follow(this.camera);
     this.atmosphere?.tick(seconds, this.settings);

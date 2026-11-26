@@ -72,6 +72,12 @@ export function nearFieldShouldRender(
   return footprint < 0.65 * wavelength;
 }
 
+export type NearFieldShaderVariant = 'off' | 'analytic' | 'textured';
+
+export function nearFieldShaderVariant(active: boolean, hasTextures: boolean): NearFieldShaderVariant {
+  return !active ? 'off' : hasTextures ? 'textured' : 'analytic';
+}
+
 interface ShaderTarget {
   fragmentShader: string;
   uniforms: Record<string, { value: unknown }>;
@@ -427,12 +433,15 @@ const GLSL_ALBEDO = `
     vec2 ormDx = dFdx(vRoughnessMapUv), ormDy = dFdy(vRoughnessMapUv);
     vec2 normDx = dFdx(vNormalMapUv), normDy = dFdy(vNormalMapUv);
     float visibility = 1.0 - smoothstep(0.28, 0.52, footprint);
+    float tileVisibility = 0.0;
+#ifdef NH_LOCAL_DETAIL
     float tileRatio = wavelength/max(nhTileMeters,0.001);
     float tileFootprint = footprint*tileRatio;
-    float tileVisibility = nhTileReady*(1.0-smoothstep(0.18,0.42,tileFootprint));
+    tileVisibility = nhTileReady*(1.0-smoothstep(0.18,0.42,tileFootprint));
     // A texture-backed close pass replaces, rather than stacks on top of,
     // the analytic close morphology. Mid-distance structure stays independent.
     visibility *= 1.0-tileVisibility;
+#endif
     float midWavelength = max(0.4, nhDetailMeters * 1.4);
     float midRatio = wavelength/midWavelength;
     float midFootprint = footprint*midRatio;
@@ -475,6 +484,7 @@ const GLSL_ALBEDO = `
         nhAlphaShift += gain*(sa.alpha+sb.alpha+sc.alpha)/3.0;
         nhReliefDelta += (gain*wavelength/span) * vec2(sb.height-sa.height, sc.height-sa.height);
       }
+#ifdef NH_LOCAL_DETAIL
       if (tileVisibility > 0.0) {
         NHTileSurface local = nhTileTriplanar(p*tileRatio,pDx*tileRatio,pDy*tileRatio,layers);
         float gain = tileVisibility*nhDetailStrength;
@@ -485,6 +495,7 @@ const GLSL_ALBEDO = `
         nhReliefDelta += gain*wavelength*vec2(dot(local.gradient,pDx),dot(local.gradient,pDy));
         nhTileOcclusion = 1.0-clamp(local.cavity*tileVisibility*nhTileAO*min(1.0,nhDetailStrength),0.0,0.45);
       }
+#endif
       diffuseColor.rgb = clamp(diffuseColor.rgb*(1.0 + tintDelta), 0.0, 1.0);
     }
   }
@@ -526,15 +537,30 @@ const GLSL_NORMAL = `
 #endif
 `;
 
-export function installNearFieldShader(shader: ShaderTarget, uniforms: NearFieldUniforms) {
-  for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
+export function installNearFieldShader(
+  shader: ShaderTarget, uniforms: NearFieldUniforms, variant: NearFieldShaderVariant = 'textured',
+) {
   const replace = (marker: string, code: string) => {
     if (!shader.fragmentShader.includes(marker)) {
       throw new Error(`Terrain PBR shader does not contain ${marker}.`);
     }
     shader.fragmentShader = shader.fragmentShader.replace(marker, marker + '\n' + code);
   };
-  shader.fragmentShader = GLSL_PARS + '\n' + DETAIL_TEXTURE_GLSL + '\n' + shader.fragmentShader;
+  // Keep identical uniform objects in all variants: Three can reuse a cached
+  // program after switching variants without invoking onBeforeCompile again.
+  for (const [name, uniform] of Object.entries(uniforms)) shader.uniforms[name] = uniform;
+  if (variant === 'off') {
+    // Keep the existing PBR roughness floor without compiling any procedural
+    // detail code (or allocating array sampler slots) for an overview.
+    replace('#include <roughnessmap_fragment>', `
+#if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
+  roughnessFactor = sqrt(clamp(roughnessFactor*roughnessFactor, 0.04, 1.0));
+#endif
+`);
+    return;
+  }
+  const local = variant === 'textured' ? '#define NH_LOCAL_DETAIL\n' + DETAIL_TEXTURE_GLSL : 'uniform float nhTileReady;';
+  shader.fragmentShader = GLSL_PARS + '\n' + local + '\n' + shader.fragmentShader;
   replace('#include <map_fragment>', GLSL_ALBEDO);
   replace('#include <roughnessmap_fragment>', GLSL_ROUGHNESS);
   replace('#include <normal_fragment_maps>', GLSL_NORMAL);

@@ -45,6 +45,13 @@ async function skyline(canvas: Locator) {
   });
 }
 
+// Read the actual WebGL canvas without Playwright's compositor/layout-stability
+// wait, which can stall under SwiftShader even after the pixel assertion passes.
+async function captureCanvas(canvas: Locator): Promise<Buffer> {
+  return Buffer.from(await canvas.evaluate((source: HTMLCanvasElement) =>
+    source.toDataURL('image/png').split(',')[1]), 'base64');
+}
+
 /** Probe several interior points of every tile on the installed triangle mesh.
  * The level terrain fixture makes all observed height variation attributable to displacement. */
 function displacedTiles(page: Page) {
@@ -84,6 +91,10 @@ for (const mode of ['adaptive', 'uniform512'] as const) {
     await expect(canvas).toHaveAttribute('data-mesh-source-resolution', '128', { timeout: 60_000 });
     await expect(page.locator('.status-bar')).toContainText('Terrain ready');
     await page.getByRole('button', { name: 'Scene', exact: true }).click();
+    // This is a geometry/silhouette test, not a fragment-material benchmark.
+    // The dedicated PBR acceptance suite exercises both analytic and textured
+    // close shading, so isolate geometry here (especially under SwiftShader).
+    await page.getByRole('checkbox', { name: /Live close-up microdetail/ }).uncheck();
     const material = page.getByRole('combobox', { name: 'Surface material' });
     const quality = page.getByRole('combobox', { name: 'Terrain mesh fidelity' });
     await material.selectOption('clay');
@@ -97,7 +108,7 @@ for (const mode of ['adaptive', 'uniform512'] as const) {
     expect(flat.p10).toBeGreaterThan(flat.height * 0.1);
     expect(flat.p90).toBeLessThan(flat.height * 0.9);
     expect(flat.spread).toBeLessThanOrEqual(1);
-    await testInfo.attach('zero-displacement-skyline.png', { body: await canvas.screenshot(), contentType: 'image/png' });
+    await testInfo.attach('zero-displacement-skyline.png', { body: await captureCanvas(canvas), contentType: 'image/png' });
 
     // An older release has no worker-status attribute. Its flat silhouette is
     // still a valid negative control when the test is run against that build.
@@ -128,7 +139,7 @@ for (const mode of ['adaptive', 'uniform512'] as const) {
         });
       }
     }
-    await testInfo.attach('displaced-skyline.png', { body: await canvas.screenshot(), contentType: 'image/png' });
+    await testInfo.attach('displaced-skyline.png', { body: await captureCanvas(canvas), contentType: 'image/png' });
     await testInfo.attach('skyline-pixels.json', { body: JSON.stringify({ flat, measurements }), contentType: 'application/json' });
     await depth.focus();
     await depth.press('Home');
