@@ -53,46 +53,57 @@ test('World Studio builds, refines, exports aligned tiles, and saves explicit wo
   // Preset parser validates values; use the existing versioned settings except
   // the known valid kernel. Avoid assuming undocumented fractal aliases.
   delete source.params.fractal;
-  await page
-    .getByLabel('Import terrain project file')
-    .setInputFiles({
-      name: 'world-test.json',
-      mimeType: 'application/json',
-      buffer: Buffer.from(JSON.stringify(project)),
-    });
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible();
+  await page.getByLabel('Import terrain project file').setInputFiles({
+    name: 'world-test.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(project)),
+  });
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Build terrain', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Compute diagnostics' })).toContainText('3 cached');
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'World Studio', exact: true });
+  const dialog = page.getByRole('region', { name: 'World Studio', exact: true });
   await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible({
     timeout: 90_000,
   });
-  await dialog.getByLabel('World depth', { exact: true }).fill('4000');
-  await dialog.getByLabel('South intervals', { exact: true }).fill('512');
-  await dialog.getByRole('button', { name: 'Build world', exact: true }).click();
+  await dialog.getByLabel('Automatic world previews').uncheck();
+  await dialog.getByText('Preview behaviour', { exact: true }).click();
+  await dialog.getByLabel('Automatic regional refinement').uncheck();
+  await dialog.getByRole('button', { name: 'Enable world in project', exact: true }).click();
+  await expect(dialog.getByText('Project linked', { exact: true })).toBeVisible();
+  await dialog.getByRole('tab', { name: 'Setup', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Lock world aspect ratio', exact: true }).click();
+  await dialog.getByLabel('Depth', { exact: true }).fill('4000');
+  await dialog.getByLabel('Depth', { exact: true }).press('Enter');
+  await dialog.getByText('Coordinates & exact cell counts', { exact: true }).click();
+  await dialog.getByLabel('Cells Z', { exact: true }).fill('512');
+  await dialog.getByLabel('Cells Z', { exact: true }).press('Enter');
+  await dialog.getByRole('button', { name: 'Build preview', exact: true }).click();
   await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible();
-  const map = dialog.getByRole('button', { name: /^World region map/ });
+  const map = dialog.getByRole('region', { name: 'Interactive world map', exact: true });
+  const terrain = dialog.locator('.wv-plane');
   // The physical 8 km × 4 km rectangle must fit without distorting terrain.
-  // A generic dialog width or max-width clamp must not silently squeeze it.
+  // The map canvas preserves physical aspect independently of its surrounding workspace.
   expect((await dialog.boundingBox())!.width).toBeGreaterThan(1100);
   await expect
     .poll(async () => {
-      const bounds = await map.boundingBox();
+      const bounds = await terrain.boundingBox();
       return bounds!.width / bounds!.height;
     })
     .toBeCloseTo(2, 2);
+  await dialog.getByRole('tab', { name: 'Explore', exact: true }).click();
   await map.focus();
   await page.keyboard.press('ArrowRight');
-  await expect(dialog.getByText('Region selected', { exact: true })).toBeVisible();
+  await expect(dialog.locator('.wv-selected-region')).toBeVisible();
   await dialog.getByRole('button', { name: 'Refine region', exact: true }).click();
-  await expect(dialog.getByText('Region ready', { exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Overview', exact: true }).click();
+  await expect(dialog.getByText('Region preview ready', { exact: true })).toBeVisible();
+  await dialog.getByRole('button', { name: 'World overview', exact: true }).click();
   await expect(dialog.getByText('World overview ready', { exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: 'Enable World project', exact: true }).click();
-  await expect(dialog.getByText('WORLD PROJECT', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Project linked', { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath('world-studio.png') });
-  await dialog.getByRole('tab', { name: 'Export', exact: true }).click();
+  await dialog.getByRole('tab', { name: 'Deliver', exact: true }).click();
   await dialog.getByLabel('World export samples').selectOption('512');
   await dialog.getByLabel('World height format').selectOption('raw32');
   await dialog.getByLabel('Mask: Elevation band', { exact: true }).check();
@@ -139,22 +150,31 @@ test('World Studio builds, refines, exports aligned tiles, and saves explicit wo
   expect(errors).toEqual([]);
 });
 
-test('cancelled world work cannot publish and the modal fits a compact viewport', async ({
+test('cancelled world work cannot publish and the workspace fits a compact viewport', async ({
   page,
 }, info) => {
+  await page.route('**/*world.worker*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.continue();
+  });
   await page.goto('/');
-  await expect(page.getByText('Terrain ready', { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(
+    page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
+  ).toBeVisible({ timeout: 90_000 });
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'World Studio', exact: true });
-  await dialog.getByRole('button', { name: 'Cancel build', exact: true }).click();
-  await expect(dialog.getByRole('status')).toContainText('cancelled');
+  const dialog = page.getByRole('region', { name: 'World Studio', exact: true });
+  await dialog.getByRole('button', { name: 'Cancel preview', exact: true }).click();
+  await expect(dialog.getByText('Preview cancelled', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 760, height: 780 });
+  // Cover the worker startup delay and settled-camera debounce: resizing must not restart a cancelled build.
+  await page.waitForTimeout(700);
+  await expect(dialog.getByText('Preview cancelled', { exact: true })).toBeVisible();
   const bounds = await dialog.boundingBox();
   expect(bounds!.width).toBeLessThanOrEqual(760);
   expect(bounds!.height).toBeLessThanOrEqual(780);
   expect(bounds!.width).toBeGreaterThan(700);
   const buildBounds = await dialog
-    .getByRole('button', { name: 'Build world', exact: true })
+    .getByRole('button', { name: 'Build preview', exact: true })
     .boundingBox();
   expect(buildBounds!.x + buildBounds!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width);
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Download, Package, Check, LoaderCircle, ArrowUpRight } from 'lucide-react';
 import { Modal } from './Modal';
 import { TerrainIcon, EXPORT_ICON_NAMES } from './TerrainIcon';
@@ -6,10 +6,12 @@ import { createTerrainWorker } from '../hooks/useTerrainEngine';
 import type { ExportFormat } from '../export/heightmap';
 import { listMaskOutputs } from '../export/maskOutputs';
 import { pbrBudgetMiB, checkPBRExportBudget, isPBRExportFormat } from '../export/budget';
+import { TerrainExportClient, type ExportState } from '../export/exportClient';
+import {
+  EXPORT_RESOLUTIONS, exportDescription, formatExportSize, mapPayloadBytes, pbrPreflight,
+} from '../export/exportPlan';
 import { downloadBlob } from '../model/project';
-import type { TerrainProject, WorkerResponse } from '../model/types';
-
-const EXPORT_RESOLUTIONS = [256, 512, 768, 1024, 2048] as const;
+import type { TerrainProject } from '../model/types';
 
 export function ExportDialog({
   project,
@@ -24,140 +26,54 @@ export function ExportDialog({
   const format = choice.startsWith('mask16:') ? 'mask16' : choice as ExportFormat;
   const mask = maskOutputs.find((output) => choice === 'mask16:' + output.id);
   const [bundle, setBundle] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState('');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const workerRef = useRef<Worker | null>(null);
-  const generationRef = useRef(0);
-  const encoderRef = useRef<Worker | null>(null);
-  useEffect(
-    () => () => {
-      ++generationRef.current;
-      workerRef.current?.terminate();
-      encoderRef.current?.terminate();
-    },
-    [],
-  );
-  const cancel = () => {
-    ++generationRef.current;
-    workerRef.current?.terminate();
-    workerRef.current = null;
-    encoderRef.current?.terminate();
-    encoderRef.current = null;
-    setBusy(false);
-    setStage('Export cancelled');
+  const [state, setState] = useState<ExportState>({ phase: 'idle' });
+  const [client] = useState(() => new TerrainExportClient(
+    createTerrainWorker,
+    () => new Worker(new URL('../export/export.worker.ts', import.meta.url), { type: 'module' }),
+    downloadBlob,
+    setState,
+  ));
+  useEffect(() => () => client.dispose(), [client]);
+  const busy = state.phase === 'generating' || state.phase === 'encoding';
+  const memoryGiB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const preflight = pbrPreflight(format, resolution, bundle, memoryGiB);
+  const isBundle = format === 'pbr' || bundle;
+  const resetStatus = () => setState({ phase: 'idle' });
+  const chooseResolution = (value: number) => {
+    setResolution(value);
+    resetStatus();
   };
   const run = () => {
-    if (format === 'mask16' && !mask?.input) return;
-    const memoryGiB = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
-    const memoryBudgetMiB = pbrBudgetMiB(memoryGiB);
+    if (busy || (format === 'mask16' && !mask?.input)) return;
+    // Recheck at the execution boundary; the worker repeats this guard before
+    // material synthesis. The device memory hint is not measured free RAM.
+    const memoryBudgetMiB = pbrBudgetMiB(
+      (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
+    );
     if (isPBRExportFormat(format)) {
       try {
-        checkPBRExportBudget(resolution, memoryBudgetMiB, format, bundle);
+        checkPBRExportBudget(resolution, memoryBudgetMiB, format, isBundle);
       } catch (error) {
-        setError(error instanceof Error ? error.message : 'PBR export exceeds device memory budget.');
-        setSuccess('');
+        setState({
+          phase: 'error',
+          message: error instanceof Error ? error.message : 'PBR export exceeds device memory budget.',
+        });
         return;
       }
     }
-    const generation = ++generationRef.current;
-    setBusy(true);
-    setProgress(0);
-    setError('');
-    setSuccess('');
-    setStage(mask ? 'Preparing mask branch' : 'Preparing full-resolution terrain');
-    const worker = createTerrainWorker();
-    workerRef.current = worker;
-    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
-      if (generation !== generationRef.current) return;
-      const m = event.data;
-      if (m.type === 'progress') {
-        setProgress(m.progress * 0.92);
-        setStage(m.stage);
-      } else if (m.type === 'error') {
-        setError(m.message);
-        setBusy(false);
-        worker.terminate();
-        workerRef.current = null;
-      } else if (m.type === 'result') {
-        setProgress(0.94);
-        setStage(mask ? 'Encoding 16-bit mask' : 'Generating and encoding material maps');
-        worker.terminate();
-        workerRef.current = null;
-        const encoder = new Worker(new URL('../export/export.worker.ts', import.meta.url), {
-          type: 'module',
-        });
-        encoderRef.current = encoder;
-        encoder.onmessage = (event: MessageEvent<
-          | { type: 'progress'; id: number; stage: string }
-          | { type: 'error'; id: number; message: string }
-          | { type: 'result'; id: number; bytes: ArrayBuffer; filename: string; mime: string }
-        >) => {
-          if (generation !== generationRef.current || event.data.id !== generation) return;
-          const message = event.data;
-          if (message.type === 'progress') setStage(message.stage);
-          else {
-            encoder.terminate();
-            encoderRef.current = null;
-            setBusy(false);
-            if (message.type === 'error') setError(message.message);
-            else {
-              downloadBlob(new Blob([message.bytes], { type: message.mime }), message.filename);
-              setSuccess(message.filename);
-              setProgress(1);
-              setStage('Export ready');
-            }
-          }
-        };
-        encoder.onerror = (event) => {
-          if (generation !== generationRef.current) return;
-          setError(event.message || 'Could not encode the export.');
-          setBusy(false);
-          encoder.terminate();
-          encoderRef.current = null;
-        };
-        const field = m.result.field;
-        // Upstream graph passes may share the same zero-filled diagnostic
-        // ArrayBuffer (especially graphs without erosion). A transferable may
-        // occur only ONCE; duplicates cause DataCloneError and a stuck export.
-        const transfer = Array.from(new Set([
-          field.height.buffer, field.flow.buffer, field.wear.buffer,
-          field.deposition.buffer,
-        ])).filter((buffer): buffer is ArrayBuffer => buffer instanceof ArrayBuffer);
-        try {
-          encoder.postMessage(
-            {
-              type: 'encode', id: generation, field, project, format, bundle,
-              outputNodeId: m.result.outputNodeId, memoryBudgetMiB,
-            },
-            transfer,
-          );
-        } catch (error) {
-          encoder.terminate();
-          encoderRef.current = null;
-          setBusy(false);
-          setError(error instanceof Error ? error.message : 'Unable to transfer terrain to export worker.');
-        }
-      }
-    };
-    worker.onerror = (e) => {
-      if (generation !== generationRef.current) return;
-      setError(e.message || 'Export failed. Try a lower resolution.');
-      setBusy(false);
-      worker.terminate();
-      workerRef.current = null;
-    };
-    worker.postMessage({
-      type: 'generate', id: generation, project, resolution, previewNodeId: mask?.id,
+    client.start({
+      project, resolution, format, bundle: isBundle, previewNodeId: mask?.id, memoryBudgetMiB,
     });
+  };
+  const close = () => {
+    client.dispose();
+    onClose();
   };
   return (
     <Modal
       title="Export your landscape"
       eyebrow="FROM GRAPH TO HEIGHTFIELD"
-      onClose={onClose}
+      onClose={close}
       className="export-modal"
     >
       <div className="modal-body">
@@ -179,8 +95,7 @@ export function ExportDialog({
               disabled={busy}
               onChange={(e) => {
                 setChoice(e.target.value);
-                setError('');
-                setSuccess('');
+                resetStatus();
               }}
             >
               <option value="png16">Heightmap · 16-bit PNG</option>
@@ -218,7 +133,7 @@ export function ExportDialog({
               aria-label="Export resolution"
               value={resolution}
               disabled={busy}
-              onChange={(e) => setResolution(Number(e.target.value))}
+              onChange={(e) => chooseResolution(Number(e.target.value))}
             >
               {EXPORT_RESOLUTIONS.map((n) => (
                 <option value={n} key={n}>
@@ -236,7 +151,7 @@ export function ExportDialog({
             <strong>
               {resolution.toLocaleString()} × {resolution.toLocaleString()}
             </strong>
-            . {mask ? 'Black is zero weight and white is full weight.' : 'Larger grids take longer and create new erosion detail.'}
+            . {mask ? 'Black is zero weight and white is full weight.' : 'Larger grids take longer and may change erosion detail.'}
           </p>
         </div>
         <label className="export-bundle">
@@ -254,9 +169,12 @@ export function ExportDialog({
           </span>
           <input
             type="checkbox"
-            checked={format === 'pbr' || bundle}
+            checked={isBundle}
             disabled={busy || format === 'pbr'}
-            onChange={(e) => setBundle(e.target.checked)}
+            onChange={(e) => {
+              setBundle(e.target.checked);
+              resetStatus();
+            }}
           />
         </label>
         <dl className="export-spec">
@@ -285,57 +203,94 @@ export function ExportDialog({
             </dd>
           </div>
           <div>
+            <dt>Map payload (uncompressed)</dt>
+            <dd>{formatExportSize(mapPayloadBytes(format, resolution))}</dd>
+          </div>
+          {preflight && (
+            <div>
+              <dt>Estimated temporary memory</dt>
+              <dd>~{preflight.estimate} / {preflight.budget} MiB budget</dd>
+            </div>
+          )}
+          <div>
             <dt>Orientation</dt>
             <dd>North at top · row-major</dd>
           </div>
         </dl>
-        {format === 'png16' && (
+        <p className="parameter-hint">{exportDescription(format)}</p>
+        {format === 'png16' && !isBundle && (
           <p className="parameter-hint">
-            PNG uses the terrain’s actual minimum and maximum elevation. The metadata records the
-            values needed to restore elevation in meters.
+            Map only: the elevation range is not embedded in the PNG. Include the bundle to
+            preserve the scale needed to recover absolute elevation.
           </p>
         )}
-        {format === 'pbr' && (
-          <p className="parameter-hint">PBR ZIP includes base color, both normal conventions, micro-normal, roughness, AO, metallic, ORM, Unity HDRP mask, layer weights, curvature, 16-bit terrain height and 16-bit material relief. Albedo uses sRGB. Data maps use linear encoding.</p>
-        )}
-        {format === 'normal' && (
+        {preflight && (
           <p className="parameter-hint">
-            Tangent-space normals, OpenGL +Y convention. Uses physical terrain dimensions,
-            independent of viewport exaggeration.
+            Memory is a conservative estimate based on the browser's device hint, not free RAM.
+            PNG and ZIP download sizes depend on compression and project data.
           </p>
         )}
-        {error && (
-          <div className="error-notice" role="alert">
-            {error}
+        {preflight?.overBudget && (
+          <div className="error-notice">
+            <span>This selection exceeds the estimated device budget.</span>
+            {preflight.suggested !== undefined && (
+              <button
+                type="button"
+                className="button secondary"
+                disabled={busy}
+                onClick={() => chooseResolution(preflight.suggested!)}
+              >
+                Use {preflight.suggested} × {preflight.suggested}
+              </button>
+            )}
           </div>
         )}
-        {busy && (
+        {state.phase === 'error' && (
+          <div className="error-notice" role="alert">
+            {state.message}
+          </div>
+        )}
+        {state.phase === 'generating' && (
           <div className="export-progress" role="status">
             <div>
-              <span>{stage}</span>
-              <span>{Math.round(progress * 100)}%</span>
+              <span>Building terrain · {state.stage}</span>
+              <span>{Math.round(state.progress * 100)}%</span>
             </div>
-            <progress max={1} value={progress} />
+            <progress aria-label="Terrain generation progress" max={1} value={state.progress} />
           </div>
         )}
-        {success && (
+        {state.phase === 'encoding' && (
+          <div className="export-progress" role="status">
+            <div>
+              <span>{state.stage}</span>
+              <span>Encoding…</span>
+            </div>
+            <progress aria-label="Encoding export" />
+          </div>
+        )}
+        {state.phase === 'cancelled' && (
+          <p className="parameter-hint" role="status">
+            Export cancelled. No terrain data was changed. Adjust the settings or try again.
+          </p>
+        )}
+        {state.phase === 'success' && (
           <div className="success-notice" role="status">
             <Check size={16} />
-            <span>Downloaded {success}</span>
+            <span>Download started: {state.filename} · {formatExportSize(state.bytes)}</span>
           </div>
         )}
       </div>
       <footer className="modal-footer">
-        <button className="button secondary" onClick={busy ? cancel : onClose}>
+        <button className="button secondary" onClick={busy ? () => client.cancel() : close}>
           {busy ? 'Cancel export' : 'Close'}
         </button>
         <button className="button primary" onClick={run} disabled={busy || (format === 'mask16' && !mask?.input)}>
           {busy ? <LoaderCircle size={16} className="spin" /> : <Download size={16} />}{' '}
           {busy
             ? 'Building export…'
-            : success
+            : state.phase === 'success'
               ? 'Export again'
-              : `Export ${format === 'pbr' || bundle ? 'bundle' : 'map'}`}
+              : `Export ${isBundle ? 'bundle' : 'map'}`}
         </button>
       </footer>
     </Modal>

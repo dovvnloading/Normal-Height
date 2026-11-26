@@ -2,6 +2,7 @@ import type { TerrainNode, TerrainProject } from '../../model/types';
 import { validateWorldDefinition, WORLD_REGION_BUDGET } from '../../model/world';
 import type { WorldDefinition } from '../../model/world';
 import { compileGraph } from '../plan/graph';
+import { describeWorldGraph, isWorldGlobalNode as isGlobal } from './capabilities';
 import { evaluateGraph } from '../index';
 import { clamp, mix, Noise, smoothstep } from '../noise';
 import { hydraulicErosion, sampleHeight, thermalErosion } from '../erosion';
@@ -21,6 +22,7 @@ import type {
   WorldSampleGrid,
   WorldStageReport,
 } from './types';
+export { describeWorldGraph } from './capabilities';
 export * from './types';
 export * from './grid';
 export * from './hydrology';
@@ -59,143 +61,6 @@ export interface PreparedWorldEvaluation {
   readonly transportBudget?: WorldMassBudget;
   sampleRegion(grid: WorldSampleGrid, options?: WorldRunOptions): Promise<WorldRegionResult>;
   dispose(): void;
-}
-
-function isGlobal(node: TerrainNode, hasInput: boolean): boolean {
-  if (node.bypassed && hasInput) return false;
-  return (
-    node.kind === 'mountain' ||
-    (node.kind === 'noise' && node.params.noiseModel !== 'v3') ||
-    node.kind === 'hydraulic' ||
-    node.kind === 'thermal' ||
-    node.kind === 'spline'
-  );
-}
-
-/** Classify every reachable stage before starting allocations or global solves. */
-export function describeWorldGraph(
-  project: TerrainProject,
-  world: WorldDefinition,
-  previewNodeId?: string,
-): { stages: WorldStageReport[]; capability: WorldCapability } {
-  const error = validateWorldDefinition(world);
-  if (error) throw new Error(error);
-  const plan = compileGraph(project, previewNodeId),
-    d = world.domain,
-    warnings: string[] = [];
-  const transportEnabled =
-    !!world.transport?.enabled && !(previewNodeId && plan.target.kind !== 'output');
-  if (world.transport?.enabled && !transportEnabled)
-    warnings.push(
-      'Intermediate and mask previews show authored graph fields before optional post-graph World transport.',
-    );
-  const stages: WorldStageReport[] = plan.stages.map((stage) => {
-    const node = plan.byId.get(stage.nodeId)!,
-      global = isGlobal(node, stage.inputs.length > 0);
-    const simulation =
-      node.kind === 'hydraulic' && !['droplet', 'watershed'].includes(String(node.params.method))
-        ? Math.min(512, world.globalResolution)
-        : world.globalResolution;
-    const scope = node.kind === 'warp' ? 'local' : stage.scope;
-    let reason = global
-      ? `${world.globalResolution} × ${world.globalResolution} whole-domain CPU reference; interpolated to requested samples.`
-      : 'Evaluated at canonical world coordinates on the requested sample grid.';
-    if (global && ['hydraulic', 'thermal', 'spline'].includes(node.kind))
-      reason = `One whole-domain solve; ${simulation} × ${simulation} simulation/reference samples. Its displacement is reconstructed over the native input; no independent tile resets.`;
-    if (node.kind === 'mask' && node.params.mode === 'slope')
-      reason = 'Physical central differences query the upstream field beyond internal tile edges.';
-    if (node.kind === 'warp')
-      reason =
-        'Bounded world-space displacement queries the same upstream field across tile boundaries.';
-    if (node.bypassed && stage.inputs.length)
-      reason = 'Bypassed: forwards the primary field without scheduling secondary inputs.';
-    return {
-      nodeId: node.id,
-      label: node.label,
-      kind: node.kind,
-      scope,
-      mode: global ? 'reconstructed' : 'native',
-      backend: 'cpu-reference',
-      algorithmVersion: `world-1/${node.kind}/${node.params.noiseModel ?? 'reference'}`,
-      samplesX: global ? simulation : d.cellsX + 1,
-      samplesZ: global ? simulation : d.cellsZ + 1,
-      spacingX: d.width / (global ? simulation - 1 : d.cellsX),
-      spacingZ: d.depth / (global ? simulation - 1 : d.cellsZ),
-      simulationResolution: global ? simulation : null,
-      reason,
-    };
-  });
-  const legacyGlobal = stages.some((stage) => stage.mode !== 'native');
-  if (transportEnabled) {
-    stages.push({
-      nodeId: 'world-transport',
-      label: 'World transport',
-      kind: 'world-transport',
-      scope: 'iterative',
-      mode: 'reconstructed',
-      backend: 'cpu-reference',
-      algorithmVersion: 'world-transport-1/f64-conservative',
-      samplesX: world.globalResolution,
-      samplesZ: world.globalResolution,
-      spacingX: d.width / (world.globalResolution - 1),
-      spacingZ: d.depth / (world.globalResolution - 1),
-      simulationResolution: world.globalResolution,
-      reason:
-        'Experimental whole-domain finite-volume water/sediment and thermal transport. Every shared face is reconciled once; coarse displacement is reconstructed over native graph detail.',
-    });
-    warnings.push(
-      'World transport is an experimental artistic CPU reference, not a calibrated geophysical simulation. Its mass budget is measured before fine-grid reconstruction.',
-    );
-  }
-  const requiresGlobal = legacyGlobal || transportEnabled;
-  let reason: string | undefined;
-  if (legacyGlobal && d.width !== d.depth)
-    reason =
-      'This graph contains square-domain legacy/global stages. Use equal width and depth, or a Noise Studio graph with native World stages for a rectangular world.';
-  if (requiresGlobal && d.boundary === 'periodic')
-    reason =
-      'Global transport/legacy solvers do not implement periodic boundary conditions. Use an open or closed domain, or disable global stages.';
-  const unsupported = stages.find((stage) =>
-    stage.kind === 'heightImport' || stage.kind === 'coast' || stage.kind === 'maskOutput',
-  );
-  if (unsupported)
-    reason = `“${unsupported.label}” is available in the single-domain Terrain workspace. World tiles do not yet implement imported rasters, coastal shelf shaping or named-mask output nodes.`;
-  if (requiresGlobal)
-    warnings.push(
-      'Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion.',
-    );
-  if (legacyGlobal) {
-    warnings.push(
-      'Legacy global solvers retain their authored outer-boundary rules; the World boundary setting does not rewrite their numerical model.',
-    );
-  }
-  if (
-    stages.some(
-      (stage) => stage.kind === 'mountain' || (stage.kind === 'noise' && stage.mode !== 'native'),
-    )
-  )
-    warnings.push(
-      'Legacy sources are anchored to the whole authored domain; the origin georeferences those fields. Studio v3 sources are anchored to absolute world coordinates.',
-    );
-  if (plan.stages.some((stage) => stage.inputs.some((input) => input.channel !== 'height')))
-    warnings.push(
-      'Diagnostic routes use one whole-domain normalization at the global reference resolution.',
-    );
-  if (d.cellsX > 8192 || d.cellsZ > 8192)
-    warnings.push(
-      'Dimensions above 8192 intervals describe a logical tiled domain; no monolithic allocation or native large-grid erosion is implied.',
-    );
-  return {
-    stages,
-    capability: {
-      supported: !reason,
-      native: !requiresGlobal && !unsupported,
-      fullGraph: !unsupported,
-      requiresGlobal,
-      warnings,
-      reason,
-    },
-  };
 }
 
 function operation(node: TerrainNode): PointwiseOperation | null {
@@ -379,7 +244,7 @@ export async function prepareWorldEvaluation(
     sampler: Sampler,
     grid: WorldSampleGrid,
     signal?: AbortSignal,
-    progress?: (fraction: number) => void,
+    progress?: (fraction: number, completed: number, total: number) => void,
   ): Promise<Channels> {
     const count = grid.samplesX * grid.samplesZ;
     const field: Channels = {
@@ -405,7 +270,7 @@ export async function prepareWorldEvaluation(
       }
       if ((row & 7) === 7 || row === grid.samplesZ - 1) {
         check(signal);
-        progress?.((row + 1) / grid.samplesZ);
+        progress?.((row + 1) / grid.samplesZ, row + 1, grid.samplesZ);
         await tick();
       }
     }
@@ -427,6 +292,16 @@ export async function prepareWorldEvaluation(
     if (normalizers.has(key)) return normalizers.get(key)!;
     const sampler = samplers.get(id)!,
       c = channelIndex(channel);
+    const report = (completed: number) =>
+      options.onProgressDetail?.({
+        phase: 'preparing',
+        stage: `Measuring ${channel} range`,
+        progress: completed / n,
+        completed,
+        total: n,
+        unit: 'rows',
+      });
+    report(0);
     let max = 0;
     for (let j = 0; j < n; j++) {
       const z = d.originZ + (j * d.depth) / (n - 1);
@@ -435,8 +310,9 @@ export async function prepareWorldEvaluation(
           max,
           sampler(d.originX + (i * d.width) / (n - 1), z, d.width / (n - 1), d.depth / (n - 1))[c],
         );
-      if ((j & 7) === 7) {
+      if ((j & 7) === 7 || j === n - 1) {
         check();
+        report(j + 1);
         await tick();
       }
     }
@@ -448,6 +324,19 @@ export async function prepareWorldEvaluation(
       check();
       const stage = plan.stages[stageIndex],
         node = plan.byId.get(stage.nodeId)!;
+      const detail = (progress: number | null, label = `Preparing · ${node.label}`) =>
+        options.onProgressDetail?.({
+          phase: 'preparing',
+          stage: label,
+          progress,
+          nodeId: node.id,
+          completed: stageIndex,
+          total: plan.stages.length,
+          unit: 'stages',
+          stageIndex: stageIndex + 1,
+          stageCount: plan.stages.length,
+        });
+      detail(null);
       const inputs = new Map<string, Sampler>();
       for (const input of stage.inputs) {
         const original = samplers.get(input.nodeId)!;
@@ -483,6 +372,7 @@ export async function prepareWorldEvaluation(
             previewNodeId: node.id,
             onProgress: (progress) => {
               check();
+              detail(progress, `Global source · ${node.label}`);
               options.onProgress?.(
                 (stageIndex + progress) / plan.stages.length,
                 `Global source · ${node.label}`,
@@ -506,6 +396,7 @@ export async function prepareWorldEvaluation(
             mask = maskSampler ? (await renderSampler(maskSampler, coarseGrid)).height : undefined;
           const progress = (fraction: number) => {
             check();
+            detail(fraction, `Global solve · ${node.label}`);
             options.onProgress?.(
               (stageIndex + fraction) / plan.stages.length,
               `Global solve · ${node.label}`,
@@ -689,13 +580,37 @@ export async function prepareWorldEvaluation(
         }
       }
       options.onProgress?.((stageIndex + 1) / plan.stages.length, `Prepared · ${node.label}`);
+      options.onProgressDetail?.({
+        phase: 'preparing',
+        stage: `Prepared · ${node.label}`,
+        progress: 1,
+        nodeId: node.id,
+        completed: stageIndex + 1,
+        total: plan.stages.length,
+        unit: 'stages',
+        stageIndex: stageIndex + 1,
+        stageCount: plan.stages.length,
+      });
       await tick();
     }
     if (world.transport?.enabled) {
       check();
       options.onProgress?.(0, 'World transport · preparing global field');
       const sourceSampler = samplers.get(plan.target.id)!;
-      const source = await renderSampler(sourceSampler, coarseGrid);
+      const source = await renderSampler(
+        sourceSampler,
+        coarseGrid,
+        options.signal,
+        (fraction, completed, total) =>
+          options.onProgressDetail?.({
+            phase: 'transport',
+            stage: 'Preparing transport field',
+            progress: fraction,
+            completed,
+            total,
+            unit: 'rows',
+          }),
+      );
       const metres = Float64Array.from(source.height, (value) => d.datum + value * d.heightScale);
       const transport = await simulateWorldTransport(
         metres,
@@ -713,6 +628,14 @@ export async function prepareWorldEvaluation(
           onProgress: (fraction) => {
             check();
             options.onProgress?.(fraction, 'World transport · exchanging water and sediment');
+            options.onProgressDetail?.({
+              phase: 'transport',
+              stage: 'Exchanging water and sediment',
+              progress: fraction,
+              completed: Math.round(fraction * world.transport!.iterations),
+              total: world.transport!.iterations,
+              unit: 'iterations',
+            });
           },
         },
       );
@@ -838,6 +761,24 @@ export async function prepareWorldEvaluation(
             check(run.signal);
             const stage = plan.stages[index],
               node = plan.byId.get(stage.nodeId)!;
+            const detail = (
+              fraction: number | null,
+              completed?: number,
+              total?: number,
+              unit?: 'rows' | 'samples',
+            ) =>
+              run.onProgressDetail?.({
+                phase: 'sampling',
+                stage: node.label,
+                nodeId: node.id,
+                progress: fraction,
+                completed,
+                total,
+                unit,
+                stageIndex: index + 1,
+                stageCount: plan.stages.length,
+              });
+            detail(null);
             let field: Channels;
             const inputs = new Map(
               stage.inputs
@@ -882,20 +823,41 @@ export async function prepareWorldEvaluation(
                 }
                 if ((i & 32767) === 32767) {
                   check(run.signal);
+                  detail((i + 1) / count, i + 1, count, 'samples');
                   await tick();
                 }
               }
             } else
-              field = await renderSampler(samplers.get(node.id)!, grid, run.signal, (fraction) =>
-                run.onProgress?.((index + fraction) / plan.stages.length, node.label),
+              field = await renderSampler(
+                samplers.get(node.id)!,
+                grid,
+                run.signal,
+                (fraction, completed, total) => {
+                  run.onProgress?.((index + fraction) / plan.stages.length, node.label);
+                  detail(fraction, completed, total, 'rows');
+                },
               );
             fields.set(node.id, field);
             run.onProgress?.((index + 1) / plan.stages.length, node.label);
+            detail(1, count, count, 'samples');
           }
           check(run.signal);
           const output = transportSampler
-            ? await renderSampler(transportSampler, grid, run.signal, (fraction) =>
-                run.onProgress?.(fraction, 'World transport · reconstructing region'),
+            ? await renderSampler(
+                transportSampler,
+                grid,
+                run.signal,
+                (fraction, completed, total) => {
+                  run.onProgress?.(fraction, 'World transport · reconstructing region');
+                  run.onProgressDetail?.({
+                    phase: 'sampling',
+                    stage: 'Reconstructing transported terrain',
+                    progress: fraction,
+                    completed,
+                    total,
+                    unit: 'rows',
+                  });
+                },
               )
             : fields.get(plan.target.id)!;
           let min = Infinity,

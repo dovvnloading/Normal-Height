@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { streamWorldExport, worldExportFilename } from './worldExport';
-import type { WorldExportRequest, WorldExportResponse } from './worldExport';
+import type { WorldExportProgress, WorldExportRequest, WorldExportResponse } from './worldExport';
 
 const worker = self as unknown as DedicatedWorkerGlobalScope;
 let active = false;
@@ -20,6 +20,7 @@ worker.addEventListener('message', async (event: MessageEvent<WorldExportRequest
   try {
     let sequence = 0,
       lastProgress = -Infinity;
+    let lastPhase: WorldExportProgress['phase'] | undefined;
     const manifest = await streamWorldExport(
       request.options,
       async (bytes) => {
@@ -32,11 +33,17 @@ worker.addEventListener('message', async (event: MessageEvent<WorldExportRequest
         send({ type: 'chunk', id: request.id, sequence: index, bytes: transfer }, [transfer]);
         await acknowledged;
       },
-      (progress, stage) => {
+      (progress, stage, detail) => {
         const now = performance.now();
-        if (now - lastProgress >= 50 || progress === 1) {
-          send({ type: 'progress', id: request.id, progress, stage });
+        if (
+          now - lastProgress >= 50 ||
+          progress === 1 ||
+          detail?.phase !== lastPhase ||
+          (detail?.total !== undefined && detail.completed === detail.total)
+        ) {
+          send({ type: 'progress', id: request.id, progress, stage, detail });
           lastProgress = now;
+          lastPhase = detail?.phase;
         }
       },
     );

@@ -143,7 +143,23 @@ test('imports a survey, shapes a coast and exports a named water mask after sess
   expect(errors).toEqual([]);
 });
 
-test('confirms RAW layout, preserves the active source on failure and makes replacement undoable', async ({ page }) => {
+test('confirms RAW layout, preserves the active source on cancellation or failure and makes replacement undoable', async ({ page }) => {
+  // Hold one import in the reading state deterministically. Other worker requests
+  // are unchanged, so the subsequent successful and invalid imports use real decoding.
+  await page.addInitScript(() => {
+    window.Worker = new Proxy(window.Worker, {
+      construct(target, args) {
+        const worker = Reflect.construct(target, args) as Worker;
+        if (!String(args[0]).includes('heightmap.worker')) return worker;
+        const send = worker.postMessage;
+        worker.postMessage = ((message: { file?: File }, ...options: unknown[]) => {
+          if (message?.file?.name === 'cancelled.r16') return;
+          Reflect.apply(send, worker, [message, ...options]);
+        }) as Worker['postMessage'];
+        return worker;
+      },
+    });
+  });
   await page.goto('/');
   await page.locator('.auto-build input').uncheck();
   await page.getByRole('button', { name: '2D map', exact: true }).click();
@@ -170,6 +186,16 @@ test('confirms RAW layout, preserves the active source on failure and makes repl
   const width = region.getByLabel('Grid width');
   const height = region.getByLabel('Grid height');
   await expect(current).toContainText('original.r16');
+
+  await file.setInputFiles({ name: 'cancelled.r16', mimeType: 'application/octet-stream', buffer: original });
+  await submit.click();
+  await expect(region.getByRole('button', { name: 'Cancel import' })).toBeVisible();
+  await expect(current).toContainText('original.r16');
+  await region.getByRole('button', { name: 'Cancel import' }).click();
+  await expect(region.getByRole('status')).toContainText('Import cancelled');
+  await expect(current).toContainText('original.r16');
+  await expect(submit).toBeEnabled();
+  await region.getByRole('button', { name: 'Discard file' }).click();
 
   // 3 × 2 samples, big-endian Float32; the generic extension is ambiguous.
   const meters = [-125, 0.25, 12, 25, 100, 250];

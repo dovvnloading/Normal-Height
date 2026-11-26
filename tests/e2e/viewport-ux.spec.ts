@@ -243,6 +243,143 @@ test.describe('terrain viewport UX', () => {
       (node as HTMLCanvasElement & { __resets: () => number }).__resets())).toBe(0);
   });
 
+  test('spline designer commits precise edits once and cancels interrupted gestures', async ({ page }) => {
+    await page.locator('.auto-build input').uncheck();
+    await page.getByRole('complementary', { name: 'Node library' })
+      .getByRole('button', { name: /River \/ ridge spline/ }).click();
+    const layer = page.locator('.nh-spline-layer');
+    const handles = layer.locator('.nh-spline-handle');
+    const x = page.getByRole('spinbutton', { name: 'Point 3 X percent', exact: true });
+    const handle = page.getByRole('button', { name: 'Move spline point 3', exact: true });
+    const original = Number(await x.inputValue());
+    const position = await handle.getAttribute('style');
+    await expect(page.locator('.spline-path-metrics')).toContainText('Approx. path length');
+    await expect(layer.locator('.nh-spline-arrow')).toHaveCount(3);
+    await expect(layer.locator('.nh-spline-outer')).toHaveCount(1);
+
+    await x.fill('');
+    await expect(handle).toHaveAttribute('style', position!);
+    await x.fill('42.125');
+    await expect(handle).toHaveAttribute('style', position!);
+    await x.press('Escape');
+    await expect(x).toHaveValue(String(original));
+    await x.fill('42.125');
+    await x.press('Enter');
+    await expect(x).toHaveValue('42.125');
+    await page.getByRole('button', { name: 'Undo', exact: true }).click();
+    await expect(x).toHaveValue(String(original));
+    await page.getByRole('button', { name: 'Redo', exact: true }).click();
+    await expect(x).toHaveValue('42.125');
+
+    await handle.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(x).toHaveValue('42.225');
+    await page.keyboard.press('Shift+ArrowLeft');
+    await expect(x).toHaveValue('41.225');
+    const before = await handle.getAttribute('style');
+    const box = (await handle.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 25, box.y + box.height / 2 + 15, { steps: 5 });
+    await expect.poll(() => handle.getAttribute('style')).not.toBe(before);
+    await expect(x).toHaveValue('41.225');
+    await page.keyboard.press('Escape');
+    await page.mouse.up();
+    await expect(handle).toHaveAttribute('style', before!);
+    await expect(x).toHaveValue('41.225');
+    await expect(handles).toHaveCount(5);
+
+    const rect = (await layer.boundingBox())!;
+    await page.mouse.move(rect.x + rect.width * 0.78, rect.y + rect.height * 0.18);
+    await page.mouse.down();
+    await expect(handles).toHaveCount(5);
+    await page.mouse.move(rect.x + rect.width * 0.78 + 25, rect.y + rect.height * 0.18 + 15, { steps: 5 });
+    await page.mouse.up();
+    await expect(handles).toHaveCount(5);
+    await expect.poll(async () => (await layer.boundingBox())!.x).toBeGreaterThan(rect.x + 10);
+
+    const next = (await layer.boundingBox())!;
+    await layer.click({ position: { x: next.width * 0.78, y: next.height * 0.18 } });
+    await expect(handles).toHaveCount(6);
+    await handles.last().focus();
+    await page.keyboard.press('Delete');
+    await expect(handles).toHaveCount(5);
+    await expect(page.getByRole('button', { name: 'Finish editing' })).toBeVisible();
+  });
+
+  test('spline pinch cancels the pending point and does not insert on release', async ({ page }) => {
+    await page.locator('.auto-build input').uncheck();
+    await page.getByRole('complementary', { name: 'Node library' })
+      .getByRole('button', { name: /River \/ ridge spline/ }).click();
+    const layer = page.locator('.nh-spline-layer');
+    const rect = (await layer.boundingBox())!;
+    const cx = Math.round(rect.x + rect.width * 0.5), cy = Math.round(rect.y + rect.height * 0.2);
+    const client = await page.context().newCDPSession(page);
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    const points = (span: number) => [{ x: cx - span, y: cy, id: 1 }, { x: cx + span, y: cy, id: 2 }];
+    const before = await page.locator('.nh-map-controls > span').innerText();
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [points(20)[0]] });
+    await expect(layer.locator('.nh-spline-handle')).toHaveCount(5);
+    await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: points(20) });
+    for (const span of [35, 45, 55])
+      await client.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: points(span) });
+    await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await expect.poll(async () => (await page.locator('.nh-map-controls > span').innerText())).not.toBe(before);
+    await expect(layer.locator('.nh-spline-handle')).toHaveCount(5);
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  });
+
+  test('spline pinch across the tile boundary never commits a point', async ({ page }) => {
+    await page.locator('.auto-build input').uncheck();
+    await page.getByRole('complementary', { name: 'Node library' })
+      .getByRole('button', { name: /River \/ ridge spline/ }).click();
+    const layer = page.locator('.nh-spline-layer');
+    const handles = layer.locator('.nh-spline-handle');
+    const zoom = page.locator('.nh-map-controls > span');
+    const snapshot = () => handles.evaluateAll(elements =>
+      elements.map(element => element.getAttribute('style')));
+    await expect(handles).toHaveCount(5);
+    const original = await snapshot();
+    const client = await page.context().newCDPSession(page);
+    await client.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    try {
+      // Cover both orders: tile-first (a pending insertion) and margin-first.
+      for (const tileFirst of [true, false]) {
+        await page.getByRole('button', { name: 'Fit map', exact: true }).click();
+        await page.getByRole('button', { name: 'Zoom map out', exact: true }).click();
+        await page.getByRole('button', { name: 'Zoom map out', exact: true }).click();
+        await expect(zoom).toHaveText('64%');
+        const map = (await page.locator('.nh-map').boundingBox())!;
+        const tile = (await layer.boundingBox())!;
+        const margin = tile.x - map.x;
+        expect(margin).toBeGreaterThan(25);
+        const y = Math.round(tile.y + tile.height * 0.5);
+        const inside = { x: Math.round(tile.x + tile.width * 0.15), y, id: 1 };
+        const outside = { x: Math.round(tile.x - margin * 0.35), y, id: 2 };
+        const farther = { ...outside, x: Math.round(tile.x - margin * 0.85) };
+        const ordered = (a: typeof inside, b: typeof outside) => tileFirst ? [a, b] : [b, a];
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchStart', touchPoints: [ordered(inside, outside)[0]],
+        });
+        await expect(handles).toHaveCount(5);
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchStart', touchPoints: ordered(inside, outside),
+        });
+        // Keep the tile finger still: its release would otherwise be a click.
+        await client.send('Input.dispatchTouchEvent', {
+          type: 'touchMove', touchPoints: ordered(inside, farther),
+        });
+        await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await expect.poll(() => zoom.innerText()).not.toBe('64%');
+        await expect(handles).toHaveCount(5);
+        expect(await snapshot()).toEqual(original);
+      }
+    } finally {
+      await client.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await client.detach();
+    }
+  });
+
   test('spline editing disables competing terrain inspection tools', async ({ page }) => {
     const library = page.getByRole('complementary', { name: 'Node library', exact: true });
     await library.getByRole('button', { name: /River \/ ridge spline/ }).click();

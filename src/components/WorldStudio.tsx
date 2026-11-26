@@ -1,1391 +1,1214 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import {
-  ArrowDownToLine,
+  Activity,
+  ArrowLeft,
   ArrowUpRight,
+  Bookmark,
+  BookmarkPlus,
   Check,
+  ChevronRight,
   Compass,
-  Cpu,
   Download,
-  Expand,
+  Focus,
+  GitBranch,
   Globe2,
-  Grid2X2,
+  HelpCircle,
+  Layers3,
   LoaderCircle,
-  Map,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pin,
   Play,
-  Scan,
-  Settings2,
+  RotateCcw,
+  Save,
+  SlidersHorizontal,
+  Trash2,
   X,
 } from 'lucide-react';
-import { Modal } from './Modal';
-import { paintWorldMap } from './worldMap';
-import type { WorldMapChannel } from './worldMap';
-import {
-  createWorldDefinition,
-  DEFAULT_WORLD_TRANSPORT,
-  validateWorldDefinition,
-} from '../model/world';
-import type { WorldDefinition, WorldDomain, WorldTransportSettings } from '../model/world';
 import type { TerrainProject } from '../model/types';
+import type { WorldDefinition } from '../model/world';
+import { createWorldDefinition, validateWorldDefinition } from '../model/world';
 import { BUILD_INFO } from '../model/buildInfo';
-import type { WorldRegionResult } from '../engine/world';
-import type { WorldGridRequest, WorldWorkerResponse } from '../hooks/worldProtocol';
-import type { WorldRegionStoreStats } from '../engine/worldStore';
-import type { ComputeCapability } from '../engine/gpu/pointwise';
 import { downloadBlob, slug } from '../model/project';
-import { checkWorldExportBudget } from '../export/worldExport';
-import type { WorldExportOptions } from '../export/worldExport';
+import { describeWorldGraph } from '../engine/world/capabilities';
+import type { WorldRegionStoreStats } from '../engine/worldStore';
+import { createWorldPreviewGrid, isWorldOverview, useWorldEngine } from '../hooks/useWorldEngine';
+import {
+  loadWorldBookmarks,
+  loadWorldViewSettings,
+  saveWorldBookmarks,
+  saveWorldViewSettings,
+  WORLD_VIEW_KEY,
+  worldBookmarkScope,
+  worldDomainKey,
+} from '../model/worldViewSettings';
+import type {
+  WorldBookmark,
+  WorldViewSettings,
+  WorldWorkspaceMode,
+} from '../model/worldViewSettings';
+import { WorldViewport } from './world/WorldViewport';
+import type { WorldLayer, WorldProbe, WorldRegion, WorldSnapshot } from './world/worldViewMath';
+import { WORLD_LAYERS, canCompareWorldSnapshots, worldGridBounds } from './world/worldViewMath';
+import { snapshotContainsRegion } from './world/worldAnalysis';
+import { WorldAnalysisPanel, WorldComparisonControls } from './world/WorldAnalysisPanel';
+import { WorldSetupPanel } from './world/WorldSetupPanel';
+import { WorldSimulationPanel } from './world/WorldSimulationPanel';
+import { WorldExportPanel } from './world/WorldExportPanel';
+import type { WorldExportActivity } from './world/WorldExportPanel';
+import {
+  WorldDisclosure,
+  WorldMetric,
+  WorldNotice,
+  WorldPanelHeading,
+  WorldSection,
+  worldDistance,
+  worldNumber,
+} from './world/WorldControls';
 import './WorldStudio.css';
 
-type Region = Pick<WorldGridRequest, 'startX' | 'startZ' | 'cellsX' | 'cellsZ'>;
-type Tab = 'domain' | 'build' | 'export';
-const number = (value: number, digits = 1) =>
-  value.toLocaleString('en-US', { maximumFractionDigits: digits });
-const mib = (bytes: number) => `${number(bytes / 1048576)} MiB`;
-const boundaryLabel = {
-  closed: 'Closed perimeter',
-  open: 'Open outlets',
-  periodic: 'Periodic world',
-};
+const modes = [
+  { id: 'explore', label: 'Explore', icon: Compass },
+  { id: 'setup', label: 'Setup', icon: Globe2 },
+  { id: 'simulate', label: 'Simulate', icon: SlidersHorizontal },
+  { id: 'analyze', label: 'Analyze', icon: Activity },
+  { id: 'deliver', label: 'Deliver', icon: Download },
+] as const;
+const isEditing = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.matches('input,textarea,select') || target.isContentEditable);
 
-function NumberField({
-  label,
-  value,
-  onChange,
-  min,
-  max,
-  step = 1,
-  unit = 'm',
-}: {
-  label: string;
-  value: number;
-  onChange: (value: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  unit?: string;
-}) {
-  return (
-    <label className="world-field">
-      <span>{label}</span>
-      <span className="world-number">
-        <input
-          aria-label={label}
-          type="number"
-          min={min}
-          max={max}
-          step={step}
-          value={value}
-          onChange={(e) => onChange(Number(e.target.value))}
-        />
-        <small>{unit}</small>
-      </span>
-    </label>
-  );
+export interface WorldStudioProps {
+  project: TerrainProject;
+  onSave(world: WorldDefinition, group?: string): boolean;
+  onClose(): void;
+  active?: boolean;
+  graphEditor?: ReactNode;
+  graphInspector?: ReactNode;
+  previewNodeId?: string;
+  onReturnOutput?(): void;
+  onSelectNode?(id: string): void;
+  deliverRequest?: number;
+  onExportActivity?(activity: WorldExportActivity | null): void;
 }
 
-interface FileWriter {
-  write(data: ArrayBuffer): Promise<void>;
-  close(): Promise<void>;
-  abort(): Promise<void>;
-}
-type PickerWindow = Window & {
-  showSaveFilePicker?: (options: {
-    suggestedName: string;
-    types: { description: string; accept: Record<string, string[]> }[];
-  }) => Promise<{ createWritable(): Promise<FileWriter> }>;
-};
-
+/** A persistent authoring workspace. Preview work can pause while hidden;
+ * delivery owns a separate immutable job and survives workspace navigation. */
 export function WorldStudio({
   project,
   onSave,
   onClose,
-}: {
-  project: TerrainProject;
-  onSave: (world: WorldDefinition) => void;
-  onClose: () => void;
-}) {
+  active = true,
+  graphEditor,
+  graphInspector,
+  previewNodeId,
+  onReturnOutput,
+  onSelectNode,
+  deliverRequest = 0,
+  onExportActivity,
+}: WorldStudioProps) {
   const [world, setWorld] = useState<WorldDefinition>(() =>
     structuredClone(project.world ?? createWorldDefinition(project)),
   );
-  const [tab, setTab] = useState<Tab>('domain');
-  const [result, setResult] = useState<WorldRegionResult | null>(null);
-  const [builtWorld, setBuiltWorld] = useState<WorldDefinition>(world);
-  const [builtGrid, setBuiltGrid] = useState<Region | null>(null);
-  const [builtSignature, setBuiltSignature] = useState('');
-  const [region, setRegion] = useState<Region | null>(null);
-  const [channel, setChannel] = useState<WorldMapChannel>('relief');
-  const [gridVisible, setGridVisible] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState('Preparing world overview');
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [savedWorld, setSavedWorld] = useState(JSON.stringify(project.world));
-  const [format, setFormat] = useState<'png16' | 'raw32' | 'raw16'>('png16');
-  const [profile, setProfile] = useState<'generic' | 'unreal' | 'unity'>('generic');
-  const [samples, setSamples] = useState(1024);
-  const [exportRegion, setExportRegion] = useState(false);
-  const [diagnostics, setDiagnostics] = useState(true);
-  const [normals, setNormals] = useState(true);
-  const [maskIds, setMaskIds] = useState<string[]>([]);
-  const [cacheEnabled, setCacheEnabled] = useState(false);
-  const [storeStats, setStoreStats] = useState<WorldRegionStoreStats | null>(null);
-  const [cacheHit, setCacheHit] = useState(false);
-  const [compute, setCompute] = useState<ComputeCapability | null>(null);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const canvas = useRef<HTMLCanvasElement>(null);
-  const mapFit = useRef<HTMLDivElement>(null);
-  const [mapSize, setMapSize] = useState({ width: 640, height: 420 });
-  useEffect(() => {
-    const element = mapFit.current;
-    if (!element) return;
-    const resize = () => setMapSize({ width: element.clientWidth, height: element.clientHeight });
-    resize();
-    const observer = new ResizeObserver(resize);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  const worker = useRef<Worker | null>(null);
-  const encoder = useRef<Worker | null>(null);
-  const writer = useRef<FileWriter | null>(null);
-  const epoch = useRef(0);
-  const exportEpoch = useRef(0);
-  const building = useRef(false);
-  const exportPending = useRef(false);
-  const dragStart = useRef<{ x: number; z: number } | null>(null);
-  const signature = JSON.stringify(world);
-  const validation = validateWorldDefinition(world);
-  const stale = result !== null && builtSignature !== signature;
-  const domain = world.domain;
-  const patch = (value: Partial<WorldDefinition>) => {
-    setWorld((w) => ({ ...w, ...value }));
-    setSuccess('');
-  };
-  const patchTransport = (value: Partial<WorldTransportSettings>) => {
-    setWorld((w) => ({
-      ...w,
-      transport: { ...DEFAULT_WORLD_TRANSPORT, ...w.transport, ...value },
-    }));
-    setSuccess('');
-  };
-  const patchDomain = (value: Partial<WorldDomain>) => {
-    setWorld((w) => ({ ...w, domain: { ...w.domain, ...value } }));
-    setSuccess('');
-    setRegion(null);
-    setExportRegion(false);
-  };
-  const cancelBuild = () => {
-    ++epoch.current;
-    worker.current?.terminate();
-    worker.current = null;
-    building.current = false;
-    setBusy(false);
-    setStage('Build cancelled — last complete field retained');
-  };
-  const cancelExport = () => {
-    ++exportEpoch.current;
-    exportPending.current = false;
-    encoder.current?.terminate();
-    encoder.current = null;
-    void writer.current?.abort().catch(() => {});
-    writer.current = null;
-    setExporting(false);
-    setStage('Export cancelled');
-  };
-  useEffect(
-    () => () => {
-      ++epoch.current;
-      ++exportEpoch.current;
-      exportPending.current = false;
-      worker.current?.terminate();
-      encoder.current?.terminate();
-      void writer.current?.abort().catch(() => {});
-    },
-    [],
+  const [view, setView] = useState<WorldViewSettings>(() => {
+    const loaded = loadWorldViewSettings();
+    try {
+      if (!localStorage.getItem(WORLD_VIEW_KEY))
+        loaded.automatic = describeWorldGraph(project, world).capability.native;
+    } catch {
+      /* A malformed graph is explained by the preview preflight. */
+    }
+    return loaded;
+  });
+  const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 1000);
+  const [graphOpen, setGraphOpen] = useState(false);
+  const [graphHeight, setGraphHeight] = useState(280);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [region, setRegion] = useState<WorldRegion | null>(null);
+  const [frameRequest, setFrameRequest] = useState(0);
+  const [autoDetail, setAutoDetail] = useState(true);
+  const [regionRequest, setRegionRequest] = useState(0);
+  const [railHorizontal, setRailHorizontal] = useState(() => window.innerWidth <= 480);
+  const [overview, setOverview] = useState<(WorldSnapshot & { revision: string }) | null>(null);
+  const [pinned, setPinned] = useState<WorldSnapshot | null>(null);
+  const [compareMode, setCompareMode] = useState<'off' | 'wipe' | 'difference'>('off');
+  const [probe, setProbe] = useState<WorldProbe | null>(null);
+  const [activity, setActivity] = useState<WorldExportActivity | null>(null);
+  const [notice, setNotice] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [clearing, setClearing] = useState(false);
+  const [clearedStats, setClearedStats] = useState<WorldRegionStoreStats | null>(null);
+  const [bookmarkName, setBookmarkName] = useState('');
+  const [bookmarks, setBookmarks] = useState<WorldBookmark[]>(() =>
+    loadWorldBookmarks(worldBookmarkScope(project)),
   );
-  const runPreview = (selected: Region | null = null) => {
-    if (validation) {
-      setError(validation);
-      return;
-    }
-    if (building.current) {
-      worker.current?.terminate();
-      worker.current = null;
-    }
-    const active =
-      worker.current ??
-      new Worker(new URL('../engine/world.worker.ts', import.meta.url), { type: 'module' });
-    worker.current = active;
-    building.current = true;
-    const id = ++epoch.current;
-    const snapshot = structuredClone(world);
-    const area = selected ?? { startX: 0, startZ: 0, cellsX: domain.cellsX, cellsZ: domain.cellsZ };
-    const width = (area.cellsX / domain.cellsX) * domain.width;
-    const depth = (area.cellsZ / domain.cellsZ) * domain.depth;
-    const longest = selected ? Math.min(512, Math.max(area.cellsX, area.cellsZ)) : 384;
-    const samplesX = Math.max(2, Math.round(longest * Math.min(1, width / depth)) + 1);
-    const samplesZ = Math.max(2, Math.round(longest * Math.min(1, depth / width)) + 1);
-    setBusy(true);
-    setError('');
-    setSuccess('');
-    setProgress(0);
-    setStage('Preparing dependency graph');
-    active.onmessage = (event: MessageEvent<WorldWorkerResponse>) => {
-      const message = event.data;
-      if (message.id !== epoch.current) return;
-      if (message.type === 'progress') {
-        setProgress(message.progress);
-        setStage(message.stage);
-      } else {
-        building.current = false;
-        setBusy(false);
-        if (message.type === 'error') {
-          setError(message.message);
-          setStage('World needs attention');
-        } else {
-          setResult(message.result);
-          setBuiltWorld(snapshot);
-          setBuiltGrid(selected);
-          setBuiltSignature(JSON.stringify(snapshot));
-          setStoreStats(message.store ?? null);
-          setCacheHit(message.cacheHit);
-          setCompute(message.compute ?? null);
-          setWarnings(message.warnings ?? []);
-          setProgress(1);
-          setStage(selected ? 'Region ready' : 'World overview ready');
-        }
-      }
-    };
-    active.onerror = (event) => {
-      if (id !== epoch.current) return;
-      building.current = false;
-      setBusy(false);
-      setError(event.message || 'World worker stopped. Try a smaller global reference grid.');
-      active.terminate();
-      worker.current = null;
-    };
-    active.postMessage({
-      type: 'preview',
-      id,
-      project,
-      world: snapshot,
-      grid: { ...area, samplesX, samplesZ },
-      cache: cacheEnabled,
-    });
-  };
-  useEffect(() => {
-    runPreview();
-  }, []); // A deliberate build, not a rebuild on every field keystroke.
-  useEffect(() => {
-    if (canvas.current && result)
-      paintWorldMap(canvas.current, result, channel, builtWorld.domain.heightScale);
-  }, [result, channel, builtWorld]);
-
-  const dimensions =
-    profile === 'unreal'
-      ? [505, 1009, 2017, 4033, 8129]
-      : profile === 'unity'
-        ? [513, 1025, 2049, 4097]
-        : [512, 1024, 2048, 4096, 8192];
-  const target =
-    exportRegion && region
-      ? region
-      : { startX: 0, startZ: 0, cellsX: domain.cellsX, cellsZ: domain.cellsZ };
-  const targetAspect =
-    ((target.cellsZ / domain.cellsZ) * domain.depth) /
-    ((target.cellsX / domain.cellsX) * domain.width);
-  const exportSamplesZ =
-    profile === 'generic'
-      ? Math.max(16, Math.min(8192, Math.round((samples - 1) * targetAspect) + 1))
-      : samples;
-  const exportOptions = useMemo(
+  const [now, setNow] = useState(() => performance.now());
+  const shell = useRef<HTMLElement>(null);
+  const alive = useRef(true);
+  const authored = JSON.stringify(project.world);
+  // Legacy projects derive their World domain from the Terrain dimensions.
+  // Undo between two legacy presets must restore that domain as well as the graph.
+  const authoredSync = authored ?? JSON.stringify([project.worldSize, project.heightScale]);
+  const previousAuthored = useRef(authoredSync);
+  const bookmarkScope = worldBookmarkScope(project);
+  const domainKey = worldDomainKey(world);
+  const previousDomain = useRef(domainKey);
+  const engine = useWorldEngine(project, world, {
+    enabled: active,
+    automatic: view.automatic,
+    cache: view.cache,
+    previewNodeId,
+  });
+  const dirty = JSON.stringify(world) !== authored;
+  const canPin = !!engine.result && !engine.stale && !engine.busy;
+  const builtLabel =
+    project.graph.nodes.find((n) => n.id === engine.builtPreviewNodeId)?.label ?? 'Terrain output';
+  const snapshot = useMemo<WorldSnapshot | null>(
     () =>
-      ({
-        project,
-        world,
-        format,
-        profile,
-        samplesX: samples,
-        samplesZ: exportSamplesZ,
-        tileIntervals: world.tileCells,
-        region: exportRegion && region ? region : undefined,
-        diagnostics,
-        normals,
-        masks: project.graph.nodes
-          .filter((n) => maskIds.includes(n.id))
-          .map((n) => ({ nodeId: n.id, name: n.label })),
-        sink: 'memory',
-      }) satisfies WorldExportOptions,
-    [
-      project,
-      world,
-      format,
-      profile,
-      samples,
-      exportSamplesZ,
-      exportRegion,
-      region,
-      diagnostics,
-      normals,
-      maskIds,
-    ],
+      engine.result && engine.builtWorld && engine.builtGrid
+        ? {
+            result: engine.result,
+            world: engine.builtWorld,
+            grid: engine.builtGrid,
+            label: builtLabel,
+          }
+        : null,
+    [engine.result, engine.builtWorld, engine.builtGrid, engine.builtPreviewNodeId, builtLabel],
   );
-  const estimate = useMemo(() => {
+  const matchingOverview = overview?.revision === engine.completedSignature ? overview : null;
+  const geometryMatches = !engine.builtWorld || worldDomainKey(engine.builtWorld) === domainKey;
+  const analysisSnapshot =
+    region && snapshot && !snapshotContainsRegion(snapshot, region) ? matchingOverview : snapshot;
+  const stageLabel = previewNodeId
+    ? project.graph.nodes.find((n) => n.id === previewNodeId)?.label
+    : undefined;
+  const visibleBookmarks = bookmarks.filter((bookmark) => bookmark.domain === domainKey);
+  const otherBookmarks = bookmarks.filter((bookmark) => bookmark.domain !== domainKey);
+  const selectedBounds = region ? worldGridBounds(world, region) : null;
+  const previewReady =
+    snapshot && isWorldOverview(snapshot.world, snapshot.grid)
+      ? 'World overview ready'
+      : 'Region preview ready';
+  const status = engine.validationError
+    ? 'Settings need attention'
+    : engine.error
+      ? 'Preview needs attention'
+      : engine.busy
+        ? engine.stage
+        : engine.stale && snapshot
+          ? 'Changes ready to build'
+          : engine.job?.status === 'cancelled'
+            ? snapshot
+              ? 'Preview cancelled · last complete terrain retained'
+              : 'Preview cancelled'
+            : snapshot
+              ? previewReady
+              : 'Preparing world overview';
+  const elapsed = engine.job
+    ? engine.busy
+      ? now - engine.job.startedAt
+      : engine.job.elapsedMs
+    : 0;
+
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    saveWorldViewSettings(view);
+  }, [view]);
+  useEffect(() => {
+    onExportActivity?.(activity);
+  }, [activity, onExportActivity]);
+  useEffect(() => {
+    if (active) shell.current?.focus({ preventScroll: true });
+  }, [active]);
+  useEffect(() => {
+    setProbe(null);
+  }, [engine.result]);
+  useEffect(() => {
+    if (compareMode !== 'off')
+      setView((previous) =>
+        previous.presentation === 'terrain' ? { ...previous, presentation: 'split' } : previous,
+      );
+  }, [compareMode, view.presentation]);
+  useEffect(() => {
+    setBookmarks(loadWorldBookmarks(bookmarkScope));
+  }, [bookmarkScope]);
+  useEffect(() => {
+    if (previousAuthored.current === authoredSync) return;
+    previousAuthored.current = authoredSync;
+    setWorld(structuredClone(project.world ?? createWorldDefinition(project)));
+    setSaveError('');
+  }, [authoredSync, project]);
+  useEffect(() => {
+    if (previousDomain.current === domainKey) return;
+    previousDomain.current = domainKey;
+    setRegion(null);
+    setProbe(null);
+  }, [domainKey]);
+  useEffect(() => {
+    if (snapshot && isWorldOverview(snapshot.world, snapshot.grid))
+      setOverview({ ...snapshot, revision: engine.completedSignature });
+  }, [snapshot, engine.completedSignature]);
+  useEffect(() => {
+    setClearedStats(null);
+  }, [engine.completedJob]);
+  useEffect(() => {
+    if (!engine.busy || !active) return;
+    setNow(performance.now());
+    const timer = window.setInterval(() => setNow(performance.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [engine.busy, active]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => {
+    const compact = window.matchMedia('(max-width: 999px)');
+    const rail = window.matchMedia('(max-width: 480px)');
+    const updateRail = () => setRailHorizontal(rail.matches);
+    rail.addEventListener('change', updateRail);
+    const change = () => {
+      if (compact.matches) setPanelOpen(false);
+    };
+    compact.addEventListener('change', change);
+    return () => {
+      compact.removeEventListener('change', change);
+      rail.removeEventListener('change', updateRail);
+    };
+  }, []);
+  const lastDeliverRequest = useRef(deliverRequest);
+  useEffect(() => {
+    if (deliverRequest === lastDeliverRequest.current) return;
+    lastDeliverRequest.current = deliverRequest;
+    setView((previous) => ({ ...previous, mode: 'deliver' }));
+    setPanelOpen(true);
+  }, [deliverRequest]);
+
+  const setMode = (mode: WorldWorkspaceMode) => {
+    setView((previous) => ({ ...previous, mode }));
+    setPanelOpen(true);
+  };
+  const setLayer = (layer: WorldLayer) => setView((previous) => ({ ...previous, layer }));
+  const changeWorld = (next: WorldDefinition, group = 'world-settings') => {
+    setWorld(next);
+    setSaveError('');
+    const invalid = validateWorldDefinition(next);
+    if (invalid) return;
+    if (!onSave(next, group))
+      setSaveError(
+        'These settings could not be saved to the project. Your draft is retained; free project space, then save settings again.',
+      );
+  };
+  const pinCurrent = () => {
+    if (!canPin || !snapshot) return;
+    setPinned({ ...snapshot, label: `Build ${engine.completedJob?.id ?? 1} · ${snapshot.label}` });
+    setCompareMode('off');
+    setNotice('Terrain pinned. Change settings and build to compare the result.');
+  };
+  const refine = () => {
+    if (!region || engine.validationError || engine.stale) return;
+    engine.build(createWorldPreviewGrid(world, region, 'detail'));
+    setFrameRequest((value) => value + 1);
+  };
+  const showOverview = () => {
+    setRegion(null);
+    engine.build(createWorldPreviewGrid(world));
+  };
+  const navigateRegion = useCallback(
+    (visible: WorldRegion | null) => {
+      if (!active || !autoDetail || engine.stale || compareMode !== 'off') return;
+      engine.schedule(createWorldPreviewGrid(world, visible, visible ? 'detail' : 'draft'), 180);
+    },
+    [active, autoDetail, engine.stale, engine.schedule, compareMode, world],
+  );
+  const clearCache = async () => {
+    if (clearing) return;
+    setClearing(true);
+    engine.invalidateCache();
     try {
-      const value = checkWorldExportBudget(exportOptions);
-      if (value.archiveBytes > 192 * 1048576)
-        throw new Error(
-          'Use Save directly to file for archives above the 192 MiB download budget.',
+      const { createWorldRegionStore } = await import('../engine/worldStore');
+      const cache = await createWorldRegionStore();
+      try {
+        await cache.clear();
+        if (!alive.current) return;
+        const stats = cache.stats();
+        setClearedStats(stats);
+        setNotice(
+          stats.lastError
+            ? `Memory regions released. Stored cache could not be cleared: ${stats.lastError}`
+            : 'Stored world regions cleared. Authored projects are preserved.',
         );
-      return { value, error: '' };
-    } catch (e) {
-      return { value: null, error: e instanceof Error ? e.message : 'Invalid export settings.' };
+      } finally {
+        await cache.close();
+      }
+    } catch (error) {
+      if (alive.current)
+        setNotice(error instanceof Error ? error.message : 'Could not clear stored regions.');
+    } finally {
+      if (alive.current) setClearing(false);
     }
-  }, [exportOptions]);
-  const runExport = async (toFile: boolean) => {
-    if (exportPending.current) return;
-    if (validation) {
-      setError(validation);
+  };
+  const writeBookmarks = (next: WorldBookmark[]) => {
+    setBookmarks(next);
+    if (!saveWorldBookmarks(bookmarkScope, next))
+      setNotice('Bookmark kept for this session. This browser could not save it locally.');
+  };
+  const addBookmark = () => {
+    if (!region || !bookmarkName.trim()) return;
+    if (bookmarks.length >= 20) {
+      setNotice('The project has 20 bookmarks. Remove one to save another.');
       return;
     }
-    const id = ++exportEpoch.current;
-    let output: FileWriter | null = null;
+    writeBookmarks([
+      ...bookmarks,
+      {
+        id: crypto.randomUUID(),
+        name: bookmarkName.trim().slice(0, 60),
+        region: { ...region },
+        domain: domainKey,
+      },
+    ]);
+    setBookmarkName('');
+    setNotice('Region bookmarked in this browser.');
+  };
+  const report = () => {
+    if (!snapshot) return;
     try {
-      const options = { ...exportOptions, sink: toFile ? 'file' : 'memory' } as WorldExportOptions;
-      const budget = checkWorldExportBudget(options);
-      if (!toFile && budget.archiveBytes > 192 * 1048576)
-        throw new Error(
-          'Use Save directly to file for archives above the 192 MiB download budget.',
-        );
-      // Reserve the request before opening the asynchronous picker. Cancellation
-      // or closing the dialog must also invalidate this preparation phase.
-      exportPending.current = true;
-      setExporting(true);
-      setError('');
-      setSuccess('');
-      setProgress(0);
-      setStage(toFile ? 'Choose a file for the world package' : 'Planning world package');
-      if (toFile) {
-        const handle = await (window as PickerWindow).showSaveFilePicker!({
-          suggestedName: `${slug(project.name)}-world-${samples}.zip`,
-          types: [{ description: 'World package', accept: { 'application/zip': ['.zip'] } }],
-        });
-        if (id !== exportEpoch.current) return;
-        output = await handle.createWritable();
-        if (id !== exportEpoch.current) {
-          await output.abort();
-          return;
-        }
-        writer.current = output;
-      }
-      const active = new Worker(new URL('../export/worldExport.worker.ts', import.meta.url), {
-        type: 'module',
-      });
-      encoder.current = active;
-      const chunks: ArrayBuffer[] = [];
-      let bytes = 0;
-      setStage('Planning world package');
-      const fail = (message: string) => {
-        if (id !== exportEpoch.current) return;
-        ++exportEpoch.current;
-        exportPending.current = false;
-        active.terminate();
-        encoder.current = null;
-        void output?.abort().catch(() => {});
-        writer.current = null;
-        chunks.length = 0;
-        setExporting(false);
-        setError(message);
-      };
-      active.onmessage = async (event: MessageEvent) => {
-        const message = event.data;
-        if (message.id !== exportEpoch.current) return;
-        try {
-          if (message.type === 'progress') {
-            setProgress(message.progress);
-            setStage(message.stage);
-          } else if (message.type === 'chunk') {
-            bytes += message.bytes.byteLength;
-            if (output) {
-              await output.write(message.bytes);
-              if (id !== exportEpoch.current) return;
-            } else {
-              if (bytes > 192 * 1048576)
-                throw new Error(
-                  'The archive exceeded the in-memory download budget. Use Save directly to file or a smaller region.',
-                );
-              chunks.push(message.bytes);
-            }
-            if (id === exportEpoch.current)
-              active.postMessage({ type: 'ack', id, sequence: message.sequence });
-          } else if (message.type === 'error') fail(message.message);
-          else if (message.type === 'complete') {
-            if (output) {
-              await output.close();
-              if (id !== exportEpoch.current) return;
-            } else downloadBlob(new Blob(chunks, { type: 'application/zip' }), message.filename);
-            writer.current = null;
-            exportPending.current = false;
-            ++exportEpoch.current;
-            chunks.length = 0;
-            active.terminate();
-            encoder.current = null;
-            setExporting(false);
-            setProgress(1);
-            setStage('World package ready');
-            setSuccess(`${message.filename} · ${mib(bytes)}`);
-          }
-        } catch (e) {
-          fail(e instanceof Error ? e.message : 'Could not save the world package.');
-        }
-      };
-      active.onerror = (event) => fail(event.message || 'World export stopped unexpectedly.');
-      active.postMessage({ type: 'export', id, options });
-    } catch (e) {
-      void output?.abort().catch(() => {});
-      if (id !== exportEpoch.current) return;
-      ++exportEpoch.current;
-      encoder.current?.terminate();
-      encoder.current = null;
-      writer.current = null;
-      exportPending.current = false;
-      setExporting(false);
-      if (e instanceof DOMException && e.name === 'AbortError') {
-        setStage('Export cancelled');
-        return;
-      }
-      setError(e instanceof Error ? e.message : 'Could not start world export.');
+      downloadBlob(
+        new Blob(
+          [
+            JSON.stringify(
+              {
+                version: 1,
+                application: 'Normal Height World Engine',
+                build: BUILD_INFO,
+                projectName: engine.builtProject?.name ?? project.name,
+                world: snapshot.world,
+                grid: snapshot.grid,
+                backend: snapshot.result.backend,
+                stages: snapshot.result.stages,
+                transportBudget: snapshot.result.transportBudget,
+                warnings: engine.warnings,
+                compute: engine.compute,
+                samplingDurationMs: snapshot.result.duration,
+                totalPreviewDurationMs: engine.completedJob?.elapsedMs,
+                cacheSource: engine.completedJob?.cacheSource ?? null,
+                estimatedPeakBytes: snapshot.result.estimatedPeakBytes,
+                stale: engine.stale,
+              },
+              null,
+              2,
+            ),
+          ],
+          { type: 'application/json' },
+        ),
+        `${slug(project.name)}-world-report.json`,
+      );
+      setNotice('Stage report download initiated.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not download the stage report.');
     }
+  };
+  const resizePanel = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const handle = event.currentTarget;
+    const startX = event.clientX,
+      width = view.panelWidth;
+    handle.setPointerCapture(event.pointerId);
+    const move = (next: PointerEvent) =>
+      setView((previous) => ({
+        ...previous,
+        panelWidth: Math.max(272, Math.min(420, width + next.clientX - startX)),
+      }));
+    const stop = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', stop);
+      handle.removeEventListener('pointercancel', stop);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+  };
+  const resizeGraph = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const handle = event.currentTarget,
+      startY = event.clientY,
+      height = graphHeight;
+    handle.setPointerCapture(event.pointerId);
+    const move = (next: PointerEvent) =>
+      setGraphHeight(
+        Math.max(
+          180,
+          Math.min((shell.current?.clientHeight ?? 900) * 0.6, height + startY - next.clientY),
+        ),
+      );
+    const stop = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', stop);
+      handle.removeEventListener('pointercancel', stop);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
   };
 
-  const selectAt = (event: React.PointerEvent<HTMLDivElement>, start = false) => {
-    if (!result || builtGrid || stale || busy || exporting || validation) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = Math.min(
-      domain.cellsX - 1,
-      Math.max(0, ((event.clientX - bounds.left) / bounds.width) * domain.cellsX),
-    );
-    const z = Math.min(
-      domain.cellsZ - 1,
-      Math.max(0, ((event.clientY - bounds.top) / bounds.height) * domain.cellsZ),
-    );
-    const tx = Math.floor(x / world.tileCells),
-      tz = Math.floor(z / world.tileCells);
-    if (start) {
-      dragStart.current = { x: tx, z: tz };
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    const anchor = dragStart.current;
-    if (!anchor) return;
-    const startX = Math.min(anchor.x, tx) * world.tileCells,
-      startZ = Math.min(anchor.z, tz) * world.tileCells;
-    setRegion({
-      startX,
-      startZ,
-      cellsX: Math.min(domain.cellsX, (Math.max(anchor.x, tx) + 1) * world.tileCells) - startX,
-      cellsZ: Math.min(domain.cellsZ, (Math.max(anchor.z, tz) + 1) * world.tileCells) - startZ,
-    });
-  };
-  const tileCount =
-    Math.ceil(domain.cellsX / world.tileCells) * Math.ceil(domain.cellsZ / world.tileCells);
-  const selectedWidth = region ? (region.cellsX / domain.cellsX) * domain.width : domain.width;
-  const selectedDepth = region ? (region.cellsZ / domain.cellsZ) * domain.depth : domain.depth;
-  const viewedWidth = builtGrid
-    ? (builtGrid.cellsX / builtWorld.domain.cellsX) * builtWorld.domain.width
-    : builtWorld.domain.width;
-  const viewedDepth = builtGrid
-    ? (builtGrid.cellsZ / builtWorld.domain.cellsZ) * builtWorld.domain.depth
-    : builtWorld.domain.depth;
-  const mapRatio = viewedWidth / viewedDepth;
-  const gridX = Math.ceil(builtWorld.domain.cellsX / builtWorld.tileCells),
-    gridZ = Math.ceil(builtWorld.domain.cellsZ / builtWorld.tileCells);
-  const gridStrideX = Math.max(1, Math.ceil(gridX / 64)),
-    gridStrideZ = Math.max(1, Math.ceil(gridZ / 64));
-  const warningStages = result?.stages.filter((s) => s.mode !== 'native') ?? [];
   return (
-    <Modal
-      title="World Studio"
-      eyebrow="NORMAL HEIGHT / WORLD ENGINE"
-      onClose={onClose}
-      className="world-modal"
+    <section
+      ref={shell}
+      tabIndex={-1}
+      className={`we-shell ${panelOpen ? 'is-panel-open' : ''} ${graphOpen ? 'is-graph-open' : ''}`}
+      aria-label="World Studio"
+      style={
+        {
+          '--we-panel-width': `${view.panelWidth}px`,
+          '--we-graph-height': `${graphHeight}px`,
+        } as CSSProperties
+      }
+      onKeyDown={(event) => {
+        if (event.defaultPrevented || isEditing(event.target)) return;
+        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+          event.preventDefault();
+          engine.busy ? engine.cancel() : engine.build();
+        }
+        if (event.key.toLowerCase() === 'g' && !event.ctrlKey && !event.metaKey) {
+          event.preventDefault();
+          setGraphOpen((value) => !value);
+        }
+        if (event.altKey && /^[1-5]$/.test(event.key)) {
+          event.preventDefault();
+          setMode(modes[Number(event.key) - 1].id);
+        }
+        if (event.key === '?') {
+          event.preventDefault();
+          setGuideOpen((value) => !value);
+        }
+      }}
     >
-      <div className="world-heading">
-        <div>
-          <Globe2 size={17} />
-          <strong>{project.name}</strong>
-          <span>seed {project.seed}</span>
+      <header className="we-topbar">
+        <div className="we-identity">
+          <button
+            type="button"
+            className="we-icon-button"
+            aria-label="Close World Studio"
+            title="Return to Terrain workspace"
+            onClick={onClose}
+          >
+            <ArrowLeft size={17} />
+          </button>
+          <span className="we-world-mark">
+            <Globe2 size={22} strokeWidth={1.4} />
+          </span>
+          <div>
+            <h1>World Engine</h1>
+            <p>
+              {worldDistance(world.domain.width)} × {worldDistance(world.domain.depth)}
+              <span>·</span>
+              {project.name}
+            </p>
+          </div>
         </div>
-        <span className="world-badge">
-          {project.version === 2 ? 'WORLD PROJECT' : 'WORLD PREVIEW'}
-        </span>
-      </div>
-      <div className="world-layout">
-        <aside className="world-sidebar">
-          <div className="world-tabs" role="tablist" aria-label="World tools">
-            {(['domain', 'build', 'export'] as Tab[]).map((t) => (
-              <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>
-                {t === 'domain' ? (
-                  <Globe2 size={14} />
-                ) : t === 'build' ? (
-                  <Cpu size={14} />
-                ) : (
-                  <Download size={14} />
-                )}
-                {t === 'domain' ? 'World' : t === 'build' ? 'Compute' : 'Export'}
+        <div className="we-top-actions">
+          {dirty ? (
+            <button
+              type="button"
+              className="we-button we-save-world"
+              disabled={!!validateWorldDefinition(world)}
+              onClick={() => changeWorld(world, 'world-enable')}
+            >
+              <Save size={13} />
+              {project.world ? 'Save settings' : 'Enable world in project'}
+            </button>
+          ) : (
+            <span className="we-saved">
+              <Check size={13} />
+              Project linked
+            </span>
+          )}
+          {graphEditor && (
+            <button
+              type="button"
+              className="we-button"
+              aria-pressed={graphOpen}
+              onClick={() => setGraphOpen(!graphOpen)}
+              title="Open graph · G"
+            >
+              <GitBranch size={14} />
+              <span>Graph</span>
+              <kbd>G</kbd>
+            </button>
+          )}
+          <button
+            type="button"
+            className="we-icon-button"
+            aria-label="World navigation guide"
+            aria-expanded={guideOpen}
+            onClick={() => setGuideOpen(!guideOpen)}
+          >
+            <HelpCircle size={17} />
+          </button>
+        </div>
+      </header>
+      <div className="we-workspace">
+        <nav className="we-mode-rail" aria-label="World workflow">
+          <div
+            role="tablist"
+            aria-label="World workspace modes"
+            aria-orientation={railHorizontal ? 'horizontal' : 'vertical'}
+          >
+            {modes.map(({ id, label, icon: Icon }, index) => (
+              <button
+                type="button"
+                role="tab"
+                id={`we-tab-${id}`}
+                key={id}
+                tabIndex={view.mode === id ? 0 : -1}
+                onKeyDown={(event) => {
+                  let next = index;
+                  if (event.key === 'ArrowDown' || event.key === 'ArrowRight')
+                    next = (index + 1) % modes.length;
+                  else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft')
+                    next = (index + modes.length - 1) % modes.length;
+                  else if (event.key === 'Home') next = 0;
+                  else if (event.key === 'End') next = modes.length - 1;
+                  else return;
+                  event.preventDefault();
+                  setMode(modes[next].id);
+                  document.getElementById(`we-tab-${modes[next].id}`)?.focus();
+                }}
+                aria-selected={view.mode === id}
+                aria-controls={`we-panel-${id}`}
+                title={`${label} · Alt ${index + 1}`}
+                onClick={() => setMode(id)}
+              >
+                <Icon size={19} strokeWidth={1.6} />
+                <span>{label}</span>
+                {id === 'deliver' && activity?.busy && <i className="we-job-dot" />}
               </button>
             ))}
           </div>
-          <div className="world-controls">
-            {tab === 'domain' && (
-              <>
-                <div className="world-section-label">01 / PHYSICAL DOMAIN</div>
-                <h3>A world, in meters.</h3>
-                <p className="world-intro">
-                  One continuous coordinate system. Refine a region without moving its terrain.
-                </p>
-                <div className="world-two">
-                  <NumberField
-                    label="World width"
-                    value={domain.width}
-                    min={1}
-                    onChange={(width) => patchDomain({ width })}
-                  />
-                  <NumberField
-                    label="World depth"
-                    value={domain.depth}
-                    min={1}
-                    onChange={(depth) => patchDomain({ depth })}
-                  />
-                </div>
-                <div className="world-two">
-                  <NumberField
-                    label="Origin east"
-                    value={domain.originX}
-                    onChange={(originX) => patchDomain({ originX })}
-                  />
-                  <NumberField
-                    label="Origin south"
-                    value={domain.originZ}
-                    onChange={(originZ) => patchDomain({ originZ })}
-                  />
-                </div>
-                <div className="world-two">
-                  <NumberField
-                    label="Height scale"
-                    value={domain.heightScale}
-                    min={1}
-                    onChange={(heightScale) => patchDomain({ heightScale })}
-                  />
-                  <NumberField
-                    label="Vertical datum"
-                    value={domain.datum}
-                    onChange={(datum) => patchDomain({ datum })}
-                  />
-                </div>
-                <div className="world-section-label">02 / SAMPLE GRID</div>
-                <div className="world-two">
-                  <NumberField
-                    label="East intervals"
-                    value={domain.cellsX}
-                    min={1}
-                    max={32768}
-                    unit="cells"
-                    onChange={(cellsX) => patchDomain({ cellsX })}
-                  />
-                  <NumberField
-                    label="South intervals"
-                    value={domain.cellsZ}
-                    min={1}
-                    max={32768}
-                    unit="cells"
-                    onChange={(cellsZ) => patchDomain({ cellsZ })}
-                  />
-                </div>
-                <label className="world-field">
-                  <span>Tile intervals</span>
-                  <select
-                    aria-label="World tile intervals"
-                    value={world.tileCells}
-                    onChange={(e) => {
-                      patch({ tileCells: Number(e.target.value) });
-                      setRegion(null);
-                      setExportRegion(false);
-                    }}
-                  >
-                    {[64, 128, 256, 512].map((n) => (
-                      <option key={n} value={n}>
-                        {n} cells / {n + 1} shared samples
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="world-field">
-                  <span>Outer boundary</span>
-                  <select
-                    aria-label="World boundary"
-                    value={domain.boundary}
-                    onChange={(e) =>
-                      patchDomain({ boundary: e.target.value as WorldDomain['boundary'] })
-                    }
-                  >
-                    {Object.entries(boundaryLabel).map(([key, label]) => (
-                      <option key={key} value={key}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p className="world-footnote">
-                  Legacy graph solvers keep their authored edge rules. The boundary selection
-                  controls native World sampling and optional World transport.
-                </p>
-                <div className="world-note">
-                  <Grid2X2 size={16} />
+          <button
+            type="button"
+            className="we-collapse-panel"
+            aria-label={panelOpen ? 'Hide world controls' : 'Show world controls'}
+            aria-expanded={panelOpen}
+            onClick={() => setPanelOpen(!panelOpen)}
+          >
+            {panelOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
+          </button>
+        </nav>
+        {panelOpen && (
+          <button
+            className="we-panel-scrim"
+            type="button"
+            aria-label="Close world controls"
+            onClick={() => setPanelOpen(false)}
+          />
+        )}
+        <aside className="we-context" aria-label="World controls" hidden={!panelOpen}>
+          <div className="we-context-mobile">
+            <strong>{modes.find((mode) => mode.id === view.mode)?.label}</strong>
+            <button
+              type="button"
+              className="we-icon-button"
+              aria-label="Close controls panel"
+              onClick={() => setPanelOpen(false)}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div
+            role="tabpanel"
+            id="we-panel-explore"
+            aria-labelledby="we-tab-explore"
+            hidden={view.mode !== 'explore'}
+          >
+            <WorldPanelHeading eyebrow="EXPLORE" title="A world worth getting lost in.">
+              Inspect the whole landscape, then move closer. Everything stays in place.
+            </WorldPanelHeading>
+            <WorldSection title="At a glance">
+              <div className="we-world-summary">
+                <Globe2 size={42} strokeWidth={0.85} />
+                <div>
+                  <strong>
+                    {worldDistance(world.domain.width)} × {worldDistance(world.domain.depth)}
+                  </strong>
                   <span>
-                    {number(domain.cellsX + 1, 0)} × {number(domain.cellsZ + 1, 0)} samples ·{' '}
-                    {number(tileCount, 0)} tiles
-                    <br />
-                    {number(domain.width / domain.cellsX, 3)} ×{' '}
-                    {number(domain.depth / domain.cellsZ, 3)} m spacing
+                    {worldNumber((world.domain.width * world.domain.depth) / 1e6, 2)} km² ·{' '}
+                    {Math.ceil(world.domain.cellsX / world.tileCells) *
+                      Math.ceil(world.domain.cellsZ / world.tileCells)}{' '}
+                    tiles
                   </span>
                 </div>
-                <button
-                  className="button world-save"
-                  disabled={Boolean(validation) || signature === savedWorld}
-                  onClick={() => {
-                    onSave(structuredClone(world));
-                    setSavedWorld(signature);
-                    setSuccess(
-                      'World setup saved. Undo in the editor restores the previous project.',
-                    );
-                  }}
-                >
-                  <Check size={14} />
-                  {project.version === 2 ? 'Save world setup' : 'Enable World project'}
-                </button>
-                <p className="world-footnote">
-                  World setup is saved as project v2. The original terrain graph and its versioned
-                  algorithms are preserved. This change is undoable.
-                </p>
-              </>
-            )}
-            {tab === 'build' && (
-              <>
-                <div className="world-section-label">COMPUTE / QUALITY</div>
-                <h3>See what actually ran.</h3>
-                <p className="world-intro">
-                  Each stage records its backend and physical sampling. Coarse simulations remain
-                  visible in the build report.
-                </p>
-                <label className="world-field">
-                  <span>Compute preference</span>
-                  <select
-                    aria-label="World compute backend"
-                    value={world.backend}
-                    onChange={(e) =>
-                      patch({ backend: e.target.value as WorldDefinition['backend'] })
-                    }
-                  >
-                    <option value="cpu-reference">CPU reference</option>
-                    <option value="auto">Auto · qualified stages</option>
-                    <option value="webgpu">WebGPU · CPU fallback</option>
-                  </select>
-                </label>
-                <label className="world-field">
-                  <span>Global reference grid</span>
-                  <select
-                    aria-label="Global reference resolution"
-                    value={world.globalResolution}
-                    onChange={(e) => patch({ globalResolution: Number(e.target.value) })}
-                  >
-                    {[64, 128, 256, 512, 1024].map((n) => (
-                      <option key={n} value={n}>
-                        {n} × {n} samples
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p className="world-footnote">
-                  Global and legacy stages share one whole-domain solution. Larger output tiles do
-                  not increase their simulation resolution.
-                </p>
-                <div className="world-section-label">COUPLED WORLD TRANSPORT</div>
-                <label className="world-check">
-                  <input
-                    type="checkbox"
-                    checked={world.transport?.enabled ?? false}
-                    onChange={(e) => patchTransport({ enabled: e.target.checked })}
-                  />
-                  Enable conservative transport
-                </label>
-                <p className="world-footnote">
-                  Experimental water, sediment and thermal transport over the complete reference
-                  grid. Internal tile edges exchange flux; open or closed outer boundaries follow
-                  the World setting.
-                </p>
-                {world.transport?.enabled && (
-                  <>
-                    <div className="world-two">
-                      <NumberField
-                        label="Transport iterations"
-                        unit="steps"
-                        value={world.transport.iterations}
-                        min={1}
-                        max={128}
-                        onChange={(iterations) => patchTransport({ iterations })}
-                      />
-                      <NumberField
-                        label="Rainfall per step"
-                        value={world.transport.rainfall}
-                        min={0}
-                        max={10}
-                        step={0.01}
-                        onChange={(rainfall) => patchTransport({ rainfall })}
-                      />
-                    </div>
-                    <div className="world-two">
-                      <NumberField
-                        label="Erosion rate"
-                        unit="0–1"
-                        value={world.transport.erosion}
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        onChange={(erosion) => patchTransport({ erosion })}
-                      />
-                      <NumberField
-                        label="Thermal rate"
-                        unit="0–1"
-                        value={world.transport.thermal}
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        onChange={(thermal) => patchTransport({ thermal })}
-                      />
-                    </div>
-                    <NumberField
-                      label="Erodible cover"
-                      value={world.transport.soilDepth}
-                      min={0}
-                      max={1000}
-                      onChange={(soilDepth) => patchTransport({ soilDepth })}
-                    />
-                  </>
-                )}
-                {result?.transportBudget && (
-                  <div className="world-metrics">
-                    <div>
-                      <span>Water balance residual</span>
-                      <strong>{result.transportBudget.waterResidualM3.toExponential(2)} m³</strong>
-                    </div>
-                    <div>
-                      <span>Solid balance residual</span>
-                      <strong>{result.transportBudget.solidResidualM3.toExponential(2)} m³</strong>
-                    </div>
-                    <div>
-                      <span>Boundary sediment export</span>
-                      <strong>
-                        {number(result.transportBudget.exportedSedimentVolumeM3, 2)} m³
-                      </strong>
-                    </div>
-                    <div>
-                      <span>Still suspended</span>
-                      <strong>
-                        {number(result.transportBudget.suspendedSedimentVolumeM3, 2)} m³
-                      </strong>
-                    </div>
-                  </div>
-                )}
-                {result?.transportBudget && (
-                  <p className="world-footnote">
-                    Budgets measure the reference simulation before fine-grid reconstruction. This
-                    is an artistic model; physical calibration and refinement studies remain
-                    separate validation work.
-                  </p>
-                )}
-                {compute && (
-                  <p className="world-footnote">
-                    {compute.reason}
-                    {compute.numerical &&
-                      ` Maximum probe error: ${compute.numerical.maxAbsoluteError.toExponential(2)}.`}
-                  </p>
-                )}
-                {warnings.map((warning, i) => (
-                  <p className="world-footnote" key={i}>
-                    {warning}
-                  </p>
-                ))}
-                <label className="world-check">
-                  <input
-                    type="checkbox"
-                    checked={cacheEnabled}
-                    onChange={(e) => setCacheEnabled(e.target.checked)}
-                  />
-                  Remember completed CPU regions
-                </label>
-                <p className="world-footnote">
-                  Optional local cache, limited to 64 MiB. Stored regions are checked before reuse;
-                  unavailable storage falls back to memory.
-                </p>
-                {storeStats && (
-                  <div className="world-note">
-                    {storeStats.backend === 'indexeddb' ? 'On-device' : 'Memory'} cache ·{' '}
-                    {storeStats.entries} regions · {mib(storeStats.bytes)}
-                    {storeStats.lastError && <span>{storeStats.lastError}</span>}
-                  </div>
-                )}
-                <button
-                  className="button secondary"
-                  disabled={busy || exporting}
-                  onClick={async () => {
-                    const id = ++epoch.current;
-                    worker.current?.terminate();
-                    worker.current = null;
-                    building.current = false;
-                    setCacheHit(false);
-                    setError('');
-                    const { createWorldRegionStore } = await import('../engine/worldStore');
-                    const cache = await createWorldRegionStore();
-                    try {
-                      await cache.clear();
-                      if (id !== epoch.current) return;
-                      const stats = cache.stats();
-                      setStoreStats(stats);
-                      setSuccess(
-                        stats.lastError
-                          ? `Memory regions released. Persistent cache could not be cleared: ${stats.lastError}`
-                          : 'Stored world regions cleared. Authored projects are preserved.',
-                      );
-                    } catch (error) {
-                      if (id === epoch.current)
-                        setError(
-                          error instanceof Error
-                            ? error.message
-                            : 'Could not clear stored regions.',
-                        );
-                    } finally {
-                      await cache.close();
-                    }
-                  }}
-                >
-                  Clear stored world regions
-                </button>
-                <div className="world-metrics">
-                  <div>
-                    <span>Actual backend</span>
-                    <strong>
-                      {result?.backend === 'webgpu' ? 'WebGPU + CPU' : 'CPU reference'}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Region evaluation</span>
-                    <strong>
-                      {cacheHit
-                        ? 'Loaded from cache'
-                        : result
-                          ? `${number(result.duration)} ms`
-                          : '—'}
-                    </strong>
-                  </div>
-                  <div>
-                    <span>Estimated working peak</span>
-                    <strong>{result ? mib(result.estimatedPeakBytes) : '—'}</strong>
-                  </div>
-                  <div>
-                    <span>Global / reconstructed</span>
-                    <strong>{warningStages.length} stages</strong>
-                  </div>
-                </div>
-                <button
-                  className="button secondary"
-                  disabled={!result}
-                  onClick={() =>
-                    downloadBlob(
-                      new Blob(
-                        [
-                          JSON.stringify(
-                            {
-                              application: 'Normal Height World Engine',
-                              build: BUILD_INFO,
-                              cacheHit,
-                              timingScope: cacheHit
-                                ? 'Original region sampling duration; this result was restored from cache.'
-                                : 'Region sampling duration; excludes whole-domain preparation and display rendering.',
-                              world: builtWorld,
-                              region: builtGrid,
-                              stages: result?.stages,
-                              backend: result?.backend,
-                              duration: result?.duration,
-                              estimatedPeakBytes: result?.estimatedPeakBytes,
-                              transportBudget: result?.transportBudget,
-                              compute,
-                              store: storeStats,
-                              warnings,
-                            },
-                            null,
-                            2,
-                          ),
-                        ],
-                        { type: 'application/json' },
-                      ),
-                      'world-build-report.json',
-                    )
-                  }
-                >
-                  <ArrowDownToLine size={14} />
-                  Download build report
-                </button>
-              </>
-            )}
-            {tab === 'export' && (
-              <>
-                <div className="world-section-label">WORLD / DELIVERY</div>
-                <h3>From graph to world.</h3>
-                <p className="world-intro">
-                  Aligned tiles, a common elevation range, checksums, and the original project in
-                  one package.
-                </p>
-                <label className="world-field">
-                  <span>Target profile</span>
-                  <select
-                    aria-label="World export profile"
-                    value={profile}
-                    onChange={(e) => {
-                      const p = e.target.value as typeof profile;
-                      setProfile(p);
-                      setSamples(p === 'unreal' ? 1009 : p === 'unity' ? 1025 : 1024);
-                      setFormat(p === 'unity' ? 'raw16' : 'png16');
-                    }}
-                  >
-                    <option value="generic">Generic Cartesian world</option>
-                    <option value="unreal">Unreal Landscape · experimental</option>
-                    <option value="unity">Unity Terrain · experimental</option>
-                  </select>
-                </label>
-                <label className="world-field">
-                  <span>Height encoding</span>
-                  <select
-                    aria-label="World height format"
-                    value={format}
-                    onChange={(e) => setFormat(e.target.value as typeof format)}
-                  >
-                    <option value="png16" disabled={profile === 'unity'}>
-                      16-bit PNG / common range
-                    </option>
-                    <option value="raw32" disabled={profile !== 'generic'}>
-                      Float32 RAW / meters
-                    </option>
-                    <option value="raw16">UInt16 RAW / little endian</option>
-                  </select>
-                </label>
-                <label className="world-field">
-                  <span>East sample count</span>
-                  <select
-                    aria-label="World export samples"
-                    value={samples}
-                    onChange={(e) => setSamples(Number(e.target.value))}
-                  >
-                    {dimensions.map((n) => (
-                      <option key={n} value={n}>
-                        {number(n, 0)} samples
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="world-check">
-                  <input
-                    type="checkbox"
-                    checked={exportRegion}
-                    disabled={!region}
-                    onChange={(e) => setExportRegion(e.target.checked)}
-                  />
-                  Selected region only
-                </label>
-                <label className="world-check">
-                  <input
-                    type="checkbox"
-                    checked={diagnostics}
-                    onChange={(e) => setDiagnostics(e.target.checked)}
-                  />
-                  Flow, wear & deposition
-                </label>
-                <label className="world-check">
-                  <input
-                    type="checkbox"
-                    checked={normals}
-                    onChange={(e) => setNormals(e.target.checked)}
-                  />
-                  Terrain normal map
-                </label>
-                {project.graph.nodes
-                  .filter((n) => n.kind === 'mask')
-                  .map((n) => (
-                    <label key={n.id} className="world-check">
-                      <input
-                        type="checkbox"
-                        checked={maskIds.includes(n.id)}
-                        onChange={(e) =>
-                          setMaskIds((ids) =>
-                            e.target.checked ? [...ids, n.id] : ids.filter((id) => id !== n.id),
-                          )
-                        }
-                      />
-                      Mask: {n.label}
-                    </label>
-                  ))}
-                <div className="world-note">
-                  <Map size={16} />
-                  <span>
-                    {number(samples, 0)} × {number(exportSamplesZ, 0)} output samples
-                    <br />
-                    {estimate.value
-                      ? `${number(estimate.value.tileCount, 0)} tiles · ${mib(estimate.value.peakBytes)} estimated peak`
-                      : estimate.error}
-                  </span>
-                </div>
-                <p className="world-footnote">
-                  Engine profiles include import settings and remain experimental until a real
-                  engine import is verified. Native detail and reconstructed stages are listed in
-                  every manifest.
-                </p>
-                <button
-                  className="button primary"
-                  disabled={busy || exporting || Boolean(validation) || Boolean(estimate.error)}
-                  onClick={() => void runExport(false)}
-                >
-                  <Download size={14} />
-                  Download world package
-                </button>
-                {typeof (window as PickerWindow).showSaveFilePicker === 'function' && (
+              </div>
+              <p className="we-hint">
+                {engine.capability?.native
+                  ? 'Native world coordinates. Ready for automatic previews.'
+                  : 'Global stages share one whole-domain simulation.'}
+              </p>
+            </WorldSection>
+            <WorldSection title="Terrain layers">
+              <div className="we-layer-list">
+                {WORLD_LAYERS.map((layer) => (
                   <button
-                    className="button secondary"
-                    disabled={busy || exporting || Boolean(validation)}
-                    onClick={() => void runExport(true)}
+                    type="button"
+                    key={layer.id}
+                    aria-label={layer.label}
+                    aria-pressed={view.layer === layer.id}
+                    onClick={() => setLayer(layer.id)}
+                    title={layer.description}
                   >
-                    <ArrowUpRight size={14} />
-                    Save directly to file
+                    <i className={`we-layer-swatch layer-${layer.id}`} />
+                    <span>
+                      <strong>{layer.label}</strong>
+                      <small>{layer.description}</small>
+                    </span>
+                    {view.layer === layer.id && <Check size={14} />}
                   </button>
-                )}
-              </>
+                ))}
+              </div>
+            </WorldSection>
+            <WorldSection title="Selected region">
+              {region && selectedBounds ? (
+                <>
+                  <div className="we-metrics">
+                    <WorldMetric label="Width" value={worldDistance(selectedBounds.width)} />
+                    <WorldMetric label="Depth" value={worldDistance(selectedBounds.depth)} />
+                  </div>
+                  <p className="we-hint">
+                    Cells {region.startX}–{region.startX + region.cellsX} east · {region.startZ}–
+                    {region.startZ + region.cellsZ} south
+                  </p>
+                  <div className="we-two">
+                    <button
+                      type="button"
+                      className="we-button is-primary"
+                      onClick={refine}
+                      disabled={engine.busy || engine.stale || !!engine.validationError}
+                    >
+                      <Focus size={14} />
+                      Refine region
+                    </button>
+                    <button
+                      type="button"
+                      className="we-button"
+                      onClick={() => {
+                        setRegionRequest((value) => value + 1);
+                        setMode('deliver');
+                      }}
+                    >
+                      <Download size={14} />
+                      Deliver
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="we-empty-inline">
+                  <Focus size={23} />
+                  <p>
+                    Click a tile or drag across the map to select a region. Refine it without losing
+                    the overview.
+                  </p>
+                </div>
+              )}
+            </WorldSection>
+            <WorldSection title="Region bookmarks">
+              <div className="we-bookmarks">
+                {visibleBookmarks.map((bookmark) => (
+                  <div key={bookmark.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRegion(bookmark.region);
+                        setFrameRequest((value) => value + 1);
+                        if (window.innerWidth < 1000) setPanelOpen(false);
+                      }}
+                    >
+                      <Bookmark size={14} />
+                      <span>{bookmark.name}</span>
+                      <ArrowUpRight size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      className="we-icon-button"
+                      aria-label={`Delete bookmark ${bookmark.name}`}
+                      onClick={() =>
+                        writeBookmarks(bookmarks.filter((item) => item.id !== bookmark.id))
+                      }
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {!visibleBookmarks.length && (
+                <p className="we-hint">
+                  Save a region to return to it instantly. Bookmarks stay in this browser.
+                </p>
+              )}
+              <form
+                className="we-bookmark-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addBookmark();
+                }}
+              >
+                <input
+                  aria-label="Bookmark name"
+                  placeholder={region ? 'Name this region…' : 'Select a region to bookmark'}
+                  value={bookmarkName}
+                  maxLength={60}
+                  disabled={!region}
+                  onChange={(event) => setBookmarkName(event.target.value)}
+                />
+                <button
+                  type="submit"
+                  className="we-icon-button"
+                  aria-label="Save region bookmark"
+                  disabled={!region || !bookmarkName.trim()}
+                >
+                  <BookmarkPlus size={17} />
+                </button>
+              </form>
+              {otherBookmarks.length > 0 && (
+                <WorldDisclosure title={`Other world layouts · ${otherBookmarks.length}`}>
+                  <p className="we-hint">
+                    These regions belong to a different domain. Restore that domain to revisit them,
+                    or remove a bookmark here.
+                  </p>
+                  <div className="we-bookmarks">
+                    {otherBookmarks.map((bookmark) => (
+                      <div key={bookmark.id}>
+                        <span>{bookmark.name}</span>
+                        <button
+                          type="button"
+                          className="we-icon-button"
+                          aria-label={`Delete previous-layout bookmark ${bookmark.name}`}
+                          onClick={() =>
+                            writeBookmarks(bookmarks.filter((item) => item.id !== bookmark.id))
+                          }
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </WorldDisclosure>
+              )}
+            </WorldSection>
+            <WorldDisclosure title="Preview behaviour">
+              <label className="we-toggle-card">
+                <span>
+                  <strong>Refine as you explore</strong>
+                  <small>Sample a bounded region after zooming</small>
+                </span>
+                <input
+                  aria-label="Automatic regional refinement"
+                  type="checkbox"
+                  checked={autoDetail}
+                  onChange={(event) => setAutoDetail(event.target.checked)}
+                />
+              </label>
+              <p className="we-hint">
+                Prepared global stages are reused. Panning and zooming stay responsive while detail
+                arrives. Comparison mode holds its current footprint.
+              </p>
+            </WorldDisclosure>
+          </div>
+          <div
+            role="tabpanel"
+            id="we-panel-setup"
+            aria-labelledby="we-tab-setup"
+            hidden={view.mode !== 'setup'}
+          >
+            <WorldSetupPanel
+              world={world}
+              onChange={changeWorld}
+              capability={engine.capability}
+              error={validateWorldDefinition(world) ?? saveError}
+              onOpenGraph={() => setGraphOpen(true)}
+            />
+          </div>
+          <div
+            role="tabpanel"
+            id="we-panel-simulate"
+            aria-labelledby="we-tab-simulate"
+            hidden={view.mode !== 'simulate'}
+          >
+            <WorldSimulationPanel
+              world={world}
+              onChange={changeWorld}
+              result={engine.result}
+              compute={engine.compute ?? null}
+              cacheEnabled={view.cache}
+              onCacheChange={(cache) => setView((previous) => ({ ...previous, cache }))}
+              storeStats={clearedStats ?? engine.storeStats ?? null}
+              cacheHit={engine.cacheHit && !clearedStats}
+              onClearCache={() => void clearCache()}
+              onBuild={() => engine.build()}
+              onPin={pinCurrent}
+              canPin={canPin}
+              busy={engine.busy || clearing}
+              error={engine.validationError}
+            />
+            <WorldComparisonControls
+              snapshot={snapshot}
+              pinned={pinned}
+              onPin={pinCurrent}
+              onClear={() => {
+                setPinned(null);
+                setCompareMode('off');
+              }}
+              mode={compareMode}
+              onModeChange={setCompareMode}
+              canPin={canPin}
+            />
+          </div>
+          <div
+            role="tabpanel"
+            id="we-panel-analyze"
+            aria-labelledby="we-tab-analyze"
+            hidden={view.mode !== 'analyze'}
+          >
+            {view.mode === 'analyze' && (
+              <WorldAnalysisPanel
+                snapshot={analysisSnapshot}
+                region={geometryMatches ? region : null}
+                probe={probe}
+                pinned={pinned}
+                onPin={pinCurrent}
+                onClear={() => {
+                  setPinned(null);
+                  setCompareMode('off');
+                }}
+                compareMode={compareMode}
+                onCompareMode={setCompareMode}
+                canPin={canPin}
+                stale={engine.stale}
+                onFocusNode={(id) => {
+                  onSelectNode?.(id);
+                  setGraphOpen(true);
+                }}
+                onReport={report}
+              />
             )}
+          </div>
+          <div
+            role="tabpanel"
+            id="we-panel-deliver"
+            aria-labelledby="we-tab-deliver"
+            hidden={view.mode !== 'deliver'}
+          >
+            <WorldExportPanel
+              project={project}
+              world={world}
+              region={region}
+              regionRequest={regionRequest}
+              onActivity={setActivity}
+            />
           </div>
         </aside>
-        <main className="world-main">
-          <div className="world-map-toolbar">
-            <div>
-              <Compass size={16} />
-              <span>{builtGrid ? 'Regional detail' : 'World overview'}</span>
-              {stale && <b>Settings changed</b>}
-            </div>
-            <div>
-              <select
-                aria-label="World map channel"
-                value={channel}
-                onChange={(e) => setChannel(e.target.value as WorldMapChannel)}
-              >
-                <option value="relief">Shaded relief</option>
-                <option value="height">Height</option>
-                <option value="flow">Flow</option>
-                <option value="wear">Wear</option>
-                <option value="deposition">Deposition</option>
-              </select>
-              <button
-                className={`icon-button ${gridVisible ? 'active' : ''}`}
-                aria-label="Show world tile grid"
-                aria-pressed={gridVisible}
-                onClick={() => setGridVisible((v) => !v)}
-              >
-                <Grid2X2 size={15} />
-              </button>
-              <button
-                className="icon-button"
-                aria-label="Save world map image"
-                disabled={!result}
-                onClick={() =>
-                  canvas.current?.toBlob((blob) => {
-                    if (blob) downloadBlob(blob, `${slug(project.name)}-world-${channel}.png`);
-                  })
-                }
-              >
-                <Download size={15} />
-              </button>
-            </div>
-          </div>
-          <div className="world-map-stage">
-            <div className="world-compass">
-              <span>N</span>
-              <Compass size={30} />
-              <small>+X EAST / +Z SOUTH</small>
-            </div>
-            <div className="world-map-fit" ref={mapFit}>
-              <div
-                className="world-map-frame"
-                style={{
-                  width: Math.min(mapSize.width, mapSize.height * mapRatio),
-                  height: Math.min(mapSize.height, mapSize.width / mapRatio),
-                }}
-                role="button"
-                aria-label="World region map. Click or drag to select tiles; press Enter to refine."
-                tabIndex={0}
-                onPointerDown={(e) => selectAt(e, true)}
-                onPointerMove={(e) => {
-                  if (dragStart.current) selectAt(e);
-                }}
-                onPointerUp={() => {
-                  dragStart.current = null;
-                }}
-                onPointerCancel={() => {
-                  dragStart.current = null;
-                }}
-                onKeyDown={(e) => {
-                  if (!result || stale || busy || exporting || validation) return;
-                  if (e.key === 'Enter' && region) {
-                    e.preventDefault();
-                    runPreview(region);
-                  }
-                  if (
-                    !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) ||
-                    builtGrid
-                  )
-                    return;
-                  e.preventDefault();
-                  const x = Math.max(
-                    0,
-                    Math.min(
-                      domain.cellsX - 1,
-                      (region?.startX ?? 0) +
-                        (e.key === 'ArrowRight'
-                          ? world.tileCells
-                          : e.key === 'ArrowLeft'
-                            ? -world.tileCells
-                            : 0),
-                    ),
-                  );
-                  const z = Math.max(
-                    0,
-                    Math.min(
-                      domain.cellsZ - 1,
-                      (region?.startZ ?? 0) +
-                        (e.key === 'ArrowDown'
-                          ? world.tileCells
-                          : e.key === 'ArrowUp'
-                            ? -world.tileCells
-                            : 0),
-                    ),
-                  );
-                  const startX = Math.floor(x / world.tileCells) * world.tileCells,
-                    startZ = Math.floor(z / world.tileCells) * world.tileCells;
-                  setRegion({
-                    startX,
-                    startZ,
-                    cellsX: Math.min(world.tileCells, domain.cellsX - startX),
-                    cellsZ: Math.min(world.tileCells, domain.cellsZ - startZ),
-                  });
-                }}
-              >
-                <canvas ref={canvas} aria-label="Actual generated world heightfield" />
-                {result && gridVisible && !builtGrid && (
-                  <div className="world-grid" aria-hidden="true">
-                    {Array.from({ length: Math.ceil(gridX / gridStrideX) - 1 }, (_, i) => (
-                      <i
-                        key={`x${i}`}
-                        style={{
-                          left: `${(((i + 1) * gridStrideX * builtWorld.tileCells) / builtWorld.domain.cellsX) * 100}%`,
-                        }}
-                      />
-                    ))}
-                    {Array.from({ length: Math.ceil(gridZ / gridStrideZ) - 1 }, (_, i) => (
-                      <i
-                        key={`z${i}`}
-                        className="horizontal"
-                        style={{
-                          top: `${(((i + 1) * gridStrideZ * builtWorld.tileCells) / builtWorld.domain.cellsZ) * 100}%`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
-                {result && region && !builtGrid && !stale && (
-                  <div
-                    className="world-selection"
-                    style={{
-                      left: `${(region.startX / domain.cellsX) * 100}%`,
-                      top: `${(region.startZ / domain.cellsZ) * 100}%`,
-                      width: `${(region.cellsX / domain.cellsX) * 100}%`,
-                      height: `${(region.cellsZ / domain.cellsZ) * 100}%`,
-                    }}
-                  >
-                    <span>REGION</span>
-                  </div>
-                )}
-                {!result && (
-                  <div className="world-empty">
-                    <Globe2 size={42} />
-                    <strong>
-                      {busy ? 'Your world is taking shape' : 'Ready to build your world'}
-                    </strong>
-                    <span>
-                      {busy
-                        ? 'The graph is being evaluated at global coordinates.'
-                        : 'Choose Build world to generate an overview.'}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-            {result && (
-              <>
-                <div className="world-map-caption">
-                  <span>
-                    {number(viewedWidth / 1000, 2)} × {number(viewedDepth / 1000, 2)} km
-                  </span>
-                  <strong>{builtGrid ? 'REGIONAL DETAIL' : 'CONTINUOUS WORLD'}</strong>
-                </div>
-                <div
-                  className="world-elevation-key"
-                  data-channel={channel}
-                  title={
-                    channel === 'relief' || channel === 'height'
-                      ? 'Physical elevation in meters'
-                      : 'Diagnostic display range for this view; not a physical flow rate'
-                  }
-                >
-                  <span>
-                    {channel === 'relief' || channel === 'height'
-                      ? `${number(result.max * builtWorld.domain.heightScale + builtWorld.domain.datum, 0)} m`
-                      : 'VIEW MAX'}
-                  </span>
-                  <i />
-                  <span>
-                    {channel === 'relief' || channel === 'height'
-                      ? `${number(result.min * builtWorld.domain.heightScale + builtWorld.domain.datum, 0)} m`
-                      : '0'}
-                  </span>
-                  {channel !== 'relief' && channel !== 'height' && (
-                    <small>{channel === 'flow' ? 'LOG SCALE' : 'RELATIVE'}</small>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-          <div className="world-selection-bar">
-            <div>
-              <Scan size={17} />
-              <span>
-                <strong>{region ? 'Region selected' : 'Select a region'}</strong>
-                <small>
-                  {region
-                    ? `${number(selectedWidth)} × ${number(selectedDepth)} m · ${number(region.cellsX + 1, 0)} × ${number(region.cellsZ + 1, 0)} lattice samples`
-                    : 'Click a tile or drag across the overview. Arrow keys also select tiles.'}
-                </small>
-              </span>
-            </div>
-            <div>
-              {builtGrid && (
-                <button
-                  className="button secondary"
-                  disabled={busy || exporting}
-                  onClick={() => runPreview()}
-                >
-                  <Expand size={13} />
-                  Overview
+        <div
+          className="we-panel-resizer"
+          role="separator"
+          aria-label="Resize world controls"
+          aria-orientation="vertical"
+          aria-valuemin={272}
+          aria-valuemax={420}
+          aria-valuenow={Math.round(view.panelWidth)}
+          tabIndex={panelOpen ? 0 : -1}
+          onPointerDown={resizePanel}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              event.preventDefault();
+              setView((previous) => ({
+                ...previous,
+                panelWidth: Math.max(
+                  272,
+                  Math.min(420, previous.panelWidth + (event.key === 'ArrowLeft' ? -16 : 16)),
+                ),
+              }));
+            }
+          }}
+        />
+        <main className="we-main" aria-label="World terrain workspace">
+          <div className="we-preview-controls">
+            <div className="we-output-label">
+              <Layers3 size={14} />
+              <strong>{stageLabel ?? 'Terrain output'}</strong>
+              {stageLabel && (
+                <button className="we-text-button" type="button" onClick={onReturnOutput}>
+                  Return to output <X size={12} />
                 </button>
               )}
+              {pinned && (
+                <span className="we-pinned-badge" title={pinned.label}>
+                  <Pin size={11} />
+                  Baseline pinned
+                </span>
+              )}
+            </div>
+            <div>
+              <label className="we-auto">
+                <input
+                  type="checkbox"
+                  aria-label="Automatic world previews"
+                  checked={view.automatic}
+                  onChange={(event) =>
+                    setView((previous) => ({ ...previous, automatic: event.target.checked }))
+                  }
+                />
+                <span>Auto preview</span>
+              </label>
               <button
-                className="button secondary"
-                disabled={!region || busy || exporting || Boolean(validation)}
-                onClick={() => runPreview(region)}
+                type="button"
+                className={`we-button ${engine.stale && !engine.busy ? 'is-primary' : ''}`}
+                disabled={!engine.busy && !!engine.validationError}
+                onClick={engine.busy ? engine.cancel : () => engine.build()}
+                title="Build preview · Ctrl/⌘ Enter"
               >
-                <Scan size={13} />
-                Refine region
-              </button>
-              <button
-                className="button primary"
-                disabled={exporting || Boolean(validation)}
-                onClick={busy ? cancelBuild : () => runPreview()}
-              >
-                {busy ? <X size={14} /> : <Play size={12} fill="currentColor" />}
-                {busy ? 'Cancel build' : 'Build world'}
+                {engine.busy ? <X size={14} /> : <Play size={13} />}
+                {engine.busy ? 'Cancel preview' : 'Build preview'}
               </button>
             </div>
           </div>
-          <details className="world-stage-report">
-            <summary>
-              <Settings2 size={14} />
-              Stage report{' '}
-              <span>
-                {result?.stages.length ?? 0} stages ·{' '}
-                {warningStages.length
-                  ? `${warningStages.length} use global context`
-                  : 'native coordinate sampling'}
-              </span>
-            </summary>
-            <div className="world-stage-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Stage</th>
-                    <th>Execution</th>
-                    <th>Backend</th>
-                    <th>Spacing</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {result?.stages.map((s) => (
-                    <tr key={s.nodeId}>
-                      <td>
-                        <strong>{s.label}</strong>
-                        <small>{s.reason}</small>
-                      </td>
-                      <td>
-                        {s.mode.replaceAll('-', ' ')}
-                        {s.simulationResolution && (
-                          <small>Simulation {s.simulationResolution}²</small>
-                        )}
-                      </td>
-                      <td>{s.backend === 'webgpu' ? 'WebGPU' : 'CPU'}</td>
-                      <td>
-                        {number(s.spacingX, 2)} × {number(s.spacingZ, 2)} m
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
+          <div className="we-viewport-container">
+            <WorldViewport
+              result={engine.result}
+              world={engine.builtWorld ?? world}
+              grid={engine.builtGrid}
+              overview={matchingOverview}
+              region={geometryMatches ? region : null}
+              onRegionChange={(next) => {
+                if (geometryMatches) setRegion(next);
+              }}
+              layer={view.layer}
+              onLayerChange={setLayer}
+              mode={view.presentation}
+              onModeChange={(presentation) =>
+                setView((previous) => ({ ...previous, presentation }))
+              }
+              busy={engine.busy}
+              stale={engine.stale}
+              onRefine={refine}
+              onOverview={showOverview}
+              comparison={pinned}
+              compareMode={
+                pinned && snapshot && canCompareWorldSnapshots(snapshot, pinned)
+                  ? compareMode
+                  : 'off'
+              }
+              onProbe={(next) => {
+                if (next) setProbe(next);
+              }}
+              frameRequest={frameRequest}
+              active={active}
+              onViewRegionChange={navigateRegion}
+            />
+            {(engine.validationError || engine.error || saveError) && (
+              <div className="we-canvas-notice">
+                <WorldNotice error>
+                  <strong>
+                    {engine.validationError
+                      ? 'This world needs an adjustment'
+                      : saveError
+                        ? 'Settings need saving'
+                        : 'The preview could not finish'}
+                  </strong>
+                  <p>{engine.validationError ?? saveError ?? engine.error}</p>
+                  <div>
+                    <button
+                      type="button"
+                      className="we-text-button"
+                      onClick={() => setMode('setup')}
+                    >
+                      Review settings <ChevronRight size={13} />
+                    </button>
+                    {!engine.validationError && (
+                      <button
+                        type="button"
+                        className="we-text-button"
+                        onClick={() => engine.build()}
+                      >
+                        <RotateCcw size={12} />
+                        Retry preview
+                      </button>
+                    )}
+                  </div>
+                </WorldNotice>
+              </div>
+            )}
+            {guideOpen && (
+              <section className="we-guide" aria-label="World navigation guide">
+                <div>
+                  <h2>Move through your world</h2>
+                  <button
+                    type="button"
+                    className="we-icon-button"
+                    aria-label="Close navigation guide"
+                    onClick={() => setGuideOpen(false)}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+                <dl>
+                  <dt>Zoom at the cursor</dt>
+                  <dd>Scroll / pinch</dd>
+                  <dt>Pan the map</dt>
+                  <dd>Space + drag / middle drag</dd>
+                  <dt>Select tiles</dt>
+                  <dd>Click / drag · Shift to extend</dd>
+                  <dt>Move the selection</dt>
+                  <dd>Arrow keys</dd>
+                  <dt>Frame selection / world</dt>
+                  <dd>
+                    <kbd>F</kbd> / <kbd>Home</kbd>
+                  </dd>
+                  <dt>Refine / clear selection</dt>
+                  <dd>
+                    <kbd>Enter</kbd> / <kbd>Esc</kbd>
+                  </dd>
+                  <dt>Toggle graph</dt>
+                  <dd>
+                    <kbd>G</kbd>
+                  </dd>
+                  <dt>Build / cancel preview</dt>
+                  <dd>
+                    <kbd>Ctrl / ⌘ Enter</kbd>
+                  </dd>
+                </dl>
+                <p>
+                  In 3D, drag to orbit; right-drag to pan. All measurements use real world units.
+                </p>
+              </section>
+            )}
+            {notice && (
+              <div className="we-toast" role="status">
+                <Check size={14} />
+                <span>{notice}</span>
+                <button
+                  type="button"
+                  className="we-icon-button"
+                  aria-label="Dismiss world notification"
+                  onClick={() => setNotice('')}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+            )}
+          </div>
+          {graphOpen && graphEditor && active && (
+            <section className="we-graph-dock" aria-label="World graph editor">
+              <div
+                role="separator"
+                className="we-graph-resizer"
+                aria-label="Resize world graph"
+                aria-orientation="horizontal"
+                aria-valuemin={180}
+                aria-valuemax={600}
+                aria-valuenow={Math.round(graphHeight)}
+                tabIndex={0}
+                onPointerDown={resizeGraph}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    setGraphHeight((value) =>
+                      Math.max(180, Math.min(600, value + (event.key === 'ArrowUp' ? 24 : -24))),
+                    );
+                  }
+                }}
+              />
+              <header>
+                <span>
+                  <GitBranch size={13} />
+                  Procedural graph
+                </span>
+                <span>
+                  Edits update this world{view.automatic ? ' automatically' : ' on build'}
+                </span>
+                <button
+                  type="button"
+                  className="we-icon-button"
+                  aria-label="Close world graph"
+                  onClick={() => setGraphOpen(false)}
+                >
+                  <X size={15} />
+                </button>
+              </header>
+              <div className="we-graph-content">
+                <div className="we-graph-canvas">{graphEditor}</div>
+                {graphInspector && <div className="we-graph-inspector">{graphInspector}</div>}
+              </div>
+            </section>
+          )}
         </main>
       </div>
-      <footer className="world-footer">
-        <div className={error || validation ? 'world-status error' : 'world-status'}>
-          {busy || exporting ? (
-            <LoaderCircle className="spin" size={14} />
-          ) : error || validation ? (
-            <X size={14} />
-          ) : (
-            <Check size={14} />
-          )}
-          <span role="status">{error || validation || success || stage}</span>
-        </div>
-        <div>
-          {(busy || exporting) && (
+      <footer className="we-statusbar">
+        <div className="we-status-main">
+          <span
+            className={`we-status-light ${engine.busy ? 'is-busy' : engine.error || engine.validationError ? 'is-error' : engine.stale && snapshot ? 'is-stale' : ''}`}
+          />
+          {engine.busy && <LoaderCircle size={13} className="spin" />}
+          <span role="status" aria-live="polite">
+            {status}
+          </span>
+          {engine.busy && engine.job && (
             <>
-              <progress value={progress} max={1} aria-label="World progress" />
-              <span>{Math.round(progress * 100)}%</span>
+              <span className="we-job-phase">{engine.job.phase}</span>
+              {engine.job.total !== undefined && (
+                <span className="we-status-count">
+                  {worldNumber(engine.job.completed ?? 0, 0)} / {worldNumber(engine.job.total, 0)}{' '}
+                  {engine.job.unit}
+                </span>
+              )}
+              {engine.job.progress !== null && (
+                <progress
+                  aria-label={`${engine.job.phase} progress`}
+                  max={1}
+                  value={engine.job.progress}
+                />
+              )}
+              <span className="we-elapsed">{worldNumber(elapsed / 1000)} s</span>
             </>
           )}
-          {exporting && (
-            <button className="button secondary" onClick={cancelExport}>
-              Cancel export
-            </button>
+        </div>
+        <div className="we-status-secondary">
+          {activity?.busy ? (
+            <>
+              <button type="button" className="we-text-button" onClick={() => setMode('deliver')}>
+                <Download size={12} />
+                {activity.stage}
+              </button>
+              <button
+                type="button"
+                className="we-text-button"
+                aria-label="Cancel background world export"
+                onClick={activity.cancel}
+              >
+                Cancel export
+              </button>
+            </>
+          ) : snapshot ? (
+            <>
+              <span>
+                {snapshot.result.width} × {snapshot.result.height} preview
+              </span>
+              <span>{worldNumber(snapshot.result.spacingX, 2)} m / sample</span>
+              <span>
+                {worldNumber((engine.completedJob?.elapsedMs ?? 0) / 1000, 2)} s{' '}
+                {engine.completedJob?.cacheSource ? 'restore' : 'total'}
+              </span>
+            </>
+          ) : (
+            <span>World coordinates · metres</span>
           )}
-          <span className="world-footer-label">
-            {result
-              ? `${result.width} × ${result.height} preview · ${result.backend === 'webgpu' ? 'WebGPU + CPU' : 'CPU reference'}`
-              : 'FLOAT32 / METERS'}
-          </span>
         </div>
       </footer>
-    </Modal>
+    </section>
   );
 }

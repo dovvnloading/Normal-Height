@@ -65,4 +65,19 @@ export interface WorldRegionResult {
 export interface WorldRunOptions {
   signal?: AbortSignal;
   onProgress?: (progress: number, stage: string) => void;
+  /** Measured work within the named phase. Fractions are not an ETA. */
+  onProgressDetail?: (progress: WorldEvaluationProgress) => void;
+}
+
+export interface WorldEvaluationProgress {
+  phase: 'preparing' | 'transport' | 'sampling';
+  stage: string;
+  progress: number | null;
+  nodeId?: string;
+  completed?: number;
+  total?: number;
+  unit?: 'stages' | 'rows' | 'samples' | 'iterations';
+  /** The current graph stage, one-based, when several stages share a phase. */
+  stageIndex?: number;
+  stageCount?: number;
 }

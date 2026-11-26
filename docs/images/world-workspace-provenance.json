@@ -1,0 +1,18 @@
+{
+  "sourceCommit": "d0904fbd4ae3247ba719d78f4a665523e313f4c0",
+  "captureDateUtc": "2026-11-25",
+  "workflowRun": "https://github.com/dovvnloading/Normal-Height/actions/runs/45710438900",
+  "artifactId": 15068035588,
+  "browser": "Chromium 158.0.8127.18",
+  "viewport": { "width": 1440, "height": 1000, "deviceScaleFactor": 1 },
+  "renderingBackend": "ANGLE SwiftShader",
+  "application": "Production Vite build with real World workers and sampled terrain",
+  "assets": {
+    "world-studio.png": "world-workspace.spec.ts / map navigation / world-workspace-light-map.png",
+    "world-workspace-split.png": "world-workspace.spec.ts / physical 3D lifecycle / world-workspace-physical-split.png",
+    "world-workspace-dark.png": "world-workspace.spec.ts / comparison and compact layouts / world-workspace-dark.png",
+    "world-export.png": "world-file-export.spec.ts / real RAW archive and backpressure / world-export-review.png",
+    "world-export-receipt.png": "world-file-export.spec.ts / real RAW archive and backpressure / world-export-receipt.png"
+  },
+  "qualification": "Software rendering and UI evidence. This does not qualify hardware performance or native operating-system file dialogs."
+}

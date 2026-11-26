@@ -17,7 +17,15 @@ import {
 import { NODE_DEFINITIONS, noiseParamVisible } from '../model/registry';
 import { upgradeNoiseParams } from '../model/noiseStudio';
 import { layerColorHex, resolveSurface, SPLAT_LAYERS } from '../materials/pbr';
-import { DEFAULT_SPLINE_PATH, MAX_SPLINE_POINTS, insertSplinePoint } from '../model/splines';
+import {
+  DEFAULT_SPLINE_PATH,
+  MAX_SPLINE_POINTS,
+  moveSplinePoint,
+  splineLength,
+  splineFootprint,
+  splitLongestSplineSpan,
+} from '../model/splines';
+import { formatMeters } from '../model/viewportUX';
 import type { SplinePoint } from '../model/splines';
 import { NumberField, ParamControl } from './Controls';
 import { TerrainIcon } from './TerrainIcon';
@@ -25,6 +33,8 @@ import { NoiseStudio } from './NoiseStudio';
 import type { TerrainNode, TerrainProject, ParamValue, ViewSettings } from '../model/types';
 
 interface Props {
+  /** World has its own rendering controls; this inspector edits the shared graph. */
+  worldMode?: boolean;
   onImportRaster: (raster: HeightRaster, previous?: HeightRaster) => void;
   projectSession: number;
   splineEditing: boolean;
@@ -46,6 +56,7 @@ interface Props {
   onClose?: () => void;
 }
 export function Inspector({
+  worldMode = false,
   onImportRaster,
   projectSession,
   splineEditing,
@@ -66,26 +77,28 @@ export function Inspector({
   onSettingsChange,
 }: Props) {
   const [tab, setTab] = useState<'node' | 'scene'>('node');
+  const activeTab = worldMode ? 'node' : tab;
   const definition = node ? NODE_DEFINITIONS[node.kind] : null;
   const surface = resolveSurface(project.surface);
-  const visibleParams = node && definition
-    ? definition.params.filter((p) => noiseParamVisible(node, p.key))
-    : [];
+  const visibleParams =
+    node && definition ? definition.params.filter((p) => noiseParamVisible(node, p.key)) : [];
   const sections = [...new Set(visibleParams.map((p) => p.section ?? 'Parameters'))];
   return (
     <aside className="inspector panel" aria-label="Parameter inspector">
       <div className="panel-tabs">
-        <button className={tab === 'node' ? 'active' : ''} onClick={() => setTab('node')}>
+        <button className={activeTab === 'node' ? 'active' : ''} onClick={() => setTab('node')}>
           <SlidersHorizontal size={14} />
           Inspector
         </button>
-        <button className={tab === 'scene' ? 'active' : ''} onClick={() => setTab('scene')}>
-          <Sun size={14} />
-          Scene
-        </button>
+        {!worldMode && (
+          <button className={activeTab === 'scene' ? 'active' : ''} onClick={() => setTab('scene')}>
+            <Sun size={14} />
+            Scene
+          </button>
+        )}
       </div>
       <div className="inspector-scroll">
-        {tab === 'node' ? (
+        {activeTab === 'node' ? (
           node && definition ? (
             <>
               <div className="inspector-heading">
@@ -133,66 +146,96 @@ export function Inspector({
               )}
               {node.kind === 'noise' && node.params.noiseModel !== 'v3' && (
                 <div className="studio-upgrade">
-                  <span>{node.params.noiseModel === 'v2' ? 'Corrected sampler · v2' : 'Original sampler · legacy'}</span>
-                  <p>Upgrade these controls to Noise Studio for new generators, seed exploration and shaping. The new sampler changes the pattern. Undo restores this version.</p>
-                  <button type="button" onClick={() => onParams(upgradeNoiseParams(node.params))}>Upgrade to Studio <ArrowUpRight size={14} /></button>
+                  <span>
+                    {node.params.noiseModel === 'v2'
+                      ? 'Corrected sampler · v2'
+                      : 'Original sampler · legacy'}
+                  </span>
+                  <p>
+                    Upgrade these controls to Noise Studio for new generators, seed exploration and
+                    shaping. The new sampler changes the pattern. Undo restores this version.
+                  </p>
+                  <button type="button" onClick={() => onParams(upgradeNoiseParams(node.params))}>
+                    Upgrade to Studio <ArrowUpRight size={14} />
+                  </button>
                 </div>
               )}
-              {node.kind === 'noise' && node.params.mode === 'wave' && !['v2', 'v3'].includes(String(node.params.noiseModel)) && (
-                <p className="parameter-hint">Legacy Wave uses a fixed three-layer phase fractal. Switch to corrected sampling to edit its layers.</p>
-              )}
-              {node.kind === 'noise' && node.params.mode === 'naki' && !['v2', 'v3'].includes(String(node.params.noiseModel)) && (
-                <p className="parameter-hint">Legacy Naki includes inherent coordinate distortion even at zero Warp amount.</p>
-              )}
+              {node.kind === 'noise' &&
+                node.params.mode === 'wave' &&
+                !['v2', 'v3'].includes(String(node.params.noiseModel)) && (
+                  <p className="parameter-hint">
+                    Legacy Wave uses a fixed three-layer phase fractal. Switch to corrected sampling
+                    to edit its layers.
+                  </p>
+                )}
+              {node.kind === 'noise' &&
+                node.params.mode === 'naki' &&
+                !['v2', 'v3'].includes(String(node.params.noiseModel)) && (
+                  <p className="parameter-hint">
+                    Legacy Naki includes inherent coordinate distortion even at zero Warp amount.
+                  </p>
+                )}
               {node.kind === 'noise' && node.params.noiseModel === 'v3' ? (
-                <NoiseStudio key={node.id} params={node.params} projectSeed={project.seed} worldSize={project.worldSize} heightScale={project.heightScale} onParam={onParam} onParams={onParams} />
-              ) : sections.map((section) => (
-                <details
-                  className="parameter-section"
-                  key={`${node.id}-${section}`}
-                  open={
-                    section !== 'Advanced' && section !== 'Randomness' && section !== 'Transform'
-                  }
-                >
-                  <summary>
-                    {section}
-                    <ChevronDown size={13} />
-                  </summary>
-                  <div>
-                    {visibleParams
-                      .filter((p) => (p.section ?? 'Parameters') === section)
-                      .map((d) => (
-                        <ParamControl
-                          key={`${node.id}-${d.key}`}
-                          definition={node.kind === 'noise' && d.key === 'noiseModel' ? { ...d, options: d.options?.filter(option => option.value !== 'v3') } : d}
-                          value={node.params[d.key] ?? (node.kind === 'noise' && d.key === 'noiseModel' ? 'legacy' : d.default)}
-                          onChange={(v) => onParam(d.key, v)}
-                        />
-                      ))}
-                  </div>
-                </details>
-              ))}
+                <NoiseStudio
+                  key={node.id}
+                  params={node.params}
+                  projectSeed={project.seed}
+                  worldSize={project.worldSize}
+                  heightScale={project.heightScale}
+                  onParam={onParam}
+                  onParams={onParams}
+                />
+              ) : (
+                sections.map((section) => (
+                  <details
+                    className="parameter-section"
+                    key={`${node.id}-${section}`}
+                    open={
+                      section !== 'Advanced' && section !== 'Randomness' && section !== 'Transform'
+                    }
+                  >
+                    <summary>
+                      {section}
+                      <ChevronDown size={13} />
+                    </summary>
+                    <div>
+                      {visibleParams
+                        .filter((p) => (p.section ?? 'Parameters') === section)
+                        .map((d) => (
+                          <ParamControl
+                            key={`${node.id}-${d.key}`}
+                            definition={
+                              node.kind === 'noise' && d.key === 'noiseModel'
+                                ? {
+                                    ...d,
+                                    options: d.options?.filter((option) => option.value !== 'v3'),
+                                  }
+                                : d
+                            }
+                            value={
+                              node.params[d.key] ??
+                              (node.kind === 'noise' && d.key === 'noiseModel'
+                                ? 'legacy'
+                                : d.default)
+                            }
+                            onChange={(v) => onParam(d.key, v)}
+                          />
+                        ))}
+                    </div>
+                  </details>
+                ))
+              )}
               {node.kind === 'spline' && (() => {
                 const points = node.path ?? DEFAULT_SPLINE_PATH;
+                const percentAt = (point: SplinePoint, coord: 'x' | 'y') =>
+                  Number((point[coord] * 100).toFixed(3));
                 const changePoint = (index: number, coord: 'x' | 'y', percent: number) => {
-                  if (!Number.isFinite(percent)) return;
-                  onSplinePath(points.map((point, i) =>
-                    i === index ? { ...point, [coord]: Math.max(0, Math.min(1, percent / 100)) } : { ...point },
-                  ));
+                  if (!Number.isFinite(percent) || percent === percentAt(points[index], coord)) return;
+                  onSplinePath(moveSplinePoint(points, index, { ...points[index], [coord]: percent / 100 }));
                 };
-                const addPoint = () => {
-                  if (points.length >= MAX_SPLINE_POINTS) return;
-                  let segment = 0, longest = -1;
-                  for (let i = 0; i < points.length - 1; i++) {
-                    const length = Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-                    if (length > longest) { longest = length; segment = i; }
-                  }
-                  const point = {
-                    x: (points[segment].x + points[segment + 1].x) / 2,
-                    y: (points[segment].y + points[segment + 1].y) / 2,
-                  };
-                  onSplinePath(insertSplinePoint(points, point));
-                };
+                const pathLength = splineLength(points);
+                const footprint = splineFootprint(Number(node.params.width ?? 0.016), Number(node.params.falloff ?? 3));
+                const ridge = node.params.mode === 'ridge';
                 return (
                   <section className="spline-editor" aria-label="Spline path editor">
                     <div className="spline-editor-heading">
@@ -211,11 +254,22 @@ export function Inspector({
                     </button>
                     <p className="spline-help">
                       {splineEditing
-                        ? 'Drag handles to reshape the path. Click the map to insert a point near the closest segment. First point is upstream.'
+                        ? 'Click to insert along the nearest curve span; drag empty map space to pan or pinch to zoom. Focus a handle and use arrows (Shift for larger steps). Escape cancels an active drag.'
                         : 'Switch to edit mode to draw directly over your terrain. The spline is saved with the project and evaluated before downstream erosion.'}
                     </p>
+                    <dl className="spline-path-metrics" aria-label="Path dimensions">
+                      <div><dt>Approx. path length</dt><dd>{formatMeters(pathLength * project.worldSize)}</dd></div>
+                      <div><dt>Core radius</dt><dd>{formatMeters(footprint.core * project.worldSize)}</dd></div>
+                      <div><dt>Outer reach</dt><dd>{formatMeters(footprint.outer * project.worldSize)}</dd></div>
+                    </dl>
+                    <p className="spline-help spline-footprint-help">
+                      {ridge ? 'Start → end' : 'Headwater → outlet'} · The shaded guide shows the authored core and outer reach, not a simulated water width.
+                    </p>
                     <div className="spline-edit-actions">
-                      <button type="button" onClick={addPoint} disabled={points.length >= MAX_SPLINE_POINTS}>
+                      <button type="button"
+                        title="Insert halfway along the longest curved span"
+                        onClick={() => onSplinePath(splitLongestSplineSpan(points))}
+                        disabled={points.length >= MAX_SPLINE_POINTS || pathLength <= 1e-10}>
                         <Plus size={12} /> Add point
                       </button>
                       <button type="button" onClick={() => onSplinePath([...points].reverse())}>
@@ -225,32 +279,35 @@ export function Inspector({
                         <RotateCcw size={12} /> Reset
                       </button>
                     </div>
+                    <p className="spline-capacity">{points.length >= MAX_SPLINE_POINTS
+                      ? 'Point limit reached. Remove a point to continue.'
+                      : `${MAX_SPLINE_POINTS - points.length} more points available · X east, Y south`}</p>
                     <div className="spline-point-list" aria-label="Control point coordinates">
                       {points.map((point, index) => (
                         <div className="spline-point-row" key={index}>
                           <span className="spline-point-number">{String(index + 1).padStart(2, '0')}</span>
                           <label>
                             X
-                            <input
-                              type="number"
+                            <NumberField
+                              key={`${node.id}-${index}-x`}
                               min={0}
                               max={100}
                               step={0.1}
-                              aria-label={`Point ${index + 1} X percent`}
-                              value={+(point.x * 100).toFixed(1)}
-                              onChange={(event) => changePoint(index, 'x', Number(event.target.value))}
+                              label={`Point ${index + 1} X percent`}
+                              value={percentAt(point, 'x')}
+                              onChange={(value) => changePoint(index, 'x', value)}
                             />
                           </label>
                           <label>
                             Y
-                            <input
-                              type="number"
+                            <NumberField
+                              key={`${node.id}-${index}-y`}
                               min={0}
                               max={100}
                               step={0.1}
-                              aria-label={`Point ${index + 1} Y percent`}
-                              value={+(point.y * 100).toFixed(1)}
-                              onChange={(event) => changePoint(index, 'y', Number(event.target.value))}
+                              label={`Point ${index + 1} Y percent`}
+                              value={percentAt(point, 'y')}
+                              onChange={(value) => changePoint(index, 'y', value)}
                             />
                           </label>
                           <button
@@ -427,7 +484,8 @@ export function Inspector({
                   label: 'Terrain mesh fidelity',
                   type: 'select',
                   default: 'high',
-                  description: 'Controls how finely the 3D mesh subdivides nearby terrain. Higher fidelity resolves smaller features in silhouettes and shadows.',
+                  description:
+                    'Controls how finely the 3D mesh subdivides nearby terrain. Higher fidelity resolves smaller features in silhouettes and shadows.',
                   options: [
                     { value: 'balanced', label: 'Balanced · faster' },
                     { value: 'high', label: 'High · adaptive' },
@@ -435,9 +493,12 @@ export function Inspector({
                   ],
                 }}
                 value={settings.meshQuality}
-                onChange={v => onSettingsChange({
-                  ...settings, meshQuality: v as ViewSettings['meshQuality'],
-                })}
+                onChange={(v) =>
+                  onSettingsChange({
+                    ...settings,
+                    meshQuality: v as ViewSettings['meshQuality'],
+                  })
+                }
               />
               <ParamControl
                 definition={{
@@ -449,10 +510,13 @@ export function Inspector({
                   max: 2,
                   step: 0.05,
                   unit: '×',
-                  description: 'Scales the signed relief of rock, soil, vegetation and snow on every terrain mesh. Zero shows the underlying terrain elevation.',
+                  description:
+                    'Scales the signed relief of rock, soil, vegetation and snow on every terrain mesh. Zero shows the underlying terrain elevation.',
                 }}
                 value={surface.detailStrength}
-                onChange={v => onProjectChange({ surface: { ...surface, detailStrength: Number(v) } })}
+                onChange={(v) =>
+                  onProjectChange({ surface: { ...surface, detailStrength: Number(v) } })
+                }
               />
               <ParamControl
                 definition={{
@@ -487,10 +551,15 @@ export function Inspector({
             </section>
             <section className="parameter-section open">
               <h3>PBR material studio</h3>
-              <p className="parameter-hint">Biome and layer coverage shape the relief in every 3D view. The PBR preview also shows the exported surface colors and roughness.</p>
+              <p className="parameter-hint">
+                Biome and layer coverage shape the relief in every 3D view. The PBR preview also
+                shows the exported surface colors and roughness.
+              </p>
               <ParamControl
                 definition={{
-                  key: 'biome', label: 'Material biome', type: 'select',
+                  key: 'biome',
+                  label: 'Material biome',
+                  type: 'select',
                   default: 'alpine',
                   options: [
                     { value: 'alpine', label: 'Alpine / temperate' },
@@ -499,26 +568,43 @@ export function Inspector({
                   ],
                 }}
                 value={surface.biome}
-                onChange={v => onProjectChange({ surface: { ...surface, biome: v as typeof surface.biome } })}
+                onChange={(v) =>
+                  onProjectChange({ surface: { ...surface, biome: v as typeof surface.biome } })
+                }
               />
               <fieldset className="layer-palette">
                 <legend>Layer albedo</legend>
                 <div className="layer-swatches">
-                  {SPLAT_LAYERS.map(layer => (
+                  {SPLAT_LAYERS.map((layer) => (
                     <label key={layer}>
-                      <input type="color" aria-label={layer + ' albedo'}
+                      <input
+                        type="color"
+                        aria-label={layer + ' albedo'}
                         value={layerColorHex(surface, layer)}
-                        onChange={event => onProjectChange({ surface: { ...surface,
-                          layerColors: { ...surface.layerColors, [layer]: event.target.value },
-                        } })} />
+                        onChange={(event) =>
+                          onProjectChange({
+                            surface: {
+                              ...surface,
+                              layerColors: { ...surface.layerColors, [layer]: event.target.value },
+                            },
+                          })
+                        }
+                      />
                       {layer}
                     </label>
                   ))}
                 </div>
-                {surface.layerColors && <button type="button" className="text-button"
-                  onClick={() => onProjectChange({ surface: { ...surface, layerColors: undefined } })}>
-                  Restore biome colors
-                </button>}
+                {surface.layerColors && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() =>
+                      onProjectChange({ surface: { ...surface, layerColors: undefined } })
+                    }
+                  >
+                    Restore biome colors
+                  </button>
+                )}
               </fieldset>
               <ParamControl
                 definition={{
@@ -526,36 +612,88 @@ export function Inspector({
                   label: 'Live close-up microdetail',
                   type: 'toggle',
                   default: true,
-                  description: 'Adds meter-scaled world-space rock joints, sediment grain and snow/vegetation micro-normal shading only when zoomed close enough to resolve them. Preview only; exported PBR maps are unchanged.',
+                  description:
+                    'Adds meter-scaled world-space rock joints, sediment grain and snow/vegetation micro-normal shading only when zoomed close enough to resolve them. Preview only; exported PBR maps are unchanged.',
                 }}
                 value={settings.nearFieldDetail}
-                onChange={v => onSettingsChange({ ...settings, nearFieldDetail: Boolean(v) })}
+                onChange={(v) => onSettingsChange({ ...settings, nearFieldDetail: Boolean(v) })}
               />
-              {([
-                { key: 'snowLine', label: 'Snow-line elevation', min: 0.35, max: 1, step: 0.01,
-                  description: 'Relative to the generated terrain elevation range.' },
-                { key: 'rockSlope', label: 'Exposed rock slope', min: 12, max: 75, step: 1, unit: '°',
-                  description: 'Surface angle where vegetation gives way to exposed rock.' },
-                { key: 'moisture', label: 'Environmental moisture', min: 0, max: 1, step: 0.01,
-                  description: 'Controls vegetation coverage and wet surface response.' },
-                { key: 'detailMeters', label: 'Surface detail scale', min: 4, max: 200, step: 1, unit: 'm',
-                  description: 'Approximate spatial wavelength of generated microstructure.' },
-                { key: 'strataMeters', label: 'Rock bedding separation', min: 12, max: 500,
-                  step: 2, unit: 'm',
-                  description: 'Geological stratum thickness in elevation meters; bands follow actual rock heights and fade if unresolved.' },
-                { key: 'fractureMeters', label: 'Rock fracture spacing', min: 12, max: 320,
-                  step: 2, unit: 'm',
-                  description: 'Physical spacing of seeded rock joints; one pattern drives color, roughness and micro-relief.' },
-                { key: 'aoStrength', label: 'Terrain occlusion', min: 0, max: 1, step: 0.05,
-                  description: 'Physical 50/150/425 m, plane-corrected terrain horizon occlusion.' },
-              ] as const).map(control => (
+              {(
+                [
+                  {
+                    key: 'snowLine',
+                    label: 'Snow-line elevation',
+                    min: 0.35,
+                    max: 1,
+                    step: 0.01,
+                    description: 'Relative to the generated terrain elevation range.',
+                  },
+                  {
+                    key: 'rockSlope',
+                    label: 'Exposed rock slope',
+                    min: 12,
+                    max: 75,
+                    step: 1,
+                    unit: '°',
+                    description: 'Surface angle where vegetation gives way to exposed rock.',
+                  },
+                  {
+                    key: 'moisture',
+                    label: 'Environmental moisture',
+                    min: 0,
+                    max: 1,
+                    step: 0.01,
+                    description: 'Controls vegetation coverage and wet surface response.',
+                  },
+                  {
+                    key: 'detailMeters',
+                    label: 'Surface detail scale',
+                    min: 4,
+                    max: 200,
+                    step: 1,
+                    unit: 'm',
+                    description: 'Approximate spatial wavelength of generated microstructure.',
+                  },
+                  {
+                    key: 'strataMeters',
+                    label: 'Rock bedding separation',
+                    min: 12,
+                    max: 500,
+                    step: 2,
+                    unit: 'm',
+                    description:
+                      'Geological stratum thickness in elevation meters; bands follow actual rock heights and fade if unresolved.',
+                  },
+                  {
+                    key: 'fractureMeters',
+                    label: 'Rock fracture spacing',
+                    min: 12,
+                    max: 320,
+                    step: 2,
+                    unit: 'm',
+                    description:
+                      'Physical spacing of seeded rock joints; one pattern drives color, roughness and micro-relief.',
+                  },
+                  {
+                    key: 'aoStrength',
+                    label: 'Terrain occlusion',
+                    min: 0,
+                    max: 1,
+                    step: 0.05,
+                    description:
+                      'Physical 50/150/425 m, plane-corrected terrain horizon occlusion.',
+                  },
+                ] as const
+              ).map((control) => (
                 <ParamControl
                   key={control.key}
                   definition={{ ...control, type: 'range', default: surface[control.key] }}
                   value={surface[control.key]}
-                  onChange={v => onProjectChange({
-                    surface: { ...surface, [control.key]: Number(v) },
-                  })}
+                  onChange={(v) =>
+                    onProjectChange({
+                      surface: { ...surface, [control.key]: Number(v) },
+                    })
+                  }
                 />
               ))}
             </section>
@@ -569,7 +707,7 @@ export function Inspector({
           </>
         )}
       </div>
-      {tab === 'node' && node && (
+      {activeTab === 'node' && node && (
         <div className="inspector-actions">
           {node.kind !== 'note' && node.kind !== 'group' && (
             <button
