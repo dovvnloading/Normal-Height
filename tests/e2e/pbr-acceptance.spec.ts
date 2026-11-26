@@ -688,7 +688,7 @@ test('near-field material shader compiles, activates at close zoom, and toggles 
 });
 
 
-test('seamless detail tile ZIP exports four local materials with correct channel contracts', async ({ page }) => {
+test('seamless detail tile ZIP exports four local materials with correct channel contracts', async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await loadFastProject(page, 512);
   await page.getByRole('button', { name: 'Export maps', exact: true }).click();
@@ -697,7 +697,7 @@ test('seamless detail tile ZIP exports four local materials with correct channel
   await dialog.getByRole('combobox', { name: 'Export resolution' }).selectOption('256');
   await expect(dialog).toContainText('6.00 × 6.00 m');
   const downloading = page.waitForEvent('download', { timeout: 90_000 });
-  await dialog.getByRole('button', { name: /Export/i }).last().click();
+  await dialog.getByRole('button', { name: 'Export bundle', exact: true }).click();
   const download = await downloading;
   expect(download.suggestedFilename()).toMatch(/alpine-256-detail-tiles\.zip$/);
   const path = await download.path();
@@ -708,6 +708,12 @@ test('seamless detail tile ZIP exports four local materials with correct channel
   expect(meta.materials.map((m: { layer: string }) => m.layer)).toEqual(['rock','soil','vegetation','snow']);
   expect(Object.keys(files)).toHaveLength(25);
   for (const layer of ['rock','soil','vegetation','snow']) {
+    // Preserve the actual encoded maps for inspection, not only scalar metrics.
+    for (const name of ['basecolor','roughness','normal-gl']) {
+      await testInfo.attach(layer + '-' + name + '.png', {
+        body: Buffer.from(files[layer + '/' + name + '.png']), contentType: 'image/png',
+      });
+    }
     for (const name of ['basecolor','roughness','orm','normal-gl','normal-dx','height16']) {
       const image = decodePNG(files[layer + '/' + name + '.png']);
       expect([image.width,image.height,image.depth]).toEqual([256,256,name === 'height16' ? 16 : 8]);

@@ -11,9 +11,10 @@ export function detailTileMeters(detailMeters: number): number {
 
 const wrap = (i: number, n: number) => i >= 0 && i < n ? i : ((i % n) + n) % n;
 const TAU = 2 * Math.PI;
-const faultPulse = (phase: number, width: number) => {
+const faultPulse = (phase: number, width: number, footprint: number) => {
   const distance = Math.abs(phase - Math.round(phase));
-  return 1 - smoothstep(width * 0.18, width, distance);
+  const filtered = Math.max(width, footprint);
+  return (1 - smoothstep(filtered * 0.18, filtered, distance)) * width / filtered;
 };
 const quintic = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
 const AO_X = [1,1,0,-1,-1,-1,0,1];
@@ -132,7 +133,7 @@ class PeriodicLattice {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       const cx = ix+dx, cy = iy+dy, i = this.index(cx,cy);
       const px = x-cx-this.offsetX[i], py = y-cy-this.offsetY[i];
-      if (px*px+py*py > 0.72*0.72) continue;
+      if (px*px+py*py > 0.85*0.85) continue;
       const along = px*this.axisX[i] + py*this.axisY[i];
       const length = 0.36 + 0.23*this.sizes[i];
       const t = along/length;
@@ -175,6 +176,7 @@ export class DetailTileSampler {
   private readonly leaves: PeriodicLattice;
   private readonly needles: PeriodicLattice;
   private readonly laminaVisibility: number;
+  private readonly faultFootprint: number;
   private readonly sedimentary: boolean;
   private readonly basalt: boolean;
   private readonly strength: number;
@@ -201,6 +203,7 @@ export class DetailTileSampler {
     this.leaves = lattice(37, 43, layer === 'vegetation');
     this.needles = lattice(83, 79, layer === 'vegetation');
     this.laminaVisibility = smoothstep(2.5, 5, resolution / 19);
+    this.faultFootprint = 0.6 * Math.hypot(6,5) / resolution;
     this.sedimentary = settings.biome === 'arid';
     this.basalt = settings.biome === 'volcanic';
     this.strength = settings.detailStrength;
@@ -228,9 +231,9 @@ export class DetailTileSampler {
       } else {
         const faultA = 3*x + 5*y + 0.34*wx + 0.11*medium;
         const faultB = 6*x - 2*y + 0.29*wy + 0.10*small;
-        const first = faultPulse(faultA,0.046+0.023*smoothstep(-0.6,0.5,small)) *
+        const first = faultPulse(faultA,0.046+0.023*smoothstep(-0.6,0.5,small),this.faultFootprint) *
           smoothstep(-0.25,0.32,medium+0.5*small);
-        const second = faultPulse(faultB,0.048) *
+        const second = faultPulse(faultB,0.048,this.faultFootprint) *
           smoothstep(-0.05,0.47,-medium+0.58*small);
         joint = Math.max(first,second*0.75);
         block = 0.60*medium + 0.40*small;

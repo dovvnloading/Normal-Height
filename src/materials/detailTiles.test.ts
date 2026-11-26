@@ -57,6 +57,17 @@ describe('portable material detail tiles', () => {
     }
   });
 
+  it('uses independent morphology for each biome rather than only palette swaps', () => {
+    for (const layer of layers) {
+      const alpine = generateDetailTile(layer, { biome: 'alpine' }, 48271, 64);
+      const arid = generateDetailTile(layer, { biome: 'arid' }, 48271, 64);
+      const volcanic = generateDetailTile(layer, { biome: 'volcanic' }, 48271, 64);
+      expect(alpine.relief).not.toEqual(arid.relief);
+      expect(alpine.relief).not.toEqual(volcanic.relief);
+      expect(arid.relief).not.toEqual(volcanic.relief);
+    }
+  });
+
   it('derives edge normals from periodic neighbors and honors zero relief strength', () => {
     const n = 32, scene = resolveSurface(), maps = generateDetailTile('soil', scene, 4, n);
     const dx = (maps.relief[1] - maps.relief[n-1]) / (2*maps.meters/n);

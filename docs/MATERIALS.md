@@ -163,6 +163,14 @@ All lattice sites, warps, particle morphology, and derivative neighbors repeat o
 
 The separate memory budget accounts for 24 encoded PNGs and the ZIP. Export one substrate at a time into the archive, with cancellation terminating the encoder worker. High-resolution export timing and peak memory need device qualification. The procedural tiles are authored approximations, not scanned ground truth.
 
+### Rendered tile study
+
+![Actual detail tile shading study](images/detail-tile-quality.png)
+
+Rows: alpine, arid, volcanic. Columns: rock, soil, vegetation, snow. The image is an offline diagnostic of the generated basecolor, normal and ORM buffers (seed 48271, 256² tiles, center 192² crops, default 6 m period). A fixed directional light, dielectric GGX approximation and cavity-weighted ambient term shade each map; the image is **not** a game-engine screenshot, reference photography, or an authored texture atlas. The artwork remains procedural.
+
+This iteration replaces uniform polygon fractures with discontinuous fault sets, bent mineral foliation and finer sedimentary cross-strata, retaining cooling plates for basalt. Individual tapered, curved leaf silhouettes appear at resolved wavelengths; lichen has granular nodules, and snow drifts vary in amplitude with wind exposure. All three biomes use independent seeded site fields.
+
 ### Visual qualification before release
 
 - Capture matched alpine/arid/volcanic views at overview, mid-distance and close zoom, with lighting, camera and seed held fixed. Inspect all four pure painted substrates and their boundaries; verify no black normal spikes, aliasing or visible zoom pops.
