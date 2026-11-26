@@ -13,6 +13,11 @@ import { resolveSurface, type PBRMaps } from '../materials/pbr';
 import { fabricFrame } from '../materials/surfaceFabric';
 import { packPreviewPBR } from './previewMaterial';
 import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
+import { detailTileMeters } from '../materials/detailTiles';
+import type { DetailPreviewRequest } from '../materials/detailPreview';
+import { detailPreviewKey, requestDetailPreview } from '../materials/detailPreviewClient';
+import { createDetailTextures, type DetailTextures } from './detailTextures';
+import { inspectionMinDistance, inspectionNearPlane, OVERVIEW_MIN_DISTANCE, shouldPrepareLocalTextures } from './detailCamera';
 import { createSlopeTexture, createSourceNormalUniforms, installSourceNormals } from './sourceNormals';
 import { packedPreview, requestPBR, pbrVariantKey } from '../materials/pbrClient';
 import { sampleSpline } from '../model/splines';
@@ -159,6 +164,14 @@ export class TerrainScene {
   private contourUniform = { value: false };
   private spacingUniform = { value: 0.015 };
   private readonly nearField = createNearFieldUniforms();
+  private localDetailSpec: DetailPreviewRequest | null = null;
+  private localDetailTextures: DetailTextures | null = null;
+  private localDetailRelease: (() => void) | null = null;
+  private localDetailAttempted = false;
+  private localDetailGeneration = 0;
+  private localDetailReadyAt = 0;
+  private localDetailUploads = 0;
+  private localDetailRequests = 0;
   // Per-pixel source normals: shading detail independent of mesh density.
   private readonly sourceNormals = createSourceNormalUniforms();
   private slopeTexture: THREE.DataTexture | null = null;
@@ -311,6 +324,7 @@ export class TerrainScene {
     const delta = position.sub(this.controls.target);
     this.controls.target.add(delta);
     this.camera.position.add(delta);
+    if (this.project) this.controls.minDistance = inspectionMinDistance(this.project.worldSize/TERRAIN_SIZE);
     this.cameraAdjusted = true;
     this.controls.update();
     this.needsRender = true;
@@ -355,6 +369,10 @@ export class TerrainScene {
     this.renderer.domElement.dataset.projection = 'perspective';
     this.renderer.domElement.dataset.materialStatus = 'inactive';
     this.renderer.domElement.dataset.nearFieldDetail = 'inactive';
+    this.renderer.domElement.dataset.localDetailStatus = 'idle';
+    this.renderer.domElement.dataset.localDetailTextureCount = '0';
+    this.renderer.domElement.dataset.localDetailRequests = '0';
+    this.renderer.domElement.dataset.localDetailUploads = '0';
     this.renderer.domElement.dataset.waterStatus = 'inactive';
     if (this.meshBenchmark) {
       const gl = this.renderer.getContext();
@@ -364,6 +382,7 @@ export class TerrainScene {
       // captures at real ridges, cliffs and edges of the displayed terrain.
       (window as BenchmarkWindow).__nhMeshBenchmark = {
         setCamera: (position, target) => {
+          if (this.project) this.controls.minDistance = inspectionMinDistance(this.project.worldSize/TERRAIN_SIZE);
           this.controls.target.set(target[0], target[1], target[2]);
           this.camera.position.set(position[0], position[1], position[2]);
           this.cameraAdjusted = true;
@@ -478,11 +497,9 @@ export class TerrainScene {
     this.controls.target.set(0, 0.2, 0);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    // At 8 km tile width the old 0.55-unit minimum stayed >1.6 km from
-    // the orbit target, hiding all centimeter/meter shader detail.
-    // 0.045 units is ~138 m on that tile; the matching near plane prevents
-    // 3D clipping while retaining useful depth precision at the scene far plane.
-    this.controls.minDistance = 0.045;
+    // Keep overview navigation conservative until the artist focuses an
+    // actual surface point. Focus then unlocks an ~8 m inspection distance.
+    this.controls.minDistance = OVERVIEW_MIN_DISTANCE;
     this.controls.maxDistance = 12;
     this.controls.maxPolarAngle = Math.PI * 0.485;
     this.controls.autoRotateSpeed = 0.65;
@@ -517,6 +534,7 @@ export class TerrainScene {
     this.onContextLost = (event) => {
       event.preventDefault();
       this.contextLost = true;
+      this.clearLocalDetail();
       onError('The 3D graphics context was lost. Your heightmap is safe; switch to the 2D view.');
     };
     this.renderer.domElement.addEventListener('webglcontextlost', this.onContextLost);
@@ -594,6 +612,13 @@ export class TerrainScene {
     this.animation = requestAnimationFrame(this.animate);
     if (!this.host.clientWidth || !this.host.clientHeight || document.hidden) return;
     this.controls.update();
+    const orbitDistance = this.camera.position.distanceTo(this.controls.target);
+    const near = inspectionNearPlane(orbitDistance);
+    if (Math.abs(near-this.camera.near) > 0.0000001) {
+      this.camera.near = near;
+      this.camera.updateProjectionMatrix();
+      this.needsRender = true;
+    }
     this.scaleInspectionMarkers();
     // Camera changes mark LOD dirty. Don't re-plan 3x/s while idle. When
     // auto-rotating, refresh at most every 1.5 s rather than staying stale.
@@ -618,7 +643,7 @@ export class TerrainScene {
     const activeMicro = !!this.project && this.settings.material === 'pbr' &&
       nearFieldShouldRender(
         this.settings.nearFieldDetail,
-        this.camera.position.distanceTo(this.controls.target),
+        orbitDistance,
         this.host.clientHeight * this.renderer.getPixelRatio(),
         this.camera.fov,
         this.nearField.nhMetersPerUnit.value,
@@ -631,6 +656,7 @@ export class TerrainScene {
       this.renderer.domElement.dataset.nearFieldDetail = activeMicro ? 'active' : 'inactive';
       this.needsRender = true;
     }
+    this.syncLocalDetail(orbitDistance, lodNow);
     const seconds = performance.now() / 1000;
     this.atmosphere?.follow(this.camera);
     this.atmosphere?.tick(seconds, this.settings);
@@ -1290,6 +1316,82 @@ export class TerrainScene {
     this.onError(error instanceof Error ? error.message : 'Could not prepare the displaced terrain surface.');
   }
 
+  /** Local textures are independent from the terrain bake/paint workers.
+   * Keep one GPU pair per scene, share pending/completed CPU arrays across
+   * split views, and never install a superseded material revision.
+   */
+  private clearLocalDetail() {
+    ++this.localDetailGeneration;
+    this.localDetailRelease?.();
+    this.localDetailRelease = null;
+    this.localDetailTextures?.dispose();
+    this.localDetailTextures = null;
+    this.localDetailAttempted = false;
+    this.localDetailReadyAt = 0;
+    this.nearField.nhTileReady.value = 0;
+    this.nearField.nhTileColor.value = null;
+    this.nearField.nhTileShape.value = null;
+    const data = this.renderer.domElement.dataset;
+    data.localDetailStatus = 'idle';
+    data.localDetailTextureCount = '0';
+    this.needsRender = true;
+  }
+
+  private syncLocalDetail(orbitDistance: number, now: number) {
+    const enabled = this.settings.material === 'pbr' && this.settings.nearFieldDetail &&
+      this.nearField.nhDetailStrength.value > 0.0001 && !!this.localDetailSpec;
+    if (!enabled) {
+      if (this.localDetailAttempted) this.clearLocalDetail();
+      return;
+    }
+    const data = this.renderer.domElement.dataset;
+    if (this.localDetailTextures) {
+      // Fade from the analytic fallback to texture-backed shading, so
+      // loading the array textures does not pop in a still image.
+      const t = clamp((now-this.localDetailReadyAt)/240);
+      const weight = t*t*(3-2*t);
+      if (this.nearField.nhTileReady.value !== weight) {
+        this.nearField.nhTileReady.value = weight;
+        this.needsRender = true;
+      }
+      if (t === 1) data.localDetailStatus = 'ready';
+      return;
+    }
+    if (this.localDetailAttempted || !this.localDetailSpec ||
+      !shouldPrepareLocalTextures(true,orbitDistance,
+        this.host.clientHeight*this.renderer.getPixelRatio(),this.camera.fov,
+        this.nearField.nhMetersPerUnit.value,this.nearField.nhTileMeters.value)) return;
+    this.localDetailAttempted = true;
+    const generation = ++this.localDetailGeneration;
+    data.localDetailStatus = 'loading';
+    data.localDetailRequests = String(++this.localDetailRequests);
+    const started = performance.now();
+    const request = requestDetailPreview(this.localDetailSpec);
+    this.localDetailRelease = request.release;
+    request.promise.then(maps => {
+      if (this.disposed || this.contextLost || generation !== this.localDetailGeneration) return;
+      this.localDetailRelease?.();
+      this.localDetailRelease = null;
+      const textures = createDetailTextures(maps);
+      this.localDetailTextures = textures;
+      this.nearField.nhTileColor.value = textures.color;
+      this.nearField.nhTileShape.value = textures.shape;
+      this.localDetailReadyAt = performance.now();
+      data.localDetailWorkerMs = (this.localDetailReadyAt-started).toFixed(2);
+      data.localDetailTextureCount = '2';
+      data.localDetailUploads = String(++this.localDetailUploads);
+      this.needsRender = true;
+    }).catch(() => {
+      if (this.disposed || generation !== this.localDetailGeneration) return;
+      this.localDetailRelease?.();
+      this.localDetailRelease = null;
+      // Optional visual enhancement: a failed detail worker must not make
+      // the terrain disappear or prevent painting/exports.
+      data.localDetailStatus = 'fallback';
+      this.needsRender = true;
+    });
+  }
+
   /** Upload textures only for PBR. Other palettes share the displaced geometry. */
   private applySurfaceMaterial(previewOverride?: LiveBrushPreview) {
     const field = previewOverride?.field ?? this.field,
@@ -1298,6 +1400,7 @@ export class TerrainScene {
     if (!field || !project || !maps) return;
     const monitor = this.renderer.domElement.dataset;
     if (this.settings.material !== 'pbr') {
+      if (this.localDetailAttempted) this.clearLocalDetail();
       this.measurePBRFirstRender = false;
       if (this.pbrTextures.length) {
         this.pbrTextures.forEach(texture => texture.dispose());
@@ -1317,6 +1420,13 @@ export class TerrainScene {
     const surface = resolveSurface(project.surface);
     this.nearField.nhMetersPerUnit.value = project.worldSize / TERRAIN_SIZE;
     this.nearField.nhDetailMeters.value = surface.detailMeters;
+    this.nearField.nhTileMeters.value = detailTileMeters(surface.detailMeters);
+    this.nearField.nhTileAO.value = surface.aoStrength;
+    const spec = { biome: surface.biome, seed: project.seed };
+    if (!this.localDetailSpec || detailPreviewKey(this.localDetailSpec) !== detailPreviewKey(spec)) {
+      if (this.localDetailAttempted) this.clearLocalDetail();
+      this.localDetailSpec = spec;
+    }
     this.nearField.nhFabricAzimuth.value = fabricFrame(project.seed).azimuth;
     this.nearField.nhBiome.value = surface.biome === 'alpine' ? 0 : surface.biome === 'arid' ? 1 : 2;
     this.nearField.nhDetailStrength.value = surface.detailStrength;
@@ -1441,6 +1551,7 @@ export class TerrainScene {
     if (![...state.position, ...state.target].every(Number.isFinite)) return;
     this.camera.position.fromArray(state.position);
     this.controls.target.fromArray(state.target);
+    if (this.project) this.controls.minDistance = inspectionMinDistance(this.project.worldSize/TERRAIN_SIZE);
     this.orthographic = false;
     this.renderer.domElement.dataset.projection = 'perspective';
     this.cameraAdjusted = true;
@@ -1469,6 +1580,7 @@ export class TerrainScene {
   }
 
   resetCamera() {
+    this.controls.minDistance = OVERVIEW_MIN_DISTANCE;
     this.orthographic = false;
     this.renderer.domElement.dataset.projection = 'perspective';
     this.cameraAdjusted = false;
@@ -1477,6 +1589,7 @@ export class TerrainScene {
   }
 
   topView() {
+    this.controls.minDistance = OVERVIEW_MIN_DISTANCE;
     this.orthographic = true;
     this.renderer.domElement.dataset.projection = 'orthographic';
     this.cameraAdjusted = false;
@@ -1507,6 +1620,7 @@ export class TerrainScene {
     ++this.pbrGeneration;
     this.pbrRelease?.();
     this.pbrRelease = null;
+    this.clearLocalDetail();
     this.pbrTextures.forEach(texture => texture.dispose());
     this.slopeTexture?.dispose();
     this.slopeTexture = null;

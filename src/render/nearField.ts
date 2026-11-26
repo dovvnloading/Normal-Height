@@ -4,6 +4,9 @@
  * This pass describes finer surface morphology in object-space meters. Lighting
  * and shadowing still come from the MeshStandardMaterial BRDF.
  */
+import type { DataArrayTexture } from 'three';
+import { DETAIL_TEXTURE_GLSL } from './detailTextureShader';
+
 export interface NearFieldUniforms {
   nhMetersPerUnit: { value: number };
   nhDetailMeters: { value: number };
@@ -13,6 +16,11 @@ export interface NearFieldUniforms {
   nhBiome: { value: number };
   nhFabricAzimuth: { value: number };
   nhNearFieldActive: { value: number };
+  nhTileColor: { value: DataArrayTexture | null };
+  nhTileShape: { value: DataArrayTexture | null };
+  nhTileMeters: { value: number };
+  nhTileReady: { value: number };
+  nhTileAO: { value: number };
 }
 
 export function createNearFieldUniforms(): NearFieldUniforms {
@@ -25,6 +33,8 @@ export function createNearFieldUniforms(): NearFieldUniforms {
     nhBiome: { value: 0 },
     nhFabricAzimuth: { value: 0 },
     nhNearFieldActive: { value: 0 },
+    nhTileColor: { value: null }, nhTileShape: { value: null },
+    nhTileMeters: { value: 6 }, nhTileReady: { value: 0 }, nhTileAO: { value: 0.7 },
   };
 }
 
@@ -55,7 +65,8 @@ export function nearFieldShouldRender(
     2 * Math.tan(cameraFovDegrees * Math.PI / 360) / viewportHeight;
   // Longer material wavelengths are visible from further away. Start before
   // the per-pixel cutoff to keep a zoom gesture continuous.
-  const closeWavelength = Math.max(0.4, authoredDetailMeters * 0.22);
+  const closeWavelength = Math.max(0.4, authoredDetailMeters * 0.22,
+    Math.min(16, Math.max(2, authoredDetailMeters*0.25)));
   const wavelength = middleDetailWeight(authoredDetailMeters, bakeCellMeters) > 0
     ? Math.max(closeWavelength, middleDetailWavelength(authoredDetailMeters)) : closeWavelength;
   return footprint < 0.65 * wavelength;
@@ -63,7 +74,7 @@ export function nearFieldShouldRender(
 
 interface ShaderTarget {
   fragmentShader: string;
-  uniforms: Record<string, { value: number }>;
+  uniforms: Record<string, { value: unknown }>;
 }
 
 const GLSL_PARS = `
@@ -399,6 +410,7 @@ const GLSL_ALBEDO = `
 #if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
   vec2 nhReliefDelta = vec2(0.0);
   float nhAlphaShift = 0.0;
+  float nhTileOcclusion = 1.0;
   if (nhNearFieldActive > 0.5 && nhDetailStrength > 0.0001) {
     vec3 nhMetersPosition = vNHPosition * nhMetersPerUnit;
     float wavelength = max(0.4, nhDetailMeters * 0.22);
@@ -415,13 +427,19 @@ const GLSL_ALBEDO = `
     vec2 ormDx = dFdx(vRoughnessMapUv), ormDy = dFdy(vRoughnessMapUv);
     vec2 normDx = dFdx(vNormalMapUv), normDy = dFdy(vNormalMapUv);
     float visibility = 1.0 - smoothstep(0.28, 0.52, footprint);
+    float tileRatio = wavelength/max(nhTileMeters,0.001);
+    float tileFootprint = footprint*tileRatio;
+    float tileVisibility = nhTileReady*(1.0-smoothstep(0.18,0.42,tileFootprint));
+    // A texture-backed close pass replaces, rather than stacks on top of,
+    // the analytic close morphology. Mid-distance structure stays independent.
+    visibility *= 1.0-tileVisibility;
     float midWavelength = max(0.4, nhDetailMeters * 1.4);
     float midRatio = wavelength/midWavelength;
     float midFootprint = footprint*midRatio;
     float missing = nhBakeCellMeters > 0.0
       ? 1.0-smoothstep(2.0,3.5,midWavelength/nhBakeCellMeters) : 0.0;
     float midVisibility = missing*(1.0-smoothstep(0.25,0.52,midFootprint));
-    if (visibility > 0.0 || midVisibility > 0.0) {
+    if (visibility > 0.0 || midVisibility > 0.0 || tileVisibility > 0.0) {
       vec4 packedORM = textureGrad(roughnessMap, vRoughnessMapUv, ormDx, ormDy);
       float vegetation = textureGrad(normalMap, vNormalMapUv, normDx, normDy).a;
       vec3 rsv = vec3(packedORM.ba, vegetation);
@@ -457,6 +475,16 @@ const GLSL_ALBEDO = `
         nhAlphaShift += gain*(sa.alpha+sb.alpha+sc.alpha)/3.0;
         nhReliefDelta += (gain*wavelength/span) * vec2(sb.height-sa.height, sc.height-sa.height);
       }
+      if (tileVisibility > 0.0) {
+        NHTileSurface local = nhTileTriplanar(p*tileRatio,pDx*tileRatio,pDy*tileRatio,layers);
+        float gain = tileVisibility*nhDetailStrength;
+        tintDelta += gain*local.tint;
+        nhAlphaShift += gain*local.alpha;
+        // Project the tile's metric surface gradient into screen derivatives
+        // and let the shared normal pass transform it to view space.
+        nhReliefDelta += gain*wavelength*vec2(dot(local.gradient,pDx),dot(local.gradient,pDy));
+        nhTileOcclusion = 1.0-clamp(local.cavity*tileVisibility*nhTileAO*min(1.0,nhDetailStrength),0.0,0.45);
+      }
       diffuseColor.rgb = clamp(diffuseColor.rgb*(1.0 + tintDelta), 0.0, 1.0);
     }
   }
@@ -466,6 +494,14 @@ const GLSL_ALBEDO = `
 const GLSL_ROUGHNESS = `
 #if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
   roughnessFactor = sqrt(clamp(roughnessFactor*roughnessFactor + nhAlphaShift, 0.04, 1.0));
+#endif
+`;
+
+const GLSL_TILE_AO = `
+#if defined(USE_MAP) && defined(USE_ROUGHNESSMAP) && defined(USE_NORMALMAP)
+  // Local cavities affect indirect illumination, never the unlit albedo or direct sun.
+  reflectedLight.indirectDiffuse *= nhTileOcclusion;
+  reflectedLight.indirectSpecular *= mix(1.0,nhTileOcclusion,roughnessFactor);
 #endif
 `;
 
@@ -482,7 +518,7 @@ const GLSL_NORMAL = `
       vec3 gradient = (nhReliefDelta.x*rx + nhReliefDelta.y*ry)/determinant;
       // Smoothly limit the added near-field relief to a 33-degree
       // tilt. A grazing view cannot turn a subpixel grain into a black spike.
-      const float limit = 0.65;
+      float limit = mix(0.65,0.90,nhTileReady);
       gradient *= limit*inversesqrt(limit*limit + dot(gradient,gradient));
       normal = normalize(normal - gradient);
     }
@@ -498,8 +534,9 @@ export function installNearFieldShader(shader: ShaderTarget, uniforms: NearField
     }
     shader.fragmentShader = shader.fragmentShader.replace(marker, marker + '\n' + code);
   };
-  shader.fragmentShader = GLSL_PARS + '\n' + shader.fragmentShader;
+  shader.fragmentShader = GLSL_PARS + '\n' + DETAIL_TEXTURE_GLSL + '\n' + shader.fragmentShader;
   replace('#include <map_fragment>', GLSL_ALBEDO);
   replace('#include <roughnessmap_fragment>', GLSL_ROUGHNESS);
   replace('#include <normal_fragment_maps>', GLSL_NORMAL);
+  replace('#include <aomap_fragment>', GLSL_TILE_AO);
 }
