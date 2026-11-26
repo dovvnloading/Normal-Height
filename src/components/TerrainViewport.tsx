@@ -54,7 +54,8 @@ import { colorizeMap, sampleSlope } from '../render/maps';
 import { pbrPixels, resolveSurface, layerColorHex, SPLAT_LAYERS } from '../materials/pbr';
 import { requestPBR } from '../materials/pbrClient';
 import type { PBRChannel, PBRMaps } from '../materials/pbr';
-import { DEFAULT_SPLINE_PATH, insertSplinePoint, sampleSpline } from '../model/splines';
+import { DEFAULT_SPLINE_PATH } from '../model/splines';
+import { SplineMapOverlay } from './SplineMapOverlay';
 import type { SplinePoint } from '../model/splines';
 import type { TerrainNode } from '../model/types';
 import { BrushFeedback } from '../render/brushFeedback';
@@ -337,29 +338,12 @@ function MapCanvas({
     distance: number; middleX: number; middleY: number;
     zoom: number; offset: { x: number; y: number };
   } | null>(null);
-  const [draftSpline, setDraftSpline] = useState<SplinePoint[] | null>(null);
-  const draftRef = useRef<SplinePoint[] | null>(null);
-  const handleDrag = useRef<{ index: number; pointer: number } | null>(null);
-  const splinePoints = draftSpline ?? spline?.path ?? DEFAULT_SPLINE_PATH;
-  const splineCurve = useMemo(
-    () => spline ? sampleSpline(splinePoints, 22) : [],
-    [spline, splinePoints],
-  );
   const layerSize = Math.max(1, Math.min(dimensions.width - 84, dimensions.height - 82)) * zoom;
   const layerLeft = (dimensions.width - layerSize) / 2 + offset.x;
   const layerTop = (dimensions.height - layerSize) / 2 + offset.y;
   // The SVG is authored in normalized tile units. Cancel map zoom for pin
   // glyphs so they retain a stable on-screen pixel size at 0.35x–12x.
   const markerScale = 1000 / Math.max(1, layerSize);
-  const layerRef = useRef<HTMLDivElement>(null);
-  const pointFromEvent = (event: React.PointerEvent): SplinePoint => {
-    const bounds = layerRef.current!.getBoundingClientRect();
-    return {
-      x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))),
-      y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / Math.max(1, bounds.height))),
-    };
-  };
-
   const mapPoint = (clientX: number, clientY: number): TerrainPoint | null => {
     if (!field) return null;
     const rect = hostRef.current?.getBoundingClientRect();
@@ -910,117 +894,21 @@ function MapCanvas({
         <button type="button" onClick={() => setMapAttempt(value => value + 1)}>Retry map</button>
       </div>}
       {spline && (
-        <div
-          ref={layerRef}
-          className={`nh-spline-layer ${splineEditing ? 'is-editing' : ''} ${spline.params.mode === 'ridge' ? 'is-ridge' : 'is-river'}`}
-          style={{ left: layerLeft, top: layerTop, width: layerSize, height: layerSize }}
-          aria-label="Spline path overlay"
-          onPointerDown={(event) => {
-            if (!splineEditing) return;
-            if (event.button === 1 || event.button === 2) {
-              event.preventDefault();
-              drag.current = {
-                x: event.clientX, y: event.clientY,
-                startX: offset.x, startY: offset.y,
-              };
-              event.currentTarget.setPointerCapture(event.pointerId);
-              return;
-            }
-            if (event.button !== 0 || event.target !== event.currentTarget) return;
-            event.preventDefault();
-            onSplinePath(insertSplinePoint(splinePoints, pointFromEvent(event)));
-          }}
-          onPointerMove={(event) => {
-            if (drag.current) {
-              setOffset({
-                x: drag.current.startX + event.clientX - drag.current.x,
-                y: drag.current.startY + event.clientY - drag.current.y,
-              });
-            }
-          }}
-          onPointerUp={(event) => {
-            drag.current = null;
-            if (event.currentTarget.hasPointerCapture(event.pointerId))
-              event.currentTarget.releasePointerCapture(event.pointerId);
-          }}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          <svg
-            className="nh-spline-drawing"
-            viewBox="0 0 1000 1000"
-            preserveAspectRatio="none"
-            aria-hidden="true"
-          >
-            <polyline
-              className="nh-spline-outline"
-              points={splineCurve.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')}
-              fill="none"
-              vectorEffect="non-scaling-stroke"
-              strokeWidth={5}
-            />
-            <polyline
-              className="nh-spline-centerline"
-              points={splineCurve.map((p) => `${p.x * 1000},${p.y * 1000}`).join(' ')}
-              fill="none"
-              vectorEffect="non-scaling-stroke"
-              strokeWidth={2.5}
-            />
-          </svg>
-          {splineEditing && splinePoints.map((point, index) => (
-            <button
-              key={index}
-              type="button"
-              className={`nh-spline-handle ${handleDrag.current?.index === index ? 'is-dragging' : ''}`}
-              aria-label={`Move spline point ${index + 1}`}
-              title={`${index === 0 ? 'Headwater' : index === splinePoints.length - 1 ? 'Outlet' : 'Control point'} ${index + 1} · ${Math.round(point.x * 100)}% E, ${Math.round(point.y * 100)}% S. Double-click to remove.`}
-              style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
-              onPointerDown={(event) => {
-                if (event.button !== 0) return;
-                event.stopPropagation();
-                event.preventDefault();
-                handleDrag.current = { index, pointer: event.pointerId };
-                draftRef.current = splinePoints.map((p) => ({ ...p }));
-                event.currentTarget.setPointerCapture(event.pointerId);
-              }}
-              onPointerMove={(event) => {
-                if (handleDrag.current?.pointer !== event.pointerId ||
-                  handleDrag.current.index !== index) return;
-                const next = (draftRef.current ?? splinePoints).map((p) => ({ ...p }));
-                next[index] = pointFromEvent(event);
-                draftRef.current = next;
-                setDraftSpline(next);
-              }}
-              onPointerUp={(event) => {
-                if (handleDrag.current?.pointer !== event.pointerId) return;
-                event.stopPropagation();
-                const next = draftRef.current;
-                handleDrag.current = null;
-                draftRef.current = null;
-                if (event.currentTarget.hasPointerCapture(event.pointerId))
-                  event.currentTarget.releasePointerCapture(event.pointerId);
-                if (next) onSplinePath(next);
-                setDraftSpline(null);
-              }}
-              onPointerCancel={() => {
-                handleDrag.current = null;
-                draftRef.current = null;
-                setDraftSpline(null);
-              }}
-              onDoubleClick={(event) => {
-                event.stopPropagation();
-                if (splinePoints.length > 2)
-                  onSplinePath(splinePoints.filter((_, i) => i !== index).map((p) => ({ ...p })));
-              }}
-            >
-              <span>{index + 1}</span>
-            </button>
-          ))}
-          {splineEditing && (
-            <span className="nh-spline-edit-hint">
-              {spline.params.mode === 'ridge' ? 'RIDGE' : 'RIVER'} · Move points · Click to add · Middle/right drag to pan
-            </span>
-          )}
-        </div>
+        <SplineMapOverlay
+          key={spline.id}
+          points={spline.path ?? DEFAULT_SPLINE_PATH}
+          editing={splineEditing}
+          ridge={spline.params.mode === 'ridge'}
+          width={Number(spline.params.width ?? 0.016)}
+          falloff={Number(spline.params.falloff ?? 3)}
+          strength={Number(spline.params.strength ?? 0.09)}
+          left={layerLeft}
+          top={layerTop}
+          size={layerSize}
+          frame={{ zoom, offset }}
+          onFrameChange={(next) => { setZoom(next.zoom); setOffset(next.offset); }}
+          onPathChange={onSplinePath}
+        />
       )}
       <div className="nh-map-scale">
         {(project.worldSize / 1000).toLocaleString(undefined, { maximumFractionDigits: 2 })} ×{' '}
