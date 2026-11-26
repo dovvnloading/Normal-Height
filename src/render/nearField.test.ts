@@ -3,7 +3,7 @@ import { createProject } from '../model/presets';
 import { generatePBR, pbrPixels } from '../materials/pbr';
 import type { HeightField } from '../model/types';
 import { packPreviewPBR, unpackPreviewWeights } from './previewMaterial';
-import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender } from './nearField';
+import { createNearFieldUniforms, installNearFieldShader, nearFieldShouldRender, middleDetailWeight, middleDetailWavelength } from './nearField';
 
 function heightField(n = 32): HeightField {
   const height = new Float32Array(n * n);
@@ -58,6 +58,19 @@ describe('close-range shader integration', () => {
     expect(nearFieldShouldRender(true, 1, 0, 36, metersPerUnit, 24)).toBe(false);
   });
 
+  it('fills an under-resolved intermediate band but does not double it on a fine bake', () => {
+    expect(middleDetailWavelength(24)).toBeCloseTo(33.6);
+    expect(middleDetailWeight(24, 32)).toBe(1);
+    expect(middleDetailWeight(24, 4)).toBe(0);
+    expect(middleDetailWeight(24, 12)).toBeGreaterThan(0);
+    expect(middleDetailWeight(24, 12)).toBeLessThan(1);
+    expect(middleDetailWeight(24, 0)).toBe(0);
+    const mpu = 8000 / 2.6;
+    expect(nearFieldShouldRender(true, 4, 900, 36, mpu, 24, 16)).toBe(true);
+    expect(nearFieldShouldRender(true, 4, 900, 36, mpu, 24, 4)).toBe(false);
+    expect(nearFieldShouldRender(false, 4, 900, 36, mpu, 24, 16)).toBe(false);
+  });
+
   it('injects bounded world-space albedo, roughness and view-space micro-normal stages', () => {
     const uniforms = createNearFieldUniforms();
     const shader = {
@@ -74,6 +87,9 @@ describe('close-range shader integration', () => {
     expect(shader.fragmentShader).toContain('sc.height-sa.height');
     expect(shader.fragmentShader).toContain('nhDetailStrength > 0.0001');
     expect(shader.fragmentShader).toContain('nhPulseIntegral');
+    expect(shader.uniforms.nhBakeCellMeters).toBe(uniforms.nhBakeCellMeters);
+    expect(shader.fragmentShader).toContain('NHSurface nhMiddle');
+    expect(shader.fragmentShader).toContain('midWavelength/nhBakeCellMeters');
     expect(() => installNearFieldShader({ fragmentShader: 'unknown', uniforms: {} }, uniforms))
       .toThrow('shader does not contain');
   });

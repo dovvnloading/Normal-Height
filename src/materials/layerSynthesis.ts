@@ -4,6 +4,7 @@ import type { TexelRect } from './materialRegion';
 import { createProjectPaintRaster, getPaintStrokes } from './paintLayers';
 import type { MaterialBuffers, SurfaceSettings } from './pbr';
 import { SurfaceFabric, rockReflectance } from './surfaceFabric';
+import { shapeNaturalContacts } from './materialContacts';
 import { createTerrainAnalyzer, diagnosticReference } from './terrainAnalysis';
 import type { TerrainFactors } from './terrainAnalysis';
 
@@ -149,6 +150,9 @@ function createSurfaceSampler(
     weights[1] = soil;
     weights[2] = vegetation;
     weights[3] = snow;
+    // Break up natural contacts before artist strokes are composited. The
+    // brush still owns its exact authored coverage, including pure fills.
+    shapeNaturalContacts(weights, fabric);
     result.elevation = elevation;
     result.worn = worn;
     result.wet = wet;
@@ -238,24 +242,30 @@ export function synthesizeMaterials(
           0.21 * fabric.grit +
           0.19 * worn -
           0.2 * deposited +
-          (arid ? 0.11 * fabric.sorting : 0),
+          (arid ? 0.11 * fabric.sorting : 0) + 0.15 * fabric.facies,
       );
       const litter = clamp(
-        (arid ? 0.37 : 0.13) + fabric.straw * 0.73 + 0.21 * elevation - 0.54 * wet,
+        (arid ? 0.37 : 0.13) + fabric.straw * 0.73 + 0.21 * elevation - 0.54 * wet
+          - 0.13 * fabric.facies,
       );
       const powder = clamp(
         0.64 + 0.21 * leeward + 0.29 * fabric.patch - 0.28 * fabric.scour + 0.13 * valley,
       );
-      const rockValue = (1 - 0.28 * fabric.joint + 0.12 * fabric.grit) * (1 - 0.23 * wet);
+      // Facies are pigment/constituent changes, not ambient shadows. A
+      // resistant pale face and dark mineral-rich matrix read differently
+      // under every light direction; wetting remains a separate response.
+      const rockValue = (1 - 0.28 * fabric.joint + 0.12 * fabric.grit + 0.18 * fabric.facies)
+        * (1 - 0.23 * wet);
       const soilValue =
         (1 +
           0.18 * fabric.formation +
           0.15 * fabric.patch +
           0.095 * fabric.sorting +
-          0.12 * fabric.grit) *
+          0.12 * fabric.grit - 0.17 * fabric.facies) *
         (1 - (arid ? 0.43 : 0.52) * wet);
       const plantValue =
-        (0.81 + 0.33 * fabric.hummock + 0.17 * fabric.fleck + 0.08 * fabric.grit) *
+        (0.81 + 0.33 * fabric.hummock + 0.17 * fabric.fleck + 0.08 * fabric.grit
+          + 0.14 * fabric.facies) *
         (1 - 0.15 * wet);
       for (let c = 0; c < 3; c++) {
         const rockColor = palette[0][c] * rockValue * rockReflectance(fabric, params.biome, c);
@@ -276,9 +286,12 @@ export function synthesizeMaterials(
 
       // Three.js uses alpha = perceptualRoughness². Area-average this GGX
       // parameter as a single-lobe approximation to the four substrate lobes.
-      const rr = clamp(0.85 - 0.19 * fabric.mineral + 0.1 * fabric.joint - 0.23 * wet);
-      const rs = clamp(0.96 - 0.19 * stone - 0.4 * wet + 0.018 * fabric.sorting);
-      const rv = clamp(0.77 + 0.15 * litter + 0.052 * fabric.hummock - 0.07 * wet);
+      const rr = clamp(0.85 - 0.19 * fabric.mineral + 0.1 * fabric.joint - 0.23 * wet
+        - 0.065 * fabric.facies - 0.045 * fabric.clasts, 0.24, 1);
+      const rs = clamp(0.96 - 0.19 * stone - 0.4 * wet + 0.018 * fabric.sorting
+        + 0.045 * fabric.facies, 0.28, 1);
+      const rv = clamp(0.77 + 0.15 * litter + 0.052 * fabric.hummock - 0.07 * wet
+        - 0.045 * fabric.facies, 0.45, 1);
       const rn = clamp(0.48 + 0.35 * powder + 0.018 * fabric.scour);
       roughness[output] = Math.round(
         255 * Math.sqrt(rock * rr * rr + soil * rs * rs + vegetation * rv * rv + snow * rn * rn),

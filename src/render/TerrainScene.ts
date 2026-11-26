@@ -623,6 +623,7 @@ export class TerrainScene {
         this.camera.fov,
         this.nearField.nhMetersPerUnit.value,
         this.nearField.nhDetailMeters.value,
+        this.nearField.nhBakeCellMeters.value,
       );
     const activeValue = activeMicro ? 1 : 0;
     if (this.nearField.nhNearFieldActive.value !== activeValue) {
@@ -1321,6 +1322,7 @@ export class TerrainScene {
     this.nearField.nhDetailStrength.value = surface.detailStrength;
     this.nearField.nhDetailSeed.value = (project.seed % 65521) / 911;
     const n = maps.resolution;
+    this.nearField.nhBakeCellMeters.value = project.worldSize / Math.max(1, n - 1);
     const anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
     const existing = this.pbrTextures;
     const tex = (index: number, rgba: Uint8ClampedArray, srgb = false) =>
