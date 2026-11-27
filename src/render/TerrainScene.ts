@@ -89,6 +89,9 @@ export class TerrainScene {
   private orthographic = false;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
+  private resizeFrame = 0;
+  private viewportWidth = 0;
+  private viewportHeight = 0;
   private readonly sun: THREE.DirectionalLight;
   private readonly hemisphere: THREE.HemisphereLight;
   // Allocate optional atmosphere and foliage resources only while enabled.
@@ -535,7 +538,15 @@ export class TerrainScene {
     this.inspectLine.renderOrder = 9;
     this.scene.add(this.inspectLine);
 
-    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver = new ResizeObserver(() => {
+      if (this.disposed || this.resizeFrame) return;
+      // Layout changes during observer delivery can trigger a skipped-cycle
+      // error in WebKit. Coalesce rendering work into the next frame instead.
+      this.resizeFrame = requestAnimationFrame(() => {
+        this.resizeFrame = 0;
+        this.resize();
+      });
+    });
     this.resizeObserver.observe(host);
     this.onContextLost = (event) => {
       event.preventDefault();
@@ -578,9 +589,13 @@ export class TerrainScene {
     const width = this.host.clientWidth,
       height = this.host.clientHeight;
     if (width < 1 || height < 1) return;
+    if (width === this.viewportWidth && height === this.viewportHeight) return;
+    this.viewportWidth = width;
+    this.viewportHeight = height;
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(width, height);
+    // The host stylesheet owns canvas layout; only resize the drawing buffer.
+    this.renderer.setSize(width, height, false);
     // Keep the default and reset views fitted when the dock changes size, while
     // retaining an artist's orbit, pan, or zoom once they have adjusted it.
     if (this.terrain && !this.cameraAdjusted) this.fitCamera();
@@ -1640,6 +1655,8 @@ export class TerrainScene {
     this.slopeTexture = null;
     this.pbrTextures = [];
     cancelAnimationFrame(this.animation);
+    cancelAnimationFrame(this.resizeFrame);
+    this.resizeFrame = 0;
     if (!this.contextLost && this.gpuPending.length) {
       const gl = this.renderer.getContext() as WebGL2RenderingContext;
       for (const query of this.gpuPending) gl.deleteQuery(query);

@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "qualification": "Single clean-source CPU World PBR export; not maximum-size or hardware-matrix qualification",
+  "date": "2026-11-27",
+  "source": {
+    "revision": "badda48f4acdfa9dfe10a6e7792353a09a1b999f",
+    "dirty": false,
+    "source": "git"
+  },
+  "command": "node scripts/nh.mjs build examples/production-alpine.nhterrain.json --out alpine-world.zip --samples 1024 --format raw32 --maps basecolor,roughness,ao,orm,splat,curvature,materialNormalGL,materialNormalDX,detailNormalGL,relief --json",
+  "environment": {
+    "node": "v24.22.3",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "rendererUsed": false,
+    "hardwarePerformanceCertified": false
+  },
+  "input": {
+    "file": "examples/production-alpine.nhterrain.json",
+    "sha256": "3e7ebd4c2ffef95c55e0be94ec7863f42d9d6fea5b4aa09bbc6cd7dede65aad7",
+    "world": {
+      "version": 1,
+      "domain": {
+        "originX": -2000,
+        "originZ": -2000,
+        "width": 8000,
+        "depth": 8000,
+        "cellsX": 1024,
+        "cellsZ": 1024,
+        "heightScale": 2400,
+        "datum": 0,
+        "boundary": "closed"
+      },
+      "tileCells": 128,
+      "globalResolution": 128,
+      "backend": "cpu-reference"
+    },
+    "samples": [1024, 1024],
+    "maps": [
+      "height",
+      "basecolor",
+      "roughness",
+      "ao",
+      "orm",
+      "splat",
+      "curvature",
+      "materialNormalGL",
+      "materialNormalDX",
+      "detailNormalGL",
+      "relief"
+    ]
+  },
+  "measured": {
+    "elapsedMilliseconds": 41671.481366,
+    "peakProcessRssBytes": 561393664,
+    "scope": "Single process high-water RSS, including source loading and earlier operations; not live-buffer estimates or a process memory cap.",
+    "node": "v24.22.3",
+    "platform": "linux",
+    "architecture": "x64",
+    "elapsedSecondsIncludingStartup": 42.86497028099984,
+    "userCpuSeconds": 26.649064,
+    "systemCpuSeconds": 2.286118
+  },
+  "estimate": {
+    "archiveBytes": 52454790,
+    "peakBytes": 99107388,
+    "retainedArchiveBytes": 0,
+    "tileCount": 64,
+    "tileIntervals": 128,
+    "sampleCountIncludingBorders": 1062961,
+    "budgetBytes": 536870912
+  },
+  "verification": {
+    "archiveBytes": 21037498,
+    "expandedBytes": 20936630,
+    "files": 707,
+    "tiles": 64,
+    "verifiedMapFiles": 704,
+    "dimensions": [1024, 1024],
+    "profile": "generic",
+    "build": {
+      "revision": "badda48f4acdfa9dfe10a6e7792353a09a1b999f",
+      "dirty": false,
+      "source": "git"
+    },
+    "importQualification": "Generic data contract validated. Blender bridge qualification is recorded separately in docs/BLENDER.md; other external application imports remain unverified.",
+    "warnings": [
+      "Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion.",
+      "Legacy global solvers retain their authored outer-boundary rules; the World boundary setting does not rewrite their numerical model.",
+      "Legacy sources are anchored to the whole authored domain; the origin georeferences those fields. Studio v3 sources are anchored to absolute world coordinates.",
+      "Preflight counts live data buffers and archive retention. JavaScript runtime, garbage collection, renderer and GPU memory are additional; the budget is not a process memory cap.",
+      "Material elevation distribution and diagnostic normalization use the selected export region. A different crop can change climate-dependent coverage. The material appearance is model 4; shader-only close detail is not baked into these terrain maps."
+    ]
+  },
+  "archiveSHA256": "9926ab13d1f105a9b4cc83e8b2c9570343f96dbb900e2bdf0fbb76bd1f160c87",
+  "limits": [
+    "One sample run in a shared Linux execution environment; no warm/cold distribution or hardware guarantee.",
+    "Global erosion/thermal stages retain the recorded reference resolution.",
+    "The live-allocation admission budget is not an OS process-memory cap.",
+    "The archive includes source provenance; byte equality across different source revisions is not expected."
+  ]
+}

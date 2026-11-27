@@ -113,7 +113,7 @@ The Chromium runs exercise production workers and decoded package/image data. Th
 
 `WorldExportEstimate.peakBytes` is an estimate of live export allocations and retained archive data. It is **not** an OS process-memory cap. JavaScript runtime/source-loading overhead, garbage-collector timing, the renderer and GPU allocations are additional. CLI success output records elapsed time and process high-water RSS separately.
 
-An exploratory dirty-tree 1024² Alpine build generated 64 tiles and 704 map files, verified a 21,037,044-byte package, took 45.13 seconds including CLI startup/verification, and reached 565,055,488 bytes of process RSS. Its live-data estimate was 99,107,388 bytes. This is a single CPU run, not a device-wide guarantee or a final-commit benchmark. Do not present the allocation estimate as measured memory or extrapolate it into an 8K PBR guarantee.
+A clean-source 1024² Alpine build at `badda48f4acdfa9dfe10a6e7792353a09a1b999f` generated 64 tiles and 704 map files, verified a 21,037,498-byte package, took **42.86 seconds** including CLI startup/verification, and reached **561,393,664 bytes (535.4 MiB)** of process RSS. Its live-data estimate was 99,107,388 bytes. The [machine-readable report](benchmarks/production-world-pbr-1k.json) records the exact command, source, input/archive hashes, dimensions, reference resolution and measurements. This is a single CPU run in a shared environment, not a device-wide guarantee. Do not present the allocation estimate as measured memory or extrapolate it into an 8K PBR guarantee.
 
 ## Gap register
 

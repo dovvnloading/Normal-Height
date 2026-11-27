@@ -78,6 +78,7 @@ test('designer exports a painted rectangular world with PBR and named masks thro
   await expect(
     page.getByRole('contentinfo').getByText('Terrain ready', { exact: true }),
   ).toBeVisible();
+  expect(errors, 'Project import and initial terrain layout').toEqual([]);
   await page.getByRole('button', { name: '2D map', exact: true }).click();
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
   const studio = page.getByRole('region', { name: 'World Studio', exact: true });
