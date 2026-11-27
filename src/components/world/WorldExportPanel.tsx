@@ -36,6 +36,7 @@ import {
 } from '../../export/worldExportPlan';
 import './WorldExportPanel.css';
 import { WORLD_MATERIAL_MAPS } from '../../materials/worldMaterial';
+import { WORLD_GENESIS_MAPS } from '../../export/genesisExport';
 
 type Region = Pick<WorldGridRequest, 'startX' | 'startZ' | 'cellsX' | 'cellsZ'>;
 export interface WorldExportActivity {
@@ -305,6 +306,7 @@ export function WorldExportPanel({
   const [diagnostics, setDiagnostics] = useState(true);
   const [normals, setNormals] = useState(true);
   const [materials, setMaterials] = useState(false);
+  const [genesisMaps, setGenesisMaps] = useState(false);
   const [maskIds, setMaskIds] = useState<string[]>([]);
   const [state, setState] = useState<WorldExportState>({ status: 'idle' });
   const [receipt, setReceipt] = useState<WorldExportReceipt | null>(null);
@@ -402,7 +404,10 @@ export function WorldExportPanel({
       tileIntervals: world.tileCells,
       diagnostics,
       normals,
-      maps: materials ? [...WORLD_MATERIAL_MAPS] : [],
+      maps: [
+        ...(materials ? WORLD_MATERIAL_MAPS : []),
+        ...(genesisMaps && world.genesis?.enabled ? WORLD_GENESIS_MAPS : []),
+      ],
       masks: project.graph.nodes
         .filter(
           (node) =>
@@ -421,6 +426,7 @@ export function WorldExportPanel({
     diagnostics,
     normals,
     materials,
+    genesisMaps,
     maskIds,
   ]);
   const shownOptions = busy && lockedOptions ? lockedOptions : options;
@@ -722,6 +728,23 @@ export function WorldExportPanel({
               <small>
                 Base color, roughness, AO, ORM, coverage, curvature, GL/DX normals, detail normal &
                 signed relief. Includes saved paint and continuous tile borders.
+              </small>
+            </span>
+          </label>
+          <label className="we-export-check">
+            <input
+              type="checkbox"
+              aria-label="Genesis geological fields"
+              disabled={!shownOptions.world.genesis?.enabled}
+              checked={!!shownOptions.maps?.includes('hardness')}
+              onChange={(event) => setGenesisMaps(event.target.checked)}
+            />
+            <span>
+              Genesis geological fields
+              <small>
+                {shownOptions.world.genesis?.enabled
+                  ? 'Rock hardness, categorical lithology, uplift and incision in metres, drainage area in m², and channel weights. Float32 RAW and UInt8 rock IDs.'
+                  : 'Enable World Genesis in Simulate to include physical geology and drainage fields.'}
               </small>
             </span>
           </label>

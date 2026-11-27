@@ -1,5 +1,30 @@
 import type { WorldBackend } from '../../model/world';
 import type { WorldMassBudget } from './hydrology';
+import type { GenesisReport } from '../genesis/types';
+
+/** Formation diagnostics at the Genesis stage, before optional World transport.
+ * Hardness and lithology are sampled analytically at physical coordinates and
+ * reconstructed elevation. The other channels interpolate the whole-domain
+ * solve; reported reference spacing is independent of output sample spacing.
+ */
+export interface WorldGenesisFields {
+  hardness: Float32Array;
+  lithology: Uint8Array;
+  uplift: Float32Array;
+  incision: Float32Array;
+  drainageArea: Float32Array;
+  channel: Float32Array;
+  report: GenesisReport;
+}
+
+export const GENESIS_CHANNELS = [
+  'hardness',
+  'lithology',
+  'uplift',
+  'incision',
+  'drainageArea',
+  'channel',
+] as const;
 
 export interface WorldSampleGrid {
   startX: number;
@@ -60,6 +85,7 @@ export interface WorldRegionResult {
   backend: 'cpu-reference' | 'webgpu';
   estimatedPeakBytes: number;
   transportBudget?: WorldMassBudget;
+  genesis?: WorldGenesisFields;
 }
 
 export interface WorldRunOptions {

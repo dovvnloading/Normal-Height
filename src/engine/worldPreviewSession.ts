@@ -1,5 +1,6 @@
 import { describeWorldGraph, prepareWorldEvaluation } from './world';
 import type { PreparedWorldEvaluation, WorldRegionResult } from './world';
+import { GENESIS_CHANNELS } from './world/types';
 import type {
   WorldPreviewProgress,
   WorldWorkerRequest,
@@ -93,9 +94,13 @@ export class WorldPreviewSession {
     const transfer = (result: WorldRegionResult): Transferable[] =>
       [
         ...new Set(
-          [result.heights, result.flow, result.wear, result.deposition].map(
-            (array) => array.buffer,
-          ),
+          [
+            result.heights,
+            result.flow,
+            result.wear,
+            result.deposition,
+            ...(result.genesis ? GENESIS_CHANNELS.map((key) => result.genesis![key]) : []),
+          ].map((array) => array.buffer),
         ),
       ].filter((buffer): buffer is ArrayBuffer => buffer instanceof ArrayBuffer);
 

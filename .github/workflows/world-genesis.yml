@@ -1,0 +1,61 @@
+name: World Genesis acceptance
+
+on:
+  pull_request:
+    branches: [main, feat/production-foundation]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/nh.mjs'
+      - 'package*.json'
+      - 'playwright*.config.ts'
+      - 'vite.config.ts'
+      - '.github/workflows/world-genesis.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: world-genesis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formation:
+    name: Geological formation and production workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Verify numerical, project, cache and archive contracts
+        run: npm test
+      - name: Compile the production application and workers
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Verify formation, cancellation, diagnostics and existing World delivery
+        run: >-
+          npx playwright test
+          tests/e2e/world-genesis.spec.ts
+          tests/e2e/world-workspace.spec.ts
+          tests/e2e/world-cache.spec.ts
+          tests/e2e/world-transport.spec.ts
+          tests/e2e/world-material-export.spec.ts
+          --workers=1 --retries=0
+      - name: Preserve formation reports and visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-genesis-acceptance-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14

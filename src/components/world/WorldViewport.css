@@ -529,6 +529,39 @@
 .wv-ramp-deposition {
   background: linear-gradient(90deg, #1a312b, #8cdea5);
 }
+.wv-ramp-hardness {
+  background: linear-gradient(90deg, #e3c58b, #977867, #374555);
+}
+.wv-ramp-uplift {
+  background: linear-gradient(90deg, #2f86b9, #e0e6db, #da8944);
+}
+.wv-ramp-incision {
+  background: linear-gradient(90deg, #2f2a25, #ad6a41, #f7d193);
+}
+.wv-ramp-drainageArea {
+  background: linear-gradient(90deg, #192c35, #2e7489 70%, #a9ece8);
+}
+.wv-ramp-channel {
+  background: linear-gradient(90deg, #1d2e34, #30697e 40%, #9be5f0);
+}
+.wv-lithology-key {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 8px;
+  color: var(--wv-muted);
+  font-size: 9px;
+}
+.wv-lithology-key > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.wv-lithology-key i {
+  width: 10px;
+  height: 8px;
+  border: 1px solid rgb(0 0 0 / 12%);
+  border-radius: 2px;
+}
 .wv-ramp-slope {
   background: linear-gradient(90deg, #294945, #6ba081, #ddc87c, #dd874b, #963e44);
 }

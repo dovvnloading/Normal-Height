@@ -2,13 +2,16 @@ name: Blender World bridge qualification
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feat/production-foundation]
     paths:
       - 'integrations/blender/**'
       - 'src/cli/**'
       - 'scripts/nh.mjs'
       - 'src/export/worldExport.ts'
       - 'src/engine/world/**'
+      - 'src/engine/genesis/**'
+      - 'src/model/genesis.ts'
+      - 'src/export/genesisExport.ts'
       - 'src/engine/heightImport.ts'
       - 'src/materials/**'
       - 'src/model/heightRaster.ts'
@@ -31,6 +34,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 24

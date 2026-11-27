@@ -34,6 +34,7 @@ export function worldEvaluationSignature(
       globalResolution: world.globalResolution,
       backend: world.backend,
       transport: world.transport?.enabled ? world.transport : undefined,
+      genesis: world.genesis?.enabled ? world.genesis : undefined,
     },
   });
 }

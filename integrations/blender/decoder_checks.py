@@ -106,6 +106,24 @@ def run_decoder_checks(source, directory):
 
     malformed("shared-edge-disagreement.zip", break_shared_height, "shared height")
     checks.extend(("missing tile rejection", "physical-origin consistency", "shared-height mismatch despite valid CRC"))
+    def break_lithology(entries, manifest):
+        record = next(item for item in manifest["tiles"][0]["files"] if item["map"] == "lithology")
+        data = bytearray(entries[record["path"]])
+        data[0] = 255
+        entries[record["path"]] = bytes(data)
+        record["crc32"] = f"{binascii.crc32(data) & 0xFFFFFFFF:08x}"
+
+    def truncate_lithology(entries, manifest):
+        record = next(item for item in manifest["tiles"][0]["files"] if item["map"] == "lithology")
+        data = entries[record["path"]][:-1]
+        entries[record["path"]] = data
+        record["bytes"] = len(data)
+        record["crc32"] = f"{binascii.crc32(data) & 0xFFFFFFFF:08x}"
+
+    malformed("unknown-lithology-id.zip", break_lithology, "rock ID")
+    malformed("truncated-lithology.zip", truncate_lithology, "RAW8 dimensions")
+    malformed("wrong-genesis-units.zip", lambda _e, m: m["genesis"]["channels"]["drainageArea"].__setitem__("units", "meters"), "Genesis channel units")
+    checks.extend(("Genesis categorical IDs despite valid CRC", "Genesis RAW8 exact dimensions", "Genesis physical map units"))
     raw = bytearray(Path(source).read_bytes())
     end = raw.rfind(b"PK\x05\x06")
     struct.pack_into("<HH", raw, end + 8, 8193, 8193)

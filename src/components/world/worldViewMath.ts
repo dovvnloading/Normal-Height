@@ -1,11 +1,30 @@
 import type { WorldRegionResult } from '../../engine/world';
 import type { WorldGridRequest } from '../../hooks/worldProtocol';
 import type { WorldDefinition } from '../../model/world';
+import type { WorldDisplayLayer } from '../../model/worldViewSettings';
+import { GENESIS_LITHOLOGIES } from '../../model/genesis';
 
 export type WorldRegion = Pick<WorldGridRequest, 'startX' | 'startZ' | 'cellsX' | 'cellsZ'>;
 export type WorldViewMode = 'map' | 'terrain' | 'split';
-export type WorldLayer =
-  'relief' | 'elevation' | 'flow' | 'wear' | 'deposition' | 'slope' | 'contours' | 'aspect';
+export type WorldLayer = WorldDisplayLayer;
+export type GenesisLayer =
+  'hardness' | 'lithology' | 'uplift' | 'incision' | 'drainageArea' | 'channel';
+export const GENESIS_LAYERS: readonly GenesisLayer[] = [
+  'hardness',
+  'lithology',
+  'uplift',
+  'incision',
+  'drainageArea',
+  'channel',
+];
+export const isGenesisLayer = (layer: WorldLayer): layer is GenesisLayer =>
+  GENESIS_LAYERS.includes(layer as GenesisLayer);
+const GENESIS_LITHOLOGY_COLORS: Record<number, number[]> = Object.fromEntries(
+  GENESIS_LITHOLOGIES.map(({ id, color }) => [
+    id,
+    [1, 3, 5].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16)),
+  ]),
+);
 
 export interface WorldSnapshot {
   result: WorldRegionResult;
@@ -26,6 +45,15 @@ export interface WorldProbe {
   flow: number;
   wear: number;
   deposition: number;
+  /** Physical Genesis reference diagnostics, before optional World transport. */
+  genesis?: {
+    hardness: number;
+    lithology: number;
+    uplift: number;
+    incision: number;
+    drainageArea: number;
+    channel: number;
+  };
 }
 
 export interface WorldCamera {
@@ -45,6 +73,7 @@ export interface WorldLayerScale {
   flow: number;
   wear: number;
   deposition: number;
+  genesis?: { uplift: number; incision: number; drainageArea: number };
 }
 
 export const WORLD_LAYERS: ReadonlyArray<{
@@ -72,6 +101,16 @@ export const WORLD_LAYERS: ReadonlyArray<{
     label: 'Deposition',
     description: 'Relative deposition diagnostic from the evaluated graph',
   },
+  { id: 'hardness', label: 'Rock hardness', description: 'Resistance to Genesis incision · 0–1' },
+  { id: 'lithology', label: 'Lithology', description: 'Exposed rock layers · discrete classes' },
+  { id: 'uplift', label: 'Tectonic uplift', description: 'Accumulated Genesis uplift in metres' },
+  { id: 'incision', label: 'Channel incision', description: 'Genesis bedrock erosion in metres' },
+  {
+    id: 'drainageArea',
+    label: 'Drainage area',
+    description: 'Upstream contributing area in square metres',
+  },
+  { id: 'channel', label: 'River network', description: 'Drainage-derived channel strength · 0–1' },
 ];
 
 export const clamp = (value: number, low: number, high: number) =>
@@ -312,6 +351,7 @@ export function sampleWorldProbe(snapshot: WorldSnapshot, x: number, z: number):
   const v = clamp(((z - bounds.z) / bounds.depth) * (field.height - 1), 0, field.height - 1);
   const get = (data: Float32Array) => sampleArray(data, field.width, field.height, u, v);
   const { dx, dz } = sampleGradient(field, world, u, v);
+  const genesis = field.genesis;
   return {
     x,
     z,
@@ -323,6 +363,19 @@ export function sampleWorldProbe(snapshot: WorldSnapshot, x: number, z: number):
     flow: get(field.flow),
     wear: get(field.wear),
     deposition: get(field.deposition),
+    ...(genesis
+      ? {
+          genesis: {
+            hardness: get(genesis.hardness),
+            // A rock ID is a class, not a scalar; interpolation invents materials.
+            lithology: genesis.lithology[Math.round(v) * field.width + Math.round(u)],
+            uplift: get(genesis.uplift),
+            incision: get(genesis.incision),
+            drainageArea: get(genesis.drainageArea),
+            channel: get(genesis.channel),
+          },
+        }
+      : {}),
   };
 }
 
@@ -341,11 +394,17 @@ export function worldLayerScale(snapshot: WorldSnapshot): WorldLayerScale {
   const { result, world } = snapshot;
   let flow = 0,
     wear = 0,
-    deposition = 0;
+    deposition = 0,
+    uplift = 0,
+    incision = 0;
   for (let i = 0; i < result.heights.length; i++) {
     flow = Math.max(flow, result.flow[i]);
     wear = Math.max(wear, result.wear[i]);
     deposition = Math.max(deposition, result.deposition[i]);
+    if (result.genesis) {
+      uplift = Math.max(uplift, Math.abs(result.genesis.uplift[i]));
+      incision = Math.max(incision, result.genesis.incision[i]);
+    }
   }
   return {
     min: world.domain.datum + result.min * world.domain.heightScale,
@@ -353,6 +412,16 @@ export function worldLayerScale(snapshot: WorldSnapshot): WorldLayerScale {
     flow,
     wear,
     deposition,
+    ...(result.genesis
+      ? {
+          genesis: {
+            uplift,
+            incision,
+            // Drainage always uses the whole-domain maximum, even for a cropped preview.
+            drainageArea: result.genesis.report.maxDrainageAreaM2,
+          },
+        }
+      : {}),
   };
 }
 
@@ -487,6 +556,49 @@ export function worldMapPixels(
         const base = [224, 230, 219];
         const end = delta < 0 ? [47, 134, 185] : [218, 137, 68];
         rgb = base.map((c, k) => c + (end[k] - c) * t);
+      } else if (isGenesisLayer(layer)) {
+        const genesis = field.genesis;
+        if (!genesis) {
+          // A missing diagnostic is not a measurement of zero.
+          rgb = (x + z) % 12 < 6 ? [103, 112, 109] : [112, 121, 118];
+        } else if (layer === 'lithology') {
+          rgb = GENESIS_LITHOLOGY_COLORS[genesis.lithology[i]] ?? [126, 126, 126];
+        } else if (layer === 'hardness') {
+          rgb = rampColor(genesis.hardness[i], [
+            [0, 227, 197, 139],
+            [0.5, 151, 120, 103],
+            [1, 55, 69, 85],
+          ]);
+        } else if (layer === 'drainageArea') {
+          const maximum = scale.genesis?.drainageArea ?? genesis.report.maxDrainageAreaM2;
+          const v =
+            Math.log1p(Math.max(0, genesis.drainageArea[i])) / Math.max(1e-10, Math.log1p(maximum));
+          rgb = rampColor(v, [
+            [0, 25, 44, 53],
+            [0.7, 46, 116, 137],
+            [1, 169, 236, 232],
+          ]);
+        } else if (layer === 'channel') {
+          rgb = rampColor(genesis.channel[i], [
+            [0, 29, 46, 52],
+            [0.4, 48, 105, 126],
+            [1, 155, 229, 240],
+          ]);
+        } else if (layer === 'incision') {
+          const maximum = scale.genesis?.incision ?? 0;
+          rgb = rampColor(genesis.incision[i] / Math.max(maximum, 1e-10), [
+            [0, 47, 42, 37],
+            [0.5, 173, 106, 65],
+            [1, 247, 209, 147],
+          ]);
+        } else {
+          const maximum = scale.genesis?.uplift ?? 0;
+          rgb = rampColor(0.5 + (0.5 * genesis.uplift[i]) / Math.max(maximum, 1e-10), [
+            [0, 47, 134, 185],
+            [0.5, 224, 230, 219],
+            [1, 218, 137, 68],
+          ]);
+        }
       } else if (layer === 'flow') {
         const v =
           Math.log1p(Math.max(0, field.flow[i]) * 80) /

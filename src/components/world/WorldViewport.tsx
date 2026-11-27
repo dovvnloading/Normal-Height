@@ -23,6 +23,7 @@ import type { WorldRegionResult } from '../../engine/world';
 import type { WorldGridRequest } from '../../hooks/worldProtocol';
 import type { WorldDefinition } from '../../model/world';
 import type { TerrainProject } from '../../model/types';
+import { GENESIS_LITHOLOGIES } from '../../model/genesis';
 import {
   WORLD_LAYERS,
   canCompareWorldSnapshots,
@@ -30,6 +31,7 @@ import {
   fitWorldCamera,
   formatWorldDistance,
   frameWorldRegion,
+  isGenesisLayer,
   niceWorldDistance,
   sampleWorldProbe,
   screenToWorld,
@@ -203,6 +205,28 @@ function Legend({
   }
   if (layer === 'contours')
     note = `${formatWorldDistance(niceWorldDistance((scale.max - scale.min) / 12))} contour interval`;
+  if (layer === 'hardness') {
+    low = '0 · softer';
+    high = '1 · harder';
+    note = 'Genesis erosion resistance';
+  }
+  if (layer === 'channel') {
+    low = '0';
+    high = '1';
+    note = 'Genesis channel strength';
+  }
+  if (layer === 'uplift' || layer === 'incision') {
+    low = layer === 'uplift' ? `−${numeric(scale.genesis?.uplift ?? 0, 2)} m` : '0 m';
+    high = `${numeric(scale.genesis?.[layer] ?? 0, 2)} m`;
+    note = layer === 'uplift' ? 'Downthrow ← tectonics → uplift' : 'Genesis reference erosion';
+  }
+  if (layer === 'drainageArea') {
+    low = '0 m²';
+    const area = scale.genesis?.drainageArea ?? 0;
+    high = area >= 1e6 ? `${numeric(area / 1e6, 2)} km²` : `${numeric(area, 0)} m²`;
+    note = 'Whole-world area · logarithmic';
+  }
+  if (layer === 'lithology') note = 'Genesis exposed rock classes';
   if (difference !== undefined) {
     low = `−${numeric(difference, 2)} m`;
     high = `+${numeric(difference, 2)} m`;
@@ -217,13 +241,26 @@ function Legend({
         <span>{difference !== undefined ? 'Elevation change' : description}</span>
         <small>{note}</small>
       </div>
-      <div
-        className={`wv-legend-ramp wv-ramp-${difference !== undefined ? 'difference' : layer}`}
-      />
-      <div className="wv-legend-range">
-        <span>{low}</span>
-        <span>{high}</span>
-      </div>
+      {layer === 'lithology' && difference === undefined ? (
+        <div className="wv-lithology-key">
+          {GENESIS_LITHOLOGIES.map((rock) => (
+            <span key={rock.id}>
+              <i style={{ backgroundColor: rock.color }} />
+              {rock.label}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div
+            className={`wv-legend-ramp wv-ramp-${difference !== undefined ? 'difference' : layer}`}
+          />
+          <div className="wv-legend-range">
+            <span>{low}</span>
+            <span>{high}</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -304,7 +341,7 @@ export function WorldViewport({
     snapshot && comparison && canCompareWorldSnapshots(snapshot, comparison),
   );
   const scaleSnapshot = usableOverview ?? snapshot;
-  const baseScale = useMemo(
+  const baseScale = useMemo<WorldLayerScale>(
     () =>
       scaleSnapshot
         ? worldLayerScale(scaleSnapshot)
@@ -319,7 +356,7 @@ export function WorldViewport({
     () => (comparison ? worldLayerScale(comparison) : null),
     [comparison?.result, comparison?.world.domain.heightScale, comparison?.world.domain.datum],
   );
-  const scale = useMemo(() => {
+  const scale = useMemo<WorldLayerScale>(() => {
     if (!comparisonScale || !compatibleComparison || compareMode === 'off') return baseScale;
     return {
       min: Math.min(baseScale.min, comparisonScale.min),
@@ -327,6 +364,24 @@ export function WorldViewport({
       flow: Math.max(baseScale.flow, comparisonScale.flow),
       wear: Math.max(baseScale.wear, comparisonScale.wear),
       deposition: Math.max(baseScale.deposition, comparisonScale.deposition),
+      ...(baseScale.genesis || comparisonScale.genesis
+        ? {
+            genesis: {
+              uplift: Math.max(
+                baseScale.genesis?.uplift ?? 0,
+                comparisonScale.genesis?.uplift ?? 0,
+              ),
+              incision: Math.max(
+                baseScale.genesis?.incision ?? 0,
+                comparisonScale.genesis?.incision ?? 0,
+              ),
+              drainageArea: Math.max(
+                baseScale.genesis?.drainageArea ?? 0,
+                comparisonScale.genesis?.drainageArea ?? 0,
+              ),
+            },
+          }
+        : {}),
     };
   }, [baseScale, comparisonScale, compatibleComparison, compareMode]);
   const difference = useMemo(
@@ -719,6 +774,7 @@ export function WorldViewport({
   };
   const layerLabel = WORLD_LAYERS.find((item) => item.id === layer)?.label;
   const selectedBounds = region ? worldGridBounds(world, region) : null;
+  const missingGenesis = isGenesisLayer(layer) && !snapshot?.result.genesis && !difference;
   const noDiagnostic =
     layer === 'flow'
       ? scale.flow === 0
@@ -793,6 +849,12 @@ export function WorldViewport({
                   type="button"
                   key={item.id}
                   aria-pressed={layer === item.id}
+                  disabled={isGenesisLayer(item.id) && !snapshot?.result.genesis}
+                  title={
+                    isGenesisLayer(item.id) && !snapshot?.result.genesis
+                      ? 'Enable World Genesis in Simulate and build to inspect this layer.'
+                      : item.description
+                  }
                   onClick={() => {
                     onLayerChange(item.id);
                     setLayersVisible(false);
@@ -1238,6 +1300,12 @@ export function WorldViewport({
               <p className="wv-diagnostic-note">
                 <ArrowDown size={12} />
                 No {layer === 'wear' ? 'erosion' : layer} signal in this evaluated field.
+              </p>
+            )}
+            {missingGenesis && snapshot && (
+              <p className="wv-diagnostic-note">
+                <Layers size={12} />
+                Enable World Genesis in Simulate and build to inspect this layer.
               </p>
             )}
           </div>

@@ -348,6 +348,12 @@ def main():
     for format_ in ("raw16", "png16", "raw32"):
         result = bridge.import_world(directory / f"world-{format_}.zip")
         report["formats"][format_] = check_import(result)
+        genesis = result.archive.manifest["genesis"]
+        assert genesis["report"]["incisedVolumeM3"] > 0
+        assert genesis["report"]["upliftVolumeM3"] > 0
+        assert set(genesis["channels"]) == {"hardness", "lithology", "uplift", "incision", "drainageArea", "channel"}
+        report["formats"][format_]["genesisAlgorithm"] = genesis["algorithm"]
+        report["formats"][format_]["genesisFieldsVerified"] = sorted(genesis["channels"])
         report["signatures"][result.collection.name] = collection_signature(result.collection)
         assert scene_state()["unit_scale"] == original_selection["unit_scale"]
         assert scene_state()["active"] == original_selection["active"]

@@ -15,6 +15,7 @@ import type { WorldExportOptions, WorldExportMap } from '../export/worldExport';
 import type { TerrainProject } from '../model/types';
 import { verifyWorldArchive } from './archive';
 import { WORLD_MATERIAL_MAPS } from '../materials/worldMaterial';
+import { WORLD_GENESIS_MAPS } from '../export/genesisExport';
 
 const MiB = 1024 * 1024;
 const HELP = `Normal Height production CLI
@@ -37,6 +38,10 @@ Build options:
   --force                        Atomically replace an existing output
   --json                         One machine-readable result on stdout
 
+Genesis maps (requires enabled Genesis in the project):
+  hardness,lithology,uplift,incision,drainageArea,channel
+  Physical values use Float32 RAW; lithology uses categorical UInt8 RAW.
+
 Builds use the CPU reference backend and the same World exporter as the app.
 Output is verified before atomic publication. Existing files are never replaced
 without --force. Unreal and Unity profiles retain their import qualification status.
@@ -51,6 +56,7 @@ const MAP_NAMES = new Set([
   'normalGL',
   'slope',
   ...WORLD_MATERIAL_MAPS,
+  ...WORLD_GENESIS_MAPS,
 ]);
 const FLAGS: Record<string, ReadonlySet<string>> = {
   validate: new Set(['json']),

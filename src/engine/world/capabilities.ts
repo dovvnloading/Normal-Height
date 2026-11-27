@@ -1,20 +1,13 @@
-import type { TerrainNode, TerrainProject } from '../../model/types';
+import type { TerrainProject } from '../../model/types';
 import { validateWorldDefinition } from '../../model/world';
 import type { WorldDefinition } from '../../model/world';
 import { compileGraph } from '../plan/graph';
 import type { WorldCapability, WorldStageReport } from './types';
-
-export function isWorldGlobalNode(node: TerrainNode, hasInput: boolean): boolean {
-  if (node.bypassed && hasInput) return false;
-  return (
-    node.kind === 'mountain' ||
-    (node.kind === 'noise' && node.params.noiseModel !== 'v3') ||
-    node.kind === 'hydraulic' ||
-    node.kind === 'thermal' ||
-    node.kind === 'spline' ||
-    node.kind === 'coast'
-  );
-}
+import { GENESIS_ALGORITHM_VERSION } from '../../model/genesis';
+import { genesisGridSize } from '../genesis';
+import { isWorldGlobalNode } from './classification';
+import { estimateWorldPreparation, WORLD_PREPARATION_BUDGET_MESSAGE } from './memory';
+export { isWorldGlobalNode } from './classification';
 
 /** Classify every reachable stage before starting allocations or global solves. */
 export function describeWorldGraph(
@@ -29,6 +22,12 @@ export function describeWorldGraph(
     warnings: string[] = [];
   const transportEnabled =
     !!world.transport?.enabled && !(previewNodeId && plan.target.kind !== 'output');
+  const genesisEnabled =
+    !!world.genesis?.enabled && !(previewNodeId && plan.target.kind !== 'output');
+  if (world.genesis?.enabled && !genesisEnabled)
+    warnings.push(
+      'Intermediate and mask previews show authored graph fields before World Genesis.',
+    );
   if (world.transport?.enabled && !transportEnabled)
     warnings.push(
       'Intermediate and mask previews show authored graph fields before optional post-graph World transport.',
@@ -79,6 +78,28 @@ export function describeWorldGraph(
   });
   const graphGlobal = stages.some((stage) => stage.mode !== 'native');
   const legacyGlobal = stages.some((stage) => stage.mode !== 'native' && stage.kind !== 'coast');
+  if (genesisEnabled) {
+    const grid = genesisGridSize(d, world.globalResolution);
+    stages.push({
+      nodeId: 'world-genesis',
+      label: 'World Genesis',
+      kind: 'world-genesis',
+      scope: 'iterative',
+      mode: 'reconstructed',
+      backend: 'cpu-reference',
+      algorithmVersion: GENESIS_ALGORITHM_VERSION,
+      samplesX: grid.width,
+      samplesZ: grid.height,
+      spacingX: d.width / (grid.width - 1),
+      spacingZ: d.depth / (grid.height - 1),
+      simulationResolution: world.globalResolution,
+      reason:
+        'One whole-domain coarse-to-fine geological solve: uplift, exposed rock competence, implicit stream-power incision and hillslope diffusion. Its displacement is reconstructed over native input; geology is sampled at physical coordinates.',
+    });
+    warnings.push(
+      'World Genesis is an artistic landscape evolution model. Its removed-rock and uplift volumes describe the reference grids, not sediment export or a calibrated geological age. Drainage and incision diagnostics precede optional World transport.',
+    );
+  }
   if (transportEnabled) {
     stages.push({
       nodeId: 'world-transport',
@@ -100,14 +121,14 @@ export function describeWorldGraph(
       'World transport is an experimental artistic CPU reference, not a calibrated geophysical simulation. Its mass budget is measured before fine-grid reconstruction.',
     );
   }
-  const requiresGlobal = graphGlobal || transportEnabled;
+  const requiresGlobal = graphGlobal || transportEnabled || genesisEnabled;
   let reason: string | undefined;
   if (legacyGlobal && d.width !== d.depth)
     reason =
       'This graph contains square-domain legacy/global stages. Use equal width and depth, or a Noise Studio graph with native World stages for a rectangular world.';
   if (requiresGlobal && d.boundary === 'periodic')
     reason =
-      'Global transport/legacy solvers do not implement periodic boundary conditions. Use an open or closed domain, or disable global stages.';
+      'World Genesis, global transport and legacy solvers do not implement periodic boundary conditions. Use an open or closed domain, or disable global stages.';
   if (d.boundary === 'periodic' && stages.some((stage) => stage.kind === 'heightImport'))
     reason =
       'Imported rasters require an open or closed World domain. Their authored opposite borders are not assumed to be periodic.';
@@ -116,6 +137,8 @@ export function describeWorldGraph(
     .find((node) => node.kind === 'heightImport' && !node.raster);
   if (missingImport)
     reason = `Choose a heightmap file in the inspector for “${missingImport.label}”.`;
+  if (!reason && !estimateWorldPreparation(project, world, previewNodeId).supported)
+    reason = WORLD_PREPARATION_BUDGET_MESSAGE;
   if (requiresGlobal)
     warnings.push(
       'Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion.',

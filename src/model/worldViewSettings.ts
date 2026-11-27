@@ -4,7 +4,20 @@ import type { WorldDefinition } from './world';
 export type WorldWorkspaceMode = 'explore' | 'setup' | 'simulate' | 'analyze' | 'deliver';
 export type WorldPresentation = 'map' | 'terrain' | 'split';
 export type WorldDisplayLayer =
-  'relief' | 'elevation' | 'flow' | 'wear' | 'deposition' | 'slope' | 'contours' | 'aspect';
+  | 'relief'
+  | 'elevation'
+  | 'flow'
+  | 'wear'
+  | 'deposition'
+  | 'slope'
+  | 'contours'
+  | 'aspect'
+  | 'hardness'
+  | 'lithology'
+  | 'uplift'
+  | 'incision'
+  | 'drainageArea'
+  | 'channel';
 export interface WorldViewSettings {
   mode: WorldWorkspaceMode;
   presentation: WorldPresentation;
@@ -39,9 +52,22 @@ export function parseWorldViewSettings(value: unknown): WorldViewSettings {
   if (['map', 'terrain', 'split'].includes(String(input.presentation)))
     result.presentation = input.presentation as WorldPresentation;
   if (
-    ['relief', 'elevation', 'flow', 'wear', 'deposition', 'slope', 'contours', 'aspect'].includes(
-      String(input.layer),
-    )
+    [
+      'relief',
+      'elevation',
+      'flow',
+      'wear',
+      'deposition',
+      'slope',
+      'contours',
+      'aspect',
+      'hardness',
+      'lithology',
+      'uplift',
+      'incision',
+      'drainageArea',
+      'channel',
+    ].includes(String(input.layer))
   )
     result.layer = input.layer as WorldDisplayLayer;
   if (typeof input.panelWidth === 'number' && Number.isFinite(input.panelWidth))

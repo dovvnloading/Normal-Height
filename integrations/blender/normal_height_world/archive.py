@@ -25,6 +25,10 @@ MAX_ENTRY_BYTES = 64 * 1024 * 1024
 MAX_ENTRIES = 8192
 MAX_MANIFEST_BYTES = 8 * 1024 * 1024
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+GENESIS_FIELDS = {
+    "hardness": "unitless", "lithology": "category-id", "uplift": "meters",
+    "incision": "meters", "drainageArea": "square-meters", "channel": "unitless",
+}
 
 
 class WorldImportError(ValueError):
@@ -269,6 +273,22 @@ class WorldArchive:
                 project.get("version") != 2 or project.get("world") != manifest.get("world") or
                 project.get("seed") != manifest.get("projectSeed")):
             raise WorldImportError("Unsupported World schema or mismatched embedded project.")
+        genesis_channels = {}
+        if manifest.get("genesis") is not None:
+            genesis = _object(manifest["genesis"], "Genesis provenance")
+            settings = _object(project.get("world", {}).get("genesis"), "Genesis settings")
+            if (genesis.get("schemaVersion") != 1 or genesis.get("algorithm") != "world-genesis-1" or
+                    genesis.get("fieldStage") != "before-world-transport" or
+                    settings.get("version") != 1 or settings.get("enabled") is not True or
+                    genesis.get("settings") != settings):
+                raise WorldImportError("Genesis provenance disagrees with the authored project.")
+            genesis_channels = _object(genesis.get("channels"), "Genesis channels")
+            for name, raw_channel in genesis_channels.items():
+                channel = _object(raw_channel, "Genesis channel")
+                if (name not in GENESIS_FIELDS or channel.get("units") != GENESIS_FIELDS[name] or
+                        channel.get("algorithm") != "world-genesis-1" or channel.get("components") != 1 or
+                        channel.get("storage") != ("raw8" if name == "lithology" else "raw32")):
+                    raise WorldImportError("Unsupported Genesis channel units or encoding.")
         axes = _object(manifest.get("axes"), "World axes")
         if axes.get("x") != "East/right" or axes.get("z") != "South/down" or not str(axes.get("rowOrder", "")).startswith("North first;"):
             raise WorldImportError("Unsupported World coordinate convention.")
@@ -337,6 +357,12 @@ class WorldArchive:
                     pixels = np.frombuffer(data, dtype="<f4").reshape(th, tw)
                     if not np.all(np.isfinite(pixels)):
                         raise WorldImportError("A Float32 map contains non-finite values.")
+                elif map_format == "raw8":
+                    if map_ != "lithology" or map_ not in genesis_channels or len(data) != tw * th:
+                        raise WorldImportError("Genesis lithology RAW8 dimensions or provenance are invalid.")
+                    pixels = np.frombuffer(data, dtype=np.uint8).reshape(th, tw)
+                    if np.any(pixels > 3):
+                        raise WorldImportError("A Genesis lithology map contains an unknown rock ID.")
                 elif map_format == "raw16":
                     if len(data) != tw * th * 2:
                         raise WorldImportError("RAW16 map byte count disagrees with its sample dimensions.")
@@ -345,6 +371,14 @@ class WorldArchive:
                     pixels = decode_png(data, tw, th, 16 if map_format == "png16" else 8, 0 if map_format == "png16" else 6)
                 else:
                     raise WorldImportError(f"Unsupported raster format: {map_format}.")
+                if map_ in GENESIS_FIELDS:
+                    descriptor = genesis_channels.get(map_)
+                    if descriptor is None or descriptor.get("storage") != map_format:
+                        raise WorldImportError("Genesis map encoding disagrees with its descriptor.")
+                    if map_ in ("hardness", "channel") and (np.any(pixels < 0) or np.any(pixels > 1)):
+                        raise WorldImportError("A Genesis weight map is outside its 0–1 range.")
+                    if map_ in ("incision", "drainageArea") and np.any(pixels < 0):
+                        raise WorldImportError("A physical Genesis map contains negative values.")
                 if map_ == "height":
                     if map_format != format_:
                         raise WorldImportError("A tile's height encoding disagrees with the common height format.")
@@ -364,6 +398,8 @@ class WorldArchive:
                     if map_format != "rgba8" or declared_format != expected_format:
                         raise WorldImportError(f"The {map_} material channel must be RGBA8.")
                     images[path] = data
+            if any(name not in by_map for name in genesis_channels):
+                raise WorldImportError("A tile is missing a declared Genesis map.")
             if "height" not in by_map:
                 raise WorldImportError("A tile has no height map.")
             tiles.append(Tile(address, (x0, z0), (tw, th), (tx, tz), by_map))

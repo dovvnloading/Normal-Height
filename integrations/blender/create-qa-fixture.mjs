@@ -20,6 +20,7 @@ const server = await createServer({
 try {
   const { createNode } = await server.ssrLoadModule('/src/model/registry.ts');
   const { createWorldDefinition } = await server.ssrLoadModule('/src/model/world.ts');
+  const { DEFAULT_GENESIS } = await server.ssrLoadModule('/src/model/genesis.ts');
   const { encodeSamples } = await server.ssrLoadModule('/src/model/heightRaster.ts');
   const { serializeProjectFile } = await server.ssrLoadModule('/src/model/projectStorage.ts');
   const { parseProject } = await server.ssrLoadModule('/src/model/project.ts');
@@ -77,6 +78,17 @@ try {
     datum: -17.5,
   };
   world.globalResolution = 64;
+  // Exercise actual geological evolution and categorical RAW8 ingestion in
+  // all three height-format imports, including saved/offline scene reopen.
+  world.genesis = {
+    ...DEFAULT_GENESIS,
+    enabled: true,
+    durationYears: 25000,
+    upliftMeters: 120,
+    upliftWidthMeters: 450,
+    strataThicknessMeters: 30,
+    iterations: 4,
+  };
   project = parseProject({ ...project, version: 2, world });
   const input = resolve(output, 'asymmetric-world.nhterrain.json');
   await writeFile(input, serializeProjectFile(project));
@@ -95,7 +107,7 @@ try {
         '--format',
         format,
         '--maps',
-        'basecolor,orm,detailNormalGL',
+        'basecolor,orm,detailNormalGL,hardness,lithology,uplift,incision,drainageArea,channel',
         '--tile-intervals',
         '16',
         '--force',

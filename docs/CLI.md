@@ -64,6 +64,14 @@ Height is always included. Additional comma-separated `--maps` names are:
 | `basecolor`, `roughness`, `ao`, `orm`, `splat`, `curvature`        | World material maps                                                |
 | `materialNormalGL`, `materialNormalDX`, `detailNormalGL`, `relief` | Material surface normals and relief                                |
 
+Genesis-enabled projects additionally accept `hardness,lithology,uplift,incision,drainageArea,channel`.
+These maps preserve physical values: Float32 little-endian RAW for continuous fields,
+UInt8 RAW for categorical lithology IDs. Uplift/incision use metres and drainage area
+uses square metres. They describe Genesis before optional World transport, and their
+sampling modes, exact units, versioned settings and numerical report are recorded in
+`manifest.genesis`. Requesting them without enabled Genesis fails preflight.
+See [World Genesis](WORLD_GENESIS.md) for examples and decoding details.
+
 Map availability and material constraints are validated by the same exporter as the UI. Request masks by the graph node ID, with a readable output name; repeat the option to include more than one:
 
 ```sh
@@ -120,6 +128,7 @@ Verification reads the ZIP central directory before decompression, then streams 
 - The archive contains precisely the listed tile/mask files plus its project, manifest and README.
 - The embedded project parses successfully and agrees with the manifest's World definition and seed.
 - Tile rows and columns cover the full sample grid with shared borders, without gaps or duplicate addresses.
+- When present, Genesis provenance agrees with the project; field descriptors, units, formats and dimensions are valid, every selected map appears on every tile, continuous data is finite and lithology IDs are recognized.
 
 No files are extracted to disk. ZIP64, multipart archives and encrypted entries are unsupported. Compressed input is limited to the existing archive profile below 2 GiB; expanded data is independently bounded by `--max-expanded-mib` (default 2048, capped below 2 GiB). Entries are capped at 64 MiB, the embedded project at 32 MiB, and the manifest at 16 MiB. Decompression stops if actual output exceeds its declaration, including archives that lie about their uncompressed size.
 

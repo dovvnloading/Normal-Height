@@ -1,6 +1,7 @@
 import { strToU8, Zip, ZipPassThrough, zlibSync } from 'fflate';
 import { prepareWorldEvaluation } from '../engine/world';
 import type { WorldRegionResult, WorldSampleGrid, WorldStageReport } from '../engine/world/types';
+import { estimateWorldPreparation, WORLD_PREPARATION_BUDGET_MESSAGE } from '../engine/world/memory';
 import { slug } from '../model/project';
 import {
   projectFileBytes,
@@ -24,11 +25,28 @@ import type { BuildInfo } from '../model/buildInfo';
 import type { TerrainProject } from '../model/types';
 import { validateWorldDefinition } from '../model/world';
 import type { WorldDefinition } from '../model/world';
+import { GENESIS_ALGORITHM_VERSION, GENESIS_LITHOLOGIES } from '../model/genesis';
+import type { GenesisReport } from '../engine/genesis/types';
+import { estimateGenesisPeakBytes } from '../engine/genesis';
+import {
+  WORLD_GENESIS_MAPS,
+  genesisMapDescriptor,
+  isWorldGenesisMap,
+  type WorldGenesisMap,
+  type GenesisMapDescriptor,
+} from './genesisExport';
 
 export type WorldExportFormat = 'png16' | 'raw16' | 'raw32';
 export type WorldExportProfile = 'generic' | 'unreal' | 'unity';
 export type WorldExportMap =
-  'height' | 'flow' | 'wear' | 'deposition' | 'normalGL' | 'slope' | WorldMaterialMap;
+  | 'height'
+  | 'flow'
+  | 'wear'
+  | 'deposition'
+  | 'normalGL'
+  | 'slope'
+  | WorldMaterialMap
+  | WorldGenesisMap;
 export interface WorldExportOptions {
   project: TerrainProject;
   world: WorldDefinition;
@@ -117,6 +135,17 @@ export interface WorldExportManifest {
     channels: Partial<Record<WorldMaterialMap, FieldDescriptor>>;
     paint: string;
   };
+  genesis?: {
+    schemaVersion: 1;
+    algorithm: typeof GENESIS_ALGORITHM_VERSION;
+    settings: NonNullable<WorldDefinition['genesis']>;
+    report: GenesisReport;
+    fieldStage: 'before-world-transport';
+    coordinates: string;
+    sampling: string;
+    channels: Partial<Record<WorldGenesisMap, GenesisMapDescriptor>>;
+    lithologies: typeof GENESIS_LITHOLOGIES;
+  };
   warnings: string[];
   checksum: string;
 }
@@ -152,6 +181,7 @@ const MAPS: WorldExportMap[] = [
   'normalGL',
   'slope',
   ...WORLD_MATERIAL_MAPS,
+  ...WORLD_GENESIS_MAPS,
 ];
 const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
   let c = n;
@@ -234,6 +264,8 @@ function validateOptions(options: WorldExportOptions) {
     throw new Error('The Unreal profile uses 16-bit PNG or unsigned 16-bit RAW.');
   if ((options.maps || []).some((map) => !MAPS.includes(map)))
     throw new Error('Unknown world export map.');
+  if (options.maps?.some(isWorldGenesisMap) && !options.world.genesis?.enabled)
+    throw new Error('Enable World Genesis before exporting geological fields.');
   const tile = intervalsFor(options);
   if (!Number.isSafeInteger(tile) || tile < 16 || tile > 512)
     throw new Error('Export tiles must have between 16 and 512 intervals.');
@@ -298,7 +330,16 @@ export function estimateWorldExport(options: WorldExportOptions): WorldExportEst
     (options.format === 'raw32' ? 4 : 2) +
     maps
       .filter((map) => map !== 'height')
-      .reduce((sum, map) => sum + (map === 'normalGL' || isWorldMaterialMap(map) ? 4 : 2), 0) +
+      .reduce(
+        (sum, map) =>
+          sum +
+          (map === 'lithology'
+            ? 1
+            : map === 'normalGL' || isWorldMaterialMap(map) || isWorldGenesisMap(map)
+              ? 4
+              : 2),
+        0,
+      ) +
     (options.masks?.length || 0) * 2;
   const fileCount = tilesX * tilesZ * (maps.length + (options.masks?.length || 0));
   if (fileCount + 3 > 65534)
@@ -317,7 +358,15 @@ export function estimateWorldExport(options: WorldExportOptions): WorldExportEst
   // Material halos are sampled in up to 128² graph chunks even when the
   // encoded tiles are smaller. Budget the executed region, not the PNG size.
   const graphRegionSide = materials ? Math.max(tileIntervals + 3, 128) : tileIntervals + 3;
-  const tileBytes = graphRegionSide ** 2 * (32 + Math.min(graphNodes, 256) * 16);
+  const tileBytes =
+    graphRegionSide ** 2 *
+    (32 + Math.min(graphNodes, 256) * 16 + (options.world.genesis?.enabled ? 21 : 0));
+  // Genesis owns a bounded multiscale reference, while optional physical map
+  // delivery retains one no-halo tile alongside material analysis buffers.
+  const genesisBytes = options.world.genesis?.enabled
+    ? estimateGenesisPeakBytes(options.world.domain, options.world.globalResolution) +
+      (maps.some(isWorldGenesisMap) ? (tileIntervals + 1) ** 2 * 37 : 0)
+    : 0;
   const globalBytes =
     options.world.globalResolution ** 2 *
     (128 + Math.min(graphNodes, 256) * 16 + (options.world.transport?.enabled ? 224 : 0));
@@ -347,6 +396,7 @@ export function estimateWorldExport(options: WorldExportOptions): WorldExportEst
   const peakBytes = Math.ceil(
     64 * MiB +
       globalBytes +
+      genesisBytes +
       tileBytes +
       materialBytes +
       importBytes +
@@ -368,6 +418,11 @@ export function estimateWorldExport(options: WorldExportOptions): WorldExportEst
 }
 export function checkWorldExportBudget(options: WorldExportOptions): WorldExportEstimate {
   const estimate = estimateWorldExport(options);
+  if (!estimateWorldPreparation(options.project, options.world).supported)
+    throw new Error(WORLD_PREPARATION_BUDGET_MESSAGE);
+  for (const mask of options.masks ?? [])
+    if (!estimateWorldPreparation(options.project, options.world, mask.nodeId).supported)
+      throw new Error(`Mask “${mask.name}”: ${WORLD_PREPARATION_BUDGET_MESSAGE}`);
   if (estimate.archiveBytes > 2 ** 31 - 1)
     throw new Error(
       'This archive would exceed the supported 2 GiB ZIP profile. Export a smaller region or fewer maps.',
@@ -488,6 +543,10 @@ function scalar(result: WorldRegionResult, map: WorldExportMap, i: number, world
   if (map === 'flow') return result.flow[i];
   if (map === 'wear') return result.wear[i];
   if (map === 'deposition') return result.deposition[i];
+  if (isWorldGenesisMap(map)) {
+    if (!result.genesis) throw new Error('The prepared world did not produce Genesis fields.');
+    return result.genesis[map][i];
+  }
   throw new Error('A derived map needs its sampling halo.');
 }
 function assertNotAborted(signal?: AbortSignal) {
@@ -539,6 +598,7 @@ export async function streamWorldExport(
     wear: [Infinity, -Infinity],
     deposition: [Infinity, -Infinity],
     slope: [0, 90],
+    ...Object.fromEntries(WORLD_GENESIS_MAPS.map((map) => [map, [Infinity, -Infinity]])),
   };
   let lastStages: WorldStageReport[] = [],
     backend = 'cpu-reference';
@@ -588,13 +648,13 @@ export async function streamWorldExport(
     file: OutputFile,
     width: number,
     height: number,
-    format: WorldExportFormat | 'rgba8',
+    format: WorldExportFormat | 'rgba8' | 'raw8',
     values: (x: number, y: number, component?: number) => number,
     range: [number, number],
   ) => {
     const rgba = format === 'rgba8',
       png = format === 'png16' || rgba,
-      bytesPerSample = format === 'raw32' || rgba ? 4 : 2;
+      bytesPerSample = format === 'raw32' || rgba ? 4 : format === 'raw8' ? 1 : 2;
     // A tile is bounded to at most 513² samples. Compress its complete
     // scanlines together: this also avoids tiny final deflate-block failures
     // observed with streaming repetitive mask rows. The world remains streamed.
@@ -622,7 +682,11 @@ export async function streamWorldExport(
         for (let x = 0; x < width; x++) {
           const value = values(x, y0 + row);
           if (!Number.isFinite(value)) throw new Error('Export encountered a non-finite sample.');
-          if (format === 'raw32') {
+          if (format === 'raw8') {
+            if (!Number.isSafeInteger(value) || value < 0 || value > 255)
+              throw new Error('Categorical export requires an unsigned 8-bit integer ID.');
+            bytes[offset++] = value;
+          } else if (format === 'raw32') {
             if (!Number.isFinite(Math.fround(value)))
               throw new Error('Export sample exceeds the finite Float32 elevation range.');
             view.setFloat32(offset, value, true);
@@ -801,6 +865,25 @@ export async function streamWorldExport(
       checksum:
         'CRC32 per encoded file, lowercase hexadecimal; integrity check, not cryptographic authentication.',
     };
+    if (options.world.genesis?.enabled && prepared.genesisReport) {
+      manifest.genesis = {
+        schemaVersion: 1,
+        algorithm: GENESIS_ALGORITHM_VERSION,
+        settings: structuredClone(options.world.genesis),
+        report: structuredClone(prepared.genesisReport),
+        fieldStage: 'before-world-transport',
+        coordinates:
+          'The authored whole-world Cartesian domain in metres. Every tile and crop samples the same completed Genesis world; tile edges are never drainage outlets.',
+        sampling:
+          'Hardness and categorical lithology use the native physical geology sampler at reconstructed Genesis elevation and actual uplift; IDs are never interpolated. Accumulated uplift, incision, contributing area and channel weights are bilinearly reconstructed from the reported whole-domain reference. Output spacing does not create finer drainage or simulation detail. These fields describe Genesis before optional World transport.',
+        channels: Object.fromEntries(
+          maps
+            .filter(isWorldGenesisMap)
+            .map((map) => [map, genesisMapDescriptor(map, GENESIS_ALGORITHM_VERSION, ranges[map])]),
+        ),
+        lithologies: GENESIS_LITHOLOGIES,
+      };
+    }
     const materialRanges = {
       min: (range[0] - d.datum) / d.heightScale,
       span: Math.max(1e-8, (range[1] - range[0]) / d.heightScale),
@@ -843,7 +926,12 @@ export async function streamWorldExport(
       );
     }
     for (const map of maps)
-      if (!isWorldMaterialMap(map) && map !== 'height' && map !== 'normalGL')
+      if (
+        !isWorldMaterialMap(map) &&
+        !isWorldGenesisMap(map) &&
+        map !== 'height' &&
+        map !== 'normalGL'
+      )
         manifest.encoding.diagnosticRanges[map] = ranges[map];
     report(0.43, 'Encoding world maps', {
       phase: 'encode',
@@ -1039,23 +1127,33 @@ export async function streamWorldExport(
             { left, top: north, right: left + width, bottom: north + height },
           )
         : null;
+      // Geology maps need no material halo. Keeping their own bounded tile
+      // avoids mixing the last 128² analysis chunk with the assembled PBR field.
+      const genesisTile =
+        materials.length && maps.some(isWorldGenesisMap)
+          ? await prepared.sampleRegion(gridFor(options, x0, z0, width, height), { signal })
+          : undefined;
       for (const map of maps) {
         const format =
           map === 'height'
             ? options.format
-            : map === 'relief'
-              ? 'raw32'
-              : map === 'normalGL' || isWorldMaterialMap(map)
-                ? 'rgba8'
-                : 'png16';
+            : map === 'lithology'
+              ? 'raw8'
+              : map === 'relief' || isWorldGenesisMap(map)
+                ? 'raw32'
+                : map === 'normalGL' || isWorldMaterialMap(map)
+                  ? 'rgba8'
+                  : 'png16';
         const extension =
           format === 'png16' || format === 'rgba8'
             ? 'png'
             : format === 'raw32'
               ? 'f32.raw'
-              : options.profile === 'unity'
-                ? 'raw'
-                : 'r16';
+              : format === 'raw8'
+                ? 'u8.raw'
+                : options.profile === 'unity'
+                  ? 'raw'
+                  : 'r16';
         const path = `tiles/${map}_x${tile.x}_y${tile.z}.${extension}`,
           file = add(path);
         await encode(
@@ -1073,7 +1171,9 @@ export async function streamWorldExport(
                   const length = Math.hypot(gx, gz, 1);
                   return ((component === 0 ? -gx : component === 1 ? gz : 1) / length) * 0.5 + 0.5;
                 }
-                return scalar(result, map, sampleIndex(x, z), options.world);
+                return genesisTile && isWorldGenesisMap(map)
+                  ? scalar(genesisTile, map, z * width + x, options.world)
+                  : scalar(result, map, sampleIndex(x, z), options.world);
               },
           ranges[map] || [0, 1],
         );
@@ -1108,9 +1208,13 @@ export async function streamWorldExport(
         total: maskTileCount,
         unit: 'tiles',
       });
-      const maskWorld = options.world.transport?.enabled
-        ? { ...options.world, transport: { ...options.world.transport, enabled: false } }
-        : options.world;
+      const maskWorld = {
+        ...options.world,
+        ...(options.world.transport
+          ? { transport: { ...options.world.transport, enabled: false } }
+          : {}),
+        ...(options.world.genesis ? { genesis: { ...options.world.genesis, enabled: false } } : {}),
+      };
       const maskEngine = await prepareWorldEvaluation(options.project, maskWorld, {
         signal,
         previewNodeId: mask.nodeId,
@@ -1144,9 +1248,12 @@ export async function streamWorldExport(
         maskEngine.dispose();
       }
     }
-    if (options.world.transport?.enabled && options.masks?.length)
+    if (
+      (options.world.transport?.enabled || options.world.genesis?.enabled) &&
+      options.masks?.length
+    )
       manifest.warnings.push(
-        'Authored mask branches are evaluated before optional post-graph World transport. Scalar weights are not treated as elevations or eroded.',
+        'Authored mask branches are evaluated before optional post-graph Genesis and World transport. Scalar weights are not treated as elevations or eroded.',
       );
     prepared.dispose();
     report(0.97, 'Packing manifest, import notes and project', { phase: 'archive' });

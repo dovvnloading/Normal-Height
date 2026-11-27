@@ -10,7 +10,6 @@ import { reconstructionWeight } from '../erosionMask';
 import { sculptSpline } from '../spline';
 import { COAST_DEFAULTS, shapeCoast } from '../coast';
 import { createImportedHeightSampler } from '../heightImport';
-import { assertRasterBudget, rasterBytes } from '../../model/heightRaster';
 import { createPointwiseBackend } from '../gpu/pointwise';
 import type { ComputeCapability, PointwiseBackend, PointwiseOperation } from '../gpu/pointwise';
 import { createWorldNoiseSampler } from './noise';
@@ -18,12 +17,16 @@ import { quintic } from '../noiseStudio/math';
 import { gridIndex, gridSpacing, validateWorldGrid, worldCoordinate } from './grid';
 import { simulateWorldTransport } from './hydrology';
 import type { WorldMassBudget } from './hydrology';
+import { prepareGenesis, createGeologySampler, genesisGridSize } from '../genesis';
+import type { GenesisReport } from '../genesis/types';
+import { estimateWorldPreparation } from './memory';
 import type {
   WorldCapability,
   WorldRegionResult,
   WorldRunOptions,
   WorldSampleGrid,
   WorldStageReport,
+  WorldGenesisFields,
 } from './types';
 export { describeWorldGraph } from './capabilities';
 export * from './types';
@@ -64,6 +67,7 @@ export interface PreparedWorldEvaluation {
   readonly capability: WorldCapability;
   readonly computeCapability: ComputeCapability;
   readonly transportBudget?: WorldMassBudget;
+  readonly genesisReport?: GenesisReport;
   sampleRegion(grid: WorldSampleGrid, options?: WorldRunOptions): Promise<WorldRegionResult>;
   dispose(): void;
 }
@@ -164,27 +168,31 @@ export async function prepareWorldEvaluation(
     project.graph.nodes.find((node) => node.id === options.previewNodeId)?.kind !== 'output';
   if (excludedTransport && world.transport)
     world = { ...world, transport: { ...world.transport, enabled: false } };
+  const excludedGenesis =
+    !!world.genesis?.enabled &&
+    !!options.previewNodeId &&
+    project.graph.nodes.find((node) => node.id === options.previewNodeId)?.kind !== 'output';
+  if (excludedGenesis && world.genesis)
+    world = { ...world, genesis: { ...world.genesis, enabled: false } };
   const description = describeWorldGraph(project, world, options.previewNodeId);
   if (excludedTransport)
     description.capability.warnings.push(
       'Intermediate and mask previews show authored graph fields before optional post-graph World transport.',
     );
+  if (excludedGenesis)
+    description.capability.warnings.push(
+      'Intermediate and mask previews show authored graph fields before World Genesis.',
+    );
   if (!description.capability.supported) throw new Error(description.capability.reason);
   const plan = compileGraph(project, options.previewNodeId),
     d = world.domain,
     n = world.globalResolution;
-  const importedNodes = plan.stages
-    .map((stage) => plan.byId.get(stage.nodeId)!)
-    .filter((node) => node.kind === 'heightImport');
-  assertRasterBudget(importedNodes);
-  const importedBytes = importedNodes.reduce(
-    (sum, node) => sum + (node.raster ? rasterBytes(node.raster) : 0),
-    0,
-  );
-  const importScratchBytes = importedNodes.reduce(
-    (maximum, node) => Math.max(maximum, node.raster ? rasterBytes(node.raster) * 3 : 0),
-    0,
-  );
+  const {
+    importedBytes,
+    globalBytes,
+    scratchBytes: globalScratchBytes,
+  } = estimateWorldPreparation(project, world, options.previewNodeId);
+  const genesisGrid = genesisGridSize(d, n);
   const sampleCosts = new Map<string, number>();
   for (const stage of plan.stages) {
     const node = plan.byId.get(stage.nodeId)!;
@@ -197,42 +205,17 @@ export async function prepareWorldEvaluation(
       );
     sampleCosts.set(node.id, cost);
   }
-  const globalCount = description.stages.filter((stage) => stage.mode !== 'native').length;
-  const globalBytes = globalCount * n * n * 6 * 4;
-  let globalScratchBytes = Math.max(world.transport?.enabled ? n * n * 224 : 0, importScratchBytes);
-  for (const stage of plan.stages) {
-    const node = plan.byId.get(stage.nodeId)!;
-    if (!isGlobal(node, stage.inputs.length > 0)) continue;
-    let scratch = n * n * 24;
-    if (node.kind === 'hydraulic') {
-      const solver = ['landscape', 'fluid', 'hybrid'].includes(
-        String(node.params.method ?? 'landscape'),
-      )
-        ? Math.min(n, 512)
-        : n;
-      scratch = n * n * 64 + solver * solver * 224;
-    } else if (node.kind === 'thermal') scratch = n * n * 40;
-    else if (node.kind === 'spline') scratch = n * n * 56;
-    else if (node.kind === 'coast') scratch = n * n * 40 + (n + 1) * 32;
-    else if (
-      node.kind === 'mountain' &&
-      ['fluvial', 'orogenic'].includes(String(node.params.profile))
-    )
-      scratch = n * n * 160;
-    globalScratchBytes = Math.max(globalScratchBytes, scratch);
-  }
-  if (importedBytes + globalBytes + globalScratchBytes > WORLD_REGION_BUDGET)
-    throw new Error(
-      'The imported rasters and whole-domain reference/transport working fields exceed 128 MiB. Reduce the imported samples, global reference resolution or number of global stages.',
-    );
   const backend = options.pointwiseBackend ?? (await createPointwiseBackend(world.backend));
   const ownsBackend = !options.pointwiseBackend;
   let disposed = false,
     sampling = false;
   const samplers = new Map<string, Sampler>(),
     normalizers = new Map<string, number>();
-  const retained: Float32Array[] = [];
-  let transportBudget: WorldMassBudget | undefined, transportSampler: Sampler | undefined;
+  const retained: (Float32Array | Uint8Array)[] = [];
+  let transportBudget: WorldMassBudget | undefined, postSampler: Sampler | undefined;
+  let genesisReference: WorldGenesisFields | undefined;
+  let genesisSampler: Sampler | undefined;
+  let geology: ReturnType<typeof createGeologySampler> | undefined;
   const stageById = new Map(description.stages.map((stage) => [stage.nodeId, stage]));
   const check = (signal?: AbortSignal) => {
     if (disposed) throw new Error('This World evaluation has been disposed.');
@@ -302,6 +285,20 @@ export async function prepareWorldEvaluation(
       ((x - d.originX) / d.width) * (n - 1),
       ((z - d.originZ) / d.depth) * (n - 1),
     );
+  const interpolateGenesis = (values: ArrayLike<number>, x: number, z: number) => {
+    const { width, height } = genesisGrid;
+    const u = clamp(((x - d.originX) / d.width) * (width - 1), 0, width - 1);
+    const v = clamp(((z - d.originZ) / d.depth) * (height - 1), 0, height - 1);
+    const x0 = Math.floor(u),
+      z0 = Math.floor(v);
+    const x1 = Math.min(width - 1, x0 + 1),
+      z1 = Math.min(height - 1, z0 + 1);
+    return mix(
+      mix(values[z0 * width + x0], values[z0 * width + x1], u - x0),
+      mix(values[z1 * width + x0], values[z1 * width + x1], u - x0),
+      v - z0,
+    );
+  };
   const keep = (field: Channels) => {
     for (const key of channels) retained.push(field[key]);
   };
@@ -683,6 +680,66 @@ export async function prepareWorldEvaluation(
       });
       await tick();
     }
+    if (world.genesis?.enabled) {
+      check();
+      const sourceSampler = samplers.get(plan.target.id)!;
+      const seed = (Number(project.seed) || 0) >>> 0;
+      const formed = await prepareGenesis(
+        (x, z, dx, dz) => d.datum + sourceSampler(x, z, dx, dz)[0] * d.heightScale,
+        d,
+        n,
+        seed,
+        world.genesis,
+        {
+          signal: options.signal,
+          onProgress: (fraction, stage) => {
+            check();
+            options.onProgress?.(fraction, stage);
+            options.onProgressDetail?.({
+              phase: 'preparing',
+              stage,
+              nodeId: 'world-genesis',
+              progress: fraction,
+            });
+          },
+        },
+      );
+      check();
+      const delta = new Float32Array(formed.height.length);
+      for (let i = 0; i < delta.length; i++)
+        delta[i] = (formed.height[i] - formed.sourceHeight[i]) / d.heightScale;
+      genesisReference = {
+        hardness: formed.hardness,
+        lithology: formed.lithology,
+        uplift: formed.uplift,
+        incision: formed.incision,
+        drainageArea: formed.drainageArea,
+        channel: formed.channel,
+        report: structuredClone(formed.report),
+      };
+      const reference = genesisReference;
+      retained.push(
+        delta,
+        reference.hardness,
+        reference.lithology,
+        reference.uplift,
+        reference.incision,
+        reference.drainageArea,
+        reference.channel,
+      );
+      geology = createGeologySampler(d, seed, world.genesis);
+      genesisSampler = (x, z, dx, dz) => {
+        const source = sourceSampler(x, z, dx, dz);
+        return [
+          F(source[0] + interpolateGenesis(delta, x, z)),
+          F(interpolateGenesis(reference.drainageArea, x, z)),
+          F(source[2] + interpolateGenesis(reference.incision, x, z) / d.heightScale),
+          source[3],
+        ];
+      };
+      postSampler = genesisSampler;
+      samplers.set(plan.target.id, postSampler);
+    }
     if (world.transport?.enabled) {
       check();
       options.onProgress?.(0, 'World transport · preparing global field');
@@ -741,21 +798,27 @@ export async function prepareWorldEvaluation(
         deposition[i] = source.deposition[i] + transport.deposition[i] / d.heightScale;
       }
       retained.push(delta, flow, wear, deposition);
-      transportSampler = (x, z, dx, dz) => [
+      postSampler = (x, z, dx, dz) => [
         F(sourceSampler(x, z, dx, dz)[0] + interpolate(delta, x, z)),
         F(interpolate(flow, x, z)),
         F(interpolate(wear, x, z)),
         F(interpolate(deposition, x, z)),
       ];
-      samplers.set(plan.target.id, transportSampler);
+      samplers.set(plan.target.id, postSampler);
     }
     const hasFlow =
       !!world.transport?.enabled ||
+      !!world.genesis?.enabled ||
       plan.stages.some((stage) => {
         const node = plan.byId.get(stage.nodeId)!;
         return node.kind === 'hydraulic' && !node.bypassed;
       });
-    const outputFlowMax = hasFlow ? await normalize(plan.target.id, 'flow') : 0;
+    const outputFlowMax =
+      genesisReference && !world.transport?.enabled
+        ? genesisReference.drainageArea.reduce((maximum, value) => Math.max(maximum, value), 0)
+        : hasFlow
+          ? await normalize(plan.target.id, 'flow')
+          : 0;
     const retainedBytes =
       importedBytes +
       [...new Set(retained.map((array) => array.buffer))].reduce(
@@ -765,7 +828,7 @@ export async function prepareWorldEvaluation(
     const gpuEligible = new Set(
       plan.stages
         .filter((stage) => {
-          if (world.transport?.enabled) return false;
+          if (world.transport?.enabled || world.genesis?.enabled) return false;
           const node = plan.byId.get(stage.nodeId)!;
           // GPU results cannot feed a CPU spatial resampler or a precomputed global
           // stage: their boundaries must use one numerical implementation throughout.
@@ -816,6 +879,7 @@ export async function prepareWorldEvaluation(
       },
       computeCapability: backend.capability,
       transportBudget,
+      ...(genesisReference ? { genesisReport: structuredClone(genesisReference.report) } : {}),
       async sampleRegion(grid, run = {}) {
         check(run.signal);
         if (sampling)
@@ -826,7 +890,7 @@ export async function prepareWorldEvaluation(
         // typed-array snapshots and GPU upload/readback staging when selected.
         const peakBytes = Math.max(
           importedBytes + globalBytes + globalScratchBytes,
-          retainedBytes + count * 4 * (8 + 4 * plan.stages.length),
+          retainedBytes + count * (4 * (8 + 4 * plan.stages.length) + (genesisReference ? 42 : 0)),
         );
         if (peakBytes > WORLD_REGION_BUDGET)
           throw new Error(
@@ -849,7 +913,7 @@ export async function prepareWorldEvaluation(
             : { ...stage },
         );
         try {
-          for (let index = 0; !transportSampler && index < plan.stages.length; index++) {
+          for (let index = 0; !postSampler && index < plan.stages.length; index++) {
             check(run.signal);
             const stage = plan.stages[index],
               node = plan.byId.get(stage.nodeId)!;
@@ -942,24 +1006,69 @@ export async function prepareWorldEvaluation(
             detail(1, count, count, 'samples');
           }
           check(run.signal);
-          const output = transportSampler
-            ? await renderSampler(
-                transportSampler,
-                grid,
-                run.signal,
-                (fraction, completed, total) => {
-                  run.onProgress?.(fraction, 'World transport · reconstructing region');
-                  run.onProgressDetail?.({
-                    phase: 'sampling',
-                    stage: 'Reconstructing transported terrain',
-                    progress: fraction,
-                    completed,
-                    total,
-                    unit: 'rows',
-                  });
-                },
-              )
+          const output = postSampler
+            ? await renderSampler(postSampler, grid, run.signal, (fraction, completed, total) => {
+                run.onProgress?.(fraction, 'World formation · reconstructing region');
+                run.onProgressDetail?.({
+                  phase: 'sampling',
+                  stage: 'Reconstructing formed terrain',
+                  progress: fraction,
+                  completed,
+                  total,
+                  unit: 'rows',
+                });
+              })
             : fields.get(plan.target.id)!;
+          let genesis: WorldGenesisFields | undefined;
+          if (genesisReference && genesisSampler && geology) {
+            const reference = genesisReference;
+            genesis = {
+              hardness: new Float32Array(count),
+              lithology: new Uint8Array(count),
+              uplift: new Float32Array(count),
+              incision: new Float32Array(count),
+              drainageArea: new Float32Array(count),
+              channel: new Float32Array(count),
+              report: structuredClone(reference.report),
+            };
+            for (let row = 0; row < grid.samplesZ; row++) {
+              const j = gridIndex(d, grid, 'Z', row);
+              for (let col = 0; col < grid.samplesX; col++) {
+                const p = worldCoordinate(d, gridIndex(d, grid, 'X', col), j);
+                const i = row * grid.samplesX + col;
+                const uplift = interpolateGenesis(reference.uplift, p.x, p.z);
+                const elevation =
+                  d.datum +
+                  (world.transport?.enabled
+                    ? genesisSampler(p.x, p.z, dx, dz)[0]
+                    : output.height[i]) *
+                    d.heightScale;
+                const rock = geology.sample(p.x, p.z, elevation, uplift);
+                genesis.hardness[i] = rock.hardness;
+                genesis.lithology[i] = rock.lithology;
+                genesis.uplift[i] = uplift;
+                genesis.incision[i] = Math.max(0, interpolateGenesis(reference.incision, p.x, p.z));
+                genesis.drainageArea[i] = Math.max(
+                  0,
+                  interpolateGenesis(reference.drainageArea, p.x, p.z),
+                );
+                genesis.channel[i] = clamp(interpolateGenesis(reference.channel, p.x, p.z));
+              }
+              if ((row & 7) === 7 || row === grid.samplesZ - 1) {
+                check(run.signal);
+                run.onProgressDetail?.({
+                  phase: 'sampling',
+                  stage: 'Sampling geological fields',
+                  progress: (row + 1) / grid.samplesZ,
+                  completed: row + 1,
+                  total: grid.samplesZ,
+                  unit: 'rows',
+                });
+                await tick();
+              }
+            }
+          }
+          check(run.signal);
           let min = Infinity,
             max = -Infinity;
           for (const value of output.height) {
@@ -991,6 +1100,7 @@ export async function prepareWorldEvaluation(
               : 'cpu-reference',
             estimatedPeakBytes: peakBytes,
             ...(transportBudget ? { transportBudget: { ...transportBudget } } : {}),
+            ...(genesis ? { genesis } : {}),
           };
         } finally {
           sampling = false;
@@ -1002,6 +1112,10 @@ export async function prepareWorldEvaluation(
         samplers.clear();
         retained.length = 0;
         normalizers.clear();
+        genesisReference = undefined;
+        genesisSampler = undefined;
+        postSampler = undefined;
+        geology = undefined;
         if (ownsBackend) backend.dispose();
       },
     };

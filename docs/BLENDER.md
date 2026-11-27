@@ -40,6 +40,8 @@ Import creates one new collection with one independently editable mesh and mater
 | `detailNormalGL`                                     | Packed **Non-Color** tangent normal map applied to displaced geometry                              |
 | `normalGL` / `materialNormalGL` / `materialNormalDX` | Validated if present, but not applied on top of the geometry's existing macro slopes               |
 
+Genesis-enabled archives may also contain `hardness`, `lithology`, `uplift`, `incision`, `drainageArea` and `channel`. The decoder validates their declared physical units and RAW formats, including lossless UInt8 lithology IDs. These extra data maps do not automatically create a geological shader or Blender image; retain the source archive if you need their payloads for custom authoring. Their versioned provenance is preserved in the manifest text datablock.
+
 Each sample maps to the corresponding exported pixel center, including both duplicated tile endpoints. V points north and correctly flips the top-first image-row convention into Blender UV coordinates. Textures use linear interpolation and extend at tile boundaries. RGB channels stay separate from coverage/alpha semantics; no splat alpha is treated as transparency.
 
 The bridge computes physical height gradients once over the complete admitted export region, then assigns those normals to the tile meshes. Internal tile boundaries therefore use the same neighbors instead of clamped per-tile derivatives. Blender encodes custom corner normals internally; qualification measures the resulting angular error rather than claiming bit-identical stored normal vectors.
@@ -78,7 +80,7 @@ The importer deliberately qualifies a bounded mesh workflow:
 - At most **2,000,000 vertices including duplicated tile borders**.
 - At most **512 MiB of declared expanded archive data**, 64 MiB per entry, 8 MiB for the manifest, and 32 MiB for the portable project.
 - At most **8,192 members**, with a bounded central directory inspected before Python constructs its ZIP metadata objects.
-- ZIP stored/DEFLATE entries, RAW16, Float32 RAW, and non-interlaced grayscale16/RGBA8 PNGs. All five PNG row filters are supported. Split archives and ZIP64 are rejected.
+- ZIP stored/DEFLATE entries, RAW16, Float32 RAW, recognized Genesis lithology UInt8 RAW, and non-interlaced grayscale16/RGBA8 PNGs. All five PNG row filters are supported. Split archives and ZIP64 are rejected.
 
 These are admission limits, not measured peak Blender memory guarantees. Building mesh connectivity and shader images can consume substantially more memory than the source archive. The bridge does not yet stream unbounded Worlds into a Blender scene or automatically decimate an oversized project.
 
@@ -94,9 +96,9 @@ npm run test:blender
 NH_BLENDER_PATH=/path/to/blender npm run test:blender -- /path/to/evidence
 ```
 
-The runner builds an asymmetric 960 × 640 m source with a 33 × 25 sample lattice and nonzero east/south/elevation origins. The actual CLI creates and verifies four tiles, including partial southern tiles, in all three height formats. The installed Blender imports each archive and measures coordinates, height values, cross-tile borders, custom normals, UV registration, texture pixels, color spaces, and material connections.
+The runner builds an asymmetric 960 × 640 m source with a 33 × 25 sample lattice and nonzero east/south/elevation origins, then applies nonzero Genesis uplift and incision. It includes all six Genesis fields with PBR maps. The actual CLI creates and verifies four tiles, including partial southern tiles, in all three height formats. The installed Blender imports each archive and measures coordinates, height values, cross-tile borders, custom normals, UV registration, texture pixels, color spaces, and material connections.
 
-The suite also exercises all five PNG row filters, decompression/entry/vertex budgets, inconsistent origins, missing tiles, changed shared heights with valid CRCs, unsafe member paths, corrupt DEFLATE, post-allocation rollback, and a large elevation datum that must be rebased. It saves a `.blend`, makes the original World ZIP files unavailable, opens that `.blend` in a **second Blender process**, verifies packed pixels and geometry against recorded SHA-256 signatures, and renders again.
+The suite also exercises all five PNG row filters, decompression/entry/vertex budgets, inconsistent origins, missing tiles, changed shared heights with valid CRCs, invalid lithology IDs and UInt8 dimensions, incorrect Genesis units, unsafe member paths, corrupt DEFLATE, post-allocation rollback, and a large elevation datum that must be rebased. It saves a `.blend`, makes the original World ZIP files unavailable, opens that `.blend` in a **second Blender process**, verifies packed pixels and geometry against recorded SHA-256 signatures, and renders again.
 
 Evidence includes `qualification-initial.json`, `qualification-reopened.json`, the three CLI build reports, `qualified-world.blend`, and actual CPU renders before and after reopening. The fixture is an analytical integration test, not a terrain-art quality benchmark or a measurement at the two-million-vertex limit.
 
