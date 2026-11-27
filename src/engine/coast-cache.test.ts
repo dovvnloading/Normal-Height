@@ -15,11 +15,19 @@ function source(samples: number[]): HeightRaster {
 }
 
 function scene(): TerrainProject {
-  const node = (id: string, kind: TerrainNode['kind'], params: TerrainNode['params'] = {}): TerrainNode =>
-    ({ id, label: id, kind, params, position: { x: 0, y: 0 } });
+  const node = (
+    id: string,
+    kind: TerrainNode['kind'],
+    params: TerrainNode['params'] = {},
+  ): TerrainNode => ({ id, label: id, kind, params, position: { x: 0, y: 0 } });
   return {
-    version: 1, name: 'Coastal cache integration', presetId: 'test',
-    seed: 42, resolution: 32, worldSize: 1000, heightScale: 500,
+    version: 1,
+    name: 'Coastal cache integration',
+    presetId: 'test',
+    seed: 42,
+    resolution: 32,
+    worldSize: 1000,
+    heightScale: 500,
     graph: {
       nodes: [
         { ...node('import', 'heightImport'), raster: source([0, 65535, 0, 65535]) },
@@ -62,7 +70,10 @@ describe('coastal stages with persistent graph compute', () => {
     const cache = new GraphFieldCache();
     const previousSignature = semanticProjectSignature(project);
     const previous = run(project, cache, 'water');
-    project.graph.nodes[0] = { ...project.graph.nodes[0], raster: source([65535, 65535, 65535, 65535]) };
+    project.graph.nodes[0] = {
+      ...project.graph.nodes[0],
+      raster: source([65535, 65535, 65535, 65535]),
+    };
     expect(semanticProjectSignature(project)).not.toBe(previousSignature);
     const result = run(project, cache, 'water');
     expect(result.field.height).not.toEqual(previous.field.height);
@@ -70,10 +81,13 @@ describe('coastal stages with persistent graph compute', () => {
     expect(result.diagnostics?.cacheHits).toBe(0);
   });
 
-  it('reports the new single-domain stages as unsupported by World tiles before evaluating', () => {
+  it('reports imported coastal graphs as supported with honest whole-domain reference fidelity', () => {
     const project = scene();
     const { capability } = describeWorldGraph(project, createWorldDefinition(project));
-    expect(capability.supported).toBe(false);
-    expect(capability.reason).toMatch(/single-domain Terrain workspace/);
+    expect(capability.supported).toBe(true);
+    expect(capability.fullGraph).toBe(true);
+    expect(capability.native).toBe(false);
+    expect(capability.requiresGlobal).toBe(true);
+    expect(capability.warnings.join(' ')).toMatch(/Coastal connectivity/);
   });
 });

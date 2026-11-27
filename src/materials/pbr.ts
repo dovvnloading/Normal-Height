@@ -2,11 +2,14 @@ import { materialRanges, synthesizeMaterials, type MaterialRanges } from './laye
 import { tileRect, type TexelRect } from './materialRegion';
 export { AO_RADII_METERS } from './terrainAnalysis';
 import type { HeightField, TerrainProject } from '../model/types';
+import { heightFieldGrid, type FieldSampling, type FieldGrid } from '../engine/fields';
 
 import type { MaterialLayer } from './materialPaint';
 
 export type SurfaceBiome = 'alpine' | 'arid' | 'volcanic';
 export interface SurfaceSettings {
+  /** Missing legacy value adopts model 4. Unknown explicit models are rejected. */
+  modelVersion?: 4;
   biome: SurfaceBiome;
   /** Artist-authored sRGB reference colors for the individual substrates. */
   layerColors?: Partial<Record<MaterialLayer, string>>;
@@ -22,6 +25,7 @@ export interface SurfaceSettings {
   fractureMeters: number;
 }
 export const DEFAULT_SURFACE: SurfaceSettings = {
+  modelVersion: 4,
   biome: 'alpine',
   snowLine: 0.73,
   rockSlope: 38,
@@ -43,7 +47,11 @@ export const SURFACE_LIMITS = {
   fractureMeters: [12, 320] as const,
 };
 export function resolveSurface(settings?: Partial<SurfaceSettings>): SurfaceSettings {
-  return { ...DEFAULT_SURFACE, ...settings };
+  if (settings?.modelVersion !== undefined && settings.modelVersion !== 4)
+    throw new Error(
+      'This project requires an unsupported material model. Open it with a compatible Normal Height version.',
+    );
+  return { ...DEFAULT_SURFACE, ...settings, modelVersion: 4 };
 }
 
 const clamp = (v: number, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, v));
@@ -60,9 +68,14 @@ export type PBRChannel =
   | 'normal'
   | 'detailNormal'
   | 'relief'
-  | 'rockWeight' | 'soilWeight' | 'vegetationWeight' | 'snowWeight';
+  | 'rockWeight'
+  | 'soilWeight'
+  | 'vegetationWeight'
+  | 'snowWeight';
 
-export interface PBRMaps extends MaterialBuffers { resolution: number }
+export interface PBRMaps extends MaterialBuffers {
+  resolution: number;
+}
 
 export interface MaterialBuffers {
   basecolor: Uint8ClampedArray;
@@ -109,8 +122,13 @@ export function linearToSrgbByte(value: number): number {
   return Math.round(255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055));
 }
 export function layerColorHex(settings: SurfaceSettings, layer: MaterialLayer): string {
-  return settings.layerColors?.[layer] ?? '#' + PALETTES[settings.biome][SPLAT_LAYERS.indexOf(layer)]
-    .map(value => value.toString(16).padStart(2, '0')).join('');
+  return (
+    settings.layerColors?.[layer] ??
+    '#' +
+      PALETTES[settings.biome][SPLAT_LAYERS.indexOf(layer)]
+        .map((value) => value.toString(16).padStart(2, '0'))
+        .join('')
+  );
 }
 
 const LINEAR_PALETTES: Record<SurfaceBiome, number[][]> = {
@@ -125,16 +143,38 @@ const LINEAR_PALETTES: Record<SurfaceBiome, number[][]> = {
  */
 export function generatePBR(field: HeightField, project: TerrainProject): PBRMaps {
   const resolution = field.resolution;
-  return { resolution, ...generateMaterialRegion(field, project, tileRect(resolution), materialRanges(field)) };
+  return {
+    resolution,
+    ...generateMaterialRegion(field, project, tileRect(resolution), materialRanges(field)),
+  };
 }
 
-export function generateMaterialRegion(field: HeightField, project: TerrainProject, rect: TexelRect, ranges: MaterialRanges): MaterialBuffers {
+export function generateMaterialRegion(
+  field: HeightField,
+  project: TerrainProject,
+  rect: TexelRect,
+  ranges: MaterialRanges,
+  sampling?: FieldSampling,
+): MaterialBuffers {
   const params = resolveSurface(project.surface);
-  const palette = params.layerColors ? SPLAT_LAYERS.map(layer => {
-    const color = layerColorHex(params, layer);
-    return [1, 3, 5].map(offset => srgbByteToLinear(parseInt(color.slice(offset, offset + 2), 16)));
-  }) : LINEAR_PALETTES[params.biome];
-  return synthesizeMaterials(field, project, params, palette, linearToSrgbByte, rect, ranges);
+  const palette = params.layerColors
+    ? SPLAT_LAYERS.map((layer) => {
+        const color = layerColorHex(params, layer);
+        return [1, 3, 5].map((offset) =>
+          srgbByteToLinear(parseInt(color.slice(offset, offset + 2), 16)),
+        );
+      })
+    : LINEAR_PALETTES[params.biome];
+  return synthesizeMaterials(
+    field,
+    project,
+    params,
+    palette,
+    linearToSrgbByte,
+    rect,
+    ranges,
+    sampling,
+  );
 }
 
 function grayscale(values: Uint8Array): Uint8ClampedArray {
@@ -160,21 +200,35 @@ export function materialNormalPixels(
 }
 
 /** Read from a tile with the derivative halo, write only the requested pixels. */
-export function materialNormalRegion(detail: Float32Array, source: TexelRect, target: TexelRect,
-  field: HeightField, project: TerrainProject, detailOnly: boolean, directX = false,
+export function materialNormalRegion(
+  detail: Float32Array,
+  source: TexelRect,
+  target: TexelRect,
+  field: HeightField,
+  project: TerrainProject,
+  detailOnly: boolean,
+  directX = false,
+  geometry?: FieldGrid,
 ): Uint8ClampedArray {
-  const n = field.resolution;
+  const grid = geometry ?? heightFieldGrid(field, project);
+  const n = grid.width;
   const stride = source.right - source.left;
-  const pixels = new Uint8ClampedArray((target.right - target.left) * (target.bottom - target.top) * 4);
-  const cell = project.worldSize / Math.max(1, n - 1);
+  const pixels = new Uint8ClampedArray(
+    (target.right - target.left) * (target.bottom - target.top) * 4,
+  );
+  const cellX = grid.spacingX,
+    cellZ = grid.spacingZ;
   let p = 0;
   for (let y = target.top; y < target.bottom; y++) {
     for (let x = target.left; x < target.right; x++, p += 4) {
-      const l = Math.max(0, x - 1), r = Math.min(n - 1, x + 1);
-      const t = Math.max(0, y - 1), b = Math.min(n - 1, y + 1);
-      const xSpan = (r - l || 1) * cell, ySpan = (b - t || 1) * cell;
-      const gx = (field.height[y * n + r] - field.height[y * n + l]) * project.heightScale / xSpan;
-      const gy = (field.height[b * n + x] - field.height[t * n + x]) * project.heightScale / ySpan;
+      const l = Math.max(0, x - 1),
+        r = Math.min(n - 1, x + 1);
+      const t = Math.max(0, y - 1),
+        b = Math.min(grid.height - 1, y + 1);
+      const xSpan = (r - l || 1) * cellX,
+        ySpan = (b - t || 1) * cellZ;
+      const gx = ((field.height[y * n + r] - field.height[y * n + l]) * grid.heightScale) / xSpan;
+      const gy = ((field.height[b * n + x] - field.height[t * n + x]) * grid.heightScale) / ySpan;
       const local = (y - source.top) * stride + x - source.left;
       const dx = (detail[local + r - x] - detail[local + l - x]) / xSpan;
       const dy = (detail[local + (b - y) * stride] - detail[local + (t - y) * stride]) / ySpan;
@@ -182,7 +236,9 @@ export function materialNormalRegion(detail: Float32Array, source: TexelRect, ta
       // the same normal relative to the displaced mesh's orthonormal TBN.
       // Simply differentiating microheight on a horizontal plane exaggerates
       // relief on a cliff and shears the north gradient on oblique slopes.
-      let nx = -gx - dx, ny = gy + dy, nz = 1;
+      let nx = -gx - dx,
+        ny = gy + dy,
+        nz = 1;
       if (detailOnly) {
         const eastLength = Math.sqrt(1 + gx * gx);
         const normalLength = Math.sqrt(1 + gx * gx + gy * gy);
@@ -191,10 +247,10 @@ export function materialNormalRegion(detail: Float32Array, source: TexelRect, ta
         nz = normalLength + (gx * dx + gy * dy) / normalLength;
       }
       const length = Math.hypot(nx, ny, nz);
-      pixels[p] = Math.round((nx / length * 0.5 + 0.5) * 255);
-      const green = Math.round((ny / length * 0.5 + 0.5) * 255);
+      pixels[p] = Math.round(((nx / length) * 0.5 + 0.5) * 255);
+      const green = Math.round(((ny / length) * 0.5 + 0.5) * 255);
       pixels[p + 1] = directX ? 255 - green : green;
-      pixels[p + 2] = Math.round((nz / length * 0.5 + 0.5) * 255);
+      pixels[p + 2] = Math.round(((nz / length) * 0.5 + 0.5) * 255);
       pixels[p + 3] = 255;
     }
   }
@@ -224,9 +280,16 @@ export function pbrPixels(
   }
   // Inspect individual physically synthesized coverage masks as opaque grayscale
   // percentages. These are derived from the exact exported RGBA splat bytes.
-  const weightIndex = channel === 'rockWeight' ? 0 :
-    channel === 'soilWeight' ? 1 : channel === 'vegetationWeight' ? 2 :
-    channel === 'snowWeight' ? 3 : -1;
+  const weightIndex =
+    channel === 'rockWeight'
+      ? 0
+      : channel === 'soilWeight'
+        ? 1
+        : channel === 'vegetationWeight'
+          ? 2
+          : channel === 'snowWeight'
+            ? 3
+            : -1;
   if (weightIndex >= 0) {
     const out = new Uint8ClampedArray(maps.resolution * maps.resolution * 4);
     for (let i = 0; i < maps.resolution * maps.resolution; i++) {

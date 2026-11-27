@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/engine/**'
       - 'src/export/world*'
+      - 'src/materials/**'
+      - 'src/render/World*'
       - 'src/model/**'
       - 'src/hooks/**'
       - 'src/components/World*'

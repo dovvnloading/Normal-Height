@@ -8,6 +8,7 @@ import type {
 import { createWorldRegionStore, WORLD_REGION_CACHE_VERSION } from './worldStore';
 import type { WorldRegionStore } from './worldStore';
 import { canonical } from './plan/graph';
+import { worldSourceSignature } from './worldSourceIdentity';
 import { worldEvaluationSignature } from './worldPreviewPlan';
 
 type Send = (message: WorldWorkerResponse, transfer?: Transferable[]) => void;
@@ -99,17 +100,32 @@ export class WorldPreviewSession {
       ].filter((buffer): buffer is ArrayBuffer => buffer instanceof ArrayBuffer);
 
     try {
-      const signature = worldEvaluationSignature(
-        request.project,
-        request.world,
-        request.previewNodeId,
+      const hasRasters = request.project.graph.nodes.some(
+        (node) => node.kind === 'heightImport' && node.raster,
       );
+      const { signature, persistentSafe } = hasRasters
+        ? await worldSourceSignature(
+            request.project,
+            request.world,
+            request.previewNodeId,
+            controller.signal,
+          )
+        : {
+            signature: worldEvaluationSignature(
+              request.project,
+              request.world,
+              request.previewNodeId,
+            ),
+            persistentSafe: true,
+          };
+      if (!currentRequest()) return;
       const cacheKey = canonical({
         version: WORLD_REGION_CACHE_VERSION,
         signature,
         grid: request.grid,
       });
-      const cacheable = request.cache && request.world.backend === 'cpu-reference';
+      const cacheable =
+        request.cache && persistentSafe && request.world.backend === 'cpu-reference';
       if (cacheable) {
         progress({ phase: 'cache', stage: 'Checking local region cache', progress: null });
         if (!this.store) {
@@ -188,7 +204,12 @@ export class WorldPreviewSession {
           cacheHit: false,
           store: this.store?.stats(),
           compute: prepared.computeCapability,
-          warnings: prepared.capability.warnings,
+          warnings: persistentSafe
+            ? prepared.capability.warnings
+            : [
+                ...prepared.capability.warnings,
+                'Persistent caching of imported worlds is unavailable without secure-context Web Crypto. The source is still evaluated normally.',
+              ],
           preparedReused,
           elapsedMs: this.dependencies.now() - startedAt,
         },

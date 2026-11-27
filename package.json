@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "nh": "node scripts/nh.mjs",
+    "package:blender": "node integrations/blender/package.mjs",
+    "test:blender": "node integrations/blender/qualify.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
@@ -34,6 +37,7 @@
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.187.0",
     "@vitejs/plugin-react": "^6.3.0",
+    "fake-indexeddb": "^6.2.8",
     "prettier": "^3.9.10",
     "typescript": "^7.0.2",
     "vite": "^8.3.7",

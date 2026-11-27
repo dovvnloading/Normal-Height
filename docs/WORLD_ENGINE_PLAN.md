@@ -16,6 +16,12 @@
 
 This reconciliation was checked against `main` at `6fa0573a529d2444f18df365bb1cd7d8856ec007`. The baseline observations, proposed architecture, delivery sequence and unchecked review decisions below retain their historical context. Use the [implementation guide and remaining work](WORLD_ENGINE.md#remaining-rfc-work) for shipped capabilities and outstanding qualification. Merging this documentation does not mark the release gates as passed.
 
+**Implementation update:** World now supports the shared imported-raster sampler,
+rectangular whole-domain coastal reference, fixed coastal ports and named mask
+outputs. Source-content SHA-256 identities prevent persistent cache collisions
+across worker restarts. The snapshot above describes the earlier baseline;
+the current contracts and remaining limits are in [WORLD_ENGINE.md](WORLD_ENGINE.md#imported-rasters-coasts-and-named-masks).
+
 ## 1. Why this is the next flagship release
 
 Normal Height already generates physically scaled Float32 terrain, supports versioned noise, hydraulic and thermal erosion, spline rivers/ridges, biome-aware materials, PBR map export, camera-adaptive meshes, and atmospheric presentation. Noise Studio v3 brought 14 base generators, 10 layer modes, seed locking, and 8K source-only output. The next limiting factor is not the number of generators; it is the scale and responsiveness of the graph evaluator.
@@ -288,7 +294,7 @@ Reviewer decisions (retained as design review context, not a record of completed
 - [ ] Confirm World Engine as the next flagship and CPU-first planner/cache as the first implementation.
 - [ ] Approve opt-in World versioning, canonical interval-grid and shared-border ownership; settle units/datum/periodic boundary semantics before code.
 - [ ] Approve persistent coordinator, cache/OPFS policy and conservative no-GPU fallback.
-- [ ] Extend the merged PR #42 import/coast/mask contracts into World evaluation without parallel implementations.
+- [x] Extend the merged PR #42 import/coast/mask contracts into World evaluation without parallel implementations (bounded coastal reference; periodic source/coastal graphs remain unsupported).
 - [ ] Ratify proposed numerical, memory, UX and performance targets after baseline measurement.
 - [ ] Confirm release scope: generic plus Unreal/Unity first, 8K representative full-graph profile with honest stage spacing, 32K+ stretch.
 - [ ] Approve implementation milestone breakdown; no auto-merge or broad deployment from this planning PR.
@@ -307,4 +313,4 @@ These are design references, not claims that Normal Height already implements th
 
 ---
 
-**Follow-up implementation:** The CPU planner, persistent scheduling and World foundation shipped in the engineering preview from #63. Use the [implementation guide's remaining work](WORLD_ENGINE.md#remaining-rfc-work) to select separately reviewed extensions and qualification against the retained gates, including World import/coast/mask support, hardware and memory evidence, full World PBR export and production imports. The quality bar is proven by numerical invariants, visual evidence, hardware measurements and production round trips, not by feature count.
+**Follow-up implementation:** The CPU planner, persistent scheduling and World foundation shipped in the engineering preview from #63. Use the [implementation guide's remaining work](WORLD_ENGINE.md#remaining-rfc-work) to select separately reviewed extensions and qualification against the retained gates, including hardware and memory evidence, native large-domain simulation and production editor imports. World import/coast/mask support and bounded World PBR export have since been implemented; consult [Production implementation](PRODUCTION_IMPLEMENTATION.md) for the current verification boundary. The quality bar is proven by numerical invariants, visual evidence, hardware measurements and production round trips, not by feature count.

@@ -1,79 +1,8 @@
-import type { TerrainEdge, TerrainGraph, TerrainNode, TerrainProject } from '../../model/types';
-import { validSplinePoint, MAX_SPLINE_POINTS } from '../../model/splines';
-import { NODE_DEFINITIONS } from '../../model/registry';
+import type { TerrainEdge, TerrainNode, TerrainProject } from '../../model/types';
 import { rasterIdentity } from '../../model/heightRaster';
-
-export const metadata = (node: TerrainNode) => node.kind === 'note' || node.kind === 'group';
-export const inputHandle = (edge: TerrainEdge, node: TerrainNode) =>
-  edge.targetHandle || (node.kind === 'blend' ? 'a' : 'in');
-// Bypassed processors forward their primary input; secondary branches are not dependencies.
-export const usesInput = (edge: TerrainEdge, node: TerrainNode) =>
-  !node.bypassed || inputHandle(edge, node) === (node.kind === 'blend' ? 'a' : 'in');
-
-/** Structural errors are rejected; unfinished, disconnected nodes may remain on the canvas. */
-export function validateGraph(graph: TerrainGraph): string | null {
-  if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges))
-    return 'This project does not contain a valid terrain graph.';
-  if (graph.nodes.length > 256 || graph.edges.length > 768)
-    return 'The graph exceeds the 256-node or 768-connection limit.';
-  const nodes = new Map<string, TerrainNode>();
-  for (const node of graph.nodes) {
-    if (!node.id || nodes.has(node.id)) return 'Each node must have a unique identifier.';
-    if (!Object.hasOwn(NODE_DEFINITIONS, node.kind)) return `Unknown node type: ${String(node.kind)}.`;
-    if (!node.params || typeof node.params !== 'object')
-      return `“${node.label || node.id}” has invalid parameters.`;
-    if (
-      node.kind === 'spline' &&
-      (!Array.isArray(node.path) ||
-        node.path.length < 2 ||
-        node.path.length > MAX_SPLINE_POINTS ||
-        !node.path.every(validSplinePoint))
-    )
-      return `“${node.label || node.id}” needs at least two valid spline points.`;
-    nodes.set(node.id, node);
-  }
-  const ports = new Set<string>(),
-    edgeIds = new Set<string>();
-  const outgoing = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    if (!edge.id || edgeIds.has(edge.id)) return 'Each connection must have a unique identifier.';
-    edgeIds.add(edge.id);
-    const source = nodes.get(edge.source),
-      target = nodes.get(edge.target);
-    if (!source || !target) return 'A connection refers to a missing node.';
-    if (metadata(source) || metadata(target)) return 'Notes and groups cannot carry terrain data.';
-    if (source.id === target.id) return 'A node cannot connect to itself.';
-    const handle = inputHandle(edge, target);
-    if (!NODE_DEFINITIONS[target.kind].inputs.some((port) => port.id === handle))
-      return `“${target.label}” does not have a “${handle}” input.`;
-    const sourceHandle = edge.sourceHandle || 'height';
-    // Preserve legacy diagnostic routes while requiring declared new ports.
-    const outputs = NODE_DEFINITIONS[source.kind].outputs;
-    const legacyDiagnostic = outputs.length > 0 && ['flow', 'wear', 'deposition'].includes(sourceHandle);
-    if (!legacyDiagnostic && !outputs.some((port) => port.id === sourceHandle))
-      return `“${source.label}” does not have a “${sourceHandle}” output.`;
-    const port = `${target.id}:${handle}`;
-    if (ports.has(port))
-      return `“${target.label}” already has a connection on its “${handle}” input.`;
-    ports.add(port);
-    outgoing.set(source.id, [...(outgoing.get(source.id) || []), target.id]);
-  }
-  const visited = new Set<string>(),
-    active = new Set<string>();
-  const visit = (id: string): boolean => {
-    if (active.has(id)) return false;
-    if (visited.has(id)) return true;
-    active.add(id);
-    for (const next of outgoing.get(id) || []) if (!visit(next)) return false;
-    active.delete(id);
-    visited.add(id);
-    return true;
-  };
-  for (const node of graph.nodes)
-    if (!visit(node.id))
-      return 'This connection creates a cycle. Terrain must flow forward through the graph.';
-  return null;
-}
+import type { HeightRaster } from '../../model/heightRaster';
+import { inputHandle, outputHandle, metadata, usesInput, validateGraph } from '../../model/graph';
+export { inputHandle, metadata, usesInput, validateGraph } from '../../model/graph';
 
 export type ExecutionScope = 'pointwise' | 'local' | 'global' | 'iterative';
 export interface PlannedStage {
@@ -119,7 +48,7 @@ export function compileGraph(project: TerrainProject, previewNodeId?: string): G
       .map((edge) => ({
         port: inputHandle(edge, node),
         nodeId: edge.source,
-        channel: edge.sourceHandle || 'height',
+        channel: outputHandle(edge),
       }));
     for (const input of inputs) {
       visit(byId.get(input.nodeId)!);
@@ -158,7 +87,11 @@ export function canonical(value: unknown): string {
 }
 
 /** View-only edits and disconnected experiments do not enqueue a terrain build. */
-export function semanticProjectSignature(project: TerrainProject, previewNodeId?: string): string {
+export function semanticProjectSignature(
+  project: TerrainProject,
+  previewNodeId?: string,
+  rasterSignature: (raster: HeightRaster) => string | number = rasterIdentity,
+): string {
   let needed: Set<string> | undefined;
   try {
     needed = compileGraph(project, previewNodeId).needed;
@@ -173,7 +106,7 @@ export function semanticProjectSignature(project: TerrainProject, previewNodeId?
       params: node.params,
       bypassed: !!node.bypassed,
       path: node.path,
-      raster: node.raster && rasterIdentity(node.raster),
+      raster: node.raster && rasterSignature(node.raster),
     }))
     .sort((a, b) => a.id.localeCompare(b.id));
   const byId = new Map(project.graph.nodes.map((node) => [node.id, node]));
@@ -184,7 +117,7 @@ export function semanticProjectSignature(project: TerrainProject, previewNodeId?
     .map((edge) => ({
       source: edge.source,
       target: edge.target,
-      sourceHandle: edge.sourceHandle || 'height',
+      sourceHandle: outputHandle(edge),
       targetHandle: byId.has(edge.target)
         ? inputHandle(edge, byId.get(edge.target)!)
         : edge.targetHandle,

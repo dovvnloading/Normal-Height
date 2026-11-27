@@ -1,0 +1,65 @@
+name: Blender World bridge qualification
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'integrations/blender/**'
+      - 'src/cli/**'
+      - 'scripts/nh.mjs'
+      - 'src/export/worldExport.ts'
+      - 'src/engine/world/**'
+      - 'src/engine/heightImport.ts'
+      - 'src/materials/**'
+      - 'src/model/heightRaster.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/blender-bridge-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blender-bridge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  blender-4-3-2:
+    name: Blender 4.3.2 geometry, materials, rollback and offline reopen
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install the fixed Blender baseline and verify its published checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/nh-blender"
+          cd "$RUNNER_TEMP/nh-blender"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            --output blender-4.3.2-linux-x64.tar.xz \
+            https://download.blender.org/release/Blender4.3/blender-4.3.2-linux-x64.tar.xz
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            --output blender-4.3.2.sha256 \
+            https://download.blender.org/release/Blender4.3/blender-4.3.2.sha256
+          awk '$2 ~ /^\*?blender-4\.3\.2-linux-x64\.tar\.xz$/ {print; found=1} END {if (!found) exit 1}' blender-4.3.2.sha256 | sha256sum --check --strict
+          tar -xJf blender-4.3.2-linux-x64.tar.xz
+          printf '%s\n' "$RUNNER_TEMP/nh-blender/blender-4.3.2-linux-x64" >> "$GITHUB_PATH"
+      - name: Build an installable add-on
+        run: npm run package:blender
+      - name: Generate real CLI archives and qualify Blender imports
+        run: npm run test:blender
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blender-4-3-2-import-evidence
+          path: |
+            dist/normal-height-blender.zip
+            test-results/blender-qualification/
+          retention-days: 14

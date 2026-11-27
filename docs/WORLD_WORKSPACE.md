@@ -24,6 +24,16 @@ The map uses local Cartesian meters: +X is east, +Z is south, and the first rast
 
 Choose **Map**, **Terrain**, or **Split**. The 3D terrain is built from the completed World samples; it does not use the separate Terrain workspace heightfield. The mesh is bounded to at most 257 samples per axis. Camera, projection, sun direction, wireframe and vertical exaggeration affect presentation. A display exaggeration never changes the authored height scale or export values.
 
+### Authored material in the terrain view
+
+The palette button switches the 3D surface between the authored PBR material and the selected diagnostic layer. The material uses the same synthesis model as World delivery: base color, roughness, ambient occlusion and detail normals, with paint and surface variation anchored to the full world's physical coordinates. A regional preview keeps that coordinate registration instead of stretching the whole painted material into its selected footprint. Terrain normals come from the sampled physical gradients, and endpoint samples map to texture texel centers so that rectangular material maps align with the mesh.
+
+Material synthesis runs in a dedicated worker over the completed preview field, bounded to 513 samples per axis. Editing the material, lighting or camera does not evaluate the terrain again. A replacement terrain build retains the last complete field and its authored material until a new field is ready; stale geometry is never combined with a different graph's seed or material settings. While new material maps are being baked, the diagnostic surface remains available.
+
+Preview ambient occlusion uses the available regional samples and is explicitly labeled an approximation. Delivery uses its independently sampled output grid and halo context. Small surface details, slopes and occlusion can therefore differ at interactive preview resolution. When a compatible whole-world overview is available, both overview and detail material views use its shared scalar ranges.
+
+The visible 3D renderer, camera and controls persist across completed terrain revisions; only the bounded geometry and texture resources are updated. Selecting **Map** or leaving World Studio releases the graphics context and material worker, while retaining camera and display settings for the next visible view. A graphics-context loss releases the damaged resources and presents **Retry 3D**. A material-worker failure leaves diagnostic terrain usable and reports the error.
+
 | Input                                             | Action                                                             |
 | ------------------------------------------------- | ------------------------------------------------------------------ |
 | Scroll or pinch on the map                        | Zoom around the cursor or gesture centre.                          |
@@ -137,9 +147,12 @@ Focused numerical, lifecycle and presentation checks:
 
 ```sh
 npx vitest run tests/world-preview.test.ts tests/world-view-math.test.ts tests/world-analysis.test.ts tests/world-view-settings.test.ts tests/world-export.test.ts src/export/worldExportClient.test.ts src/export/worldExportPlan.test.ts
+npx vitest run tests/world-node-parity.test.ts tests/world-source-identity.test.ts tests/world-terrain-mesh.test.ts src/materials/worldMaterialPreview.test.ts src/materials/worldMaterialPreviewClient.test.ts
 ```
 
 The file-export browser suite uses a controlled picker/writable boundary with real production workers, terrain generation, ZIP encoding, chunk acknowledgments and RAW decoding. It covers pending-picker cancellation, a late writable, background workspace navigation, write failure/retry and worker startup failure/retry. These checks do not qualify native OS picker behavior.
+
+The 3D browser checks exercise authored-material and diagnostic switching, a single persistent renderer across completed terrain builds, hidden-view disposal, and graphics-context loss/recovery. Numerical checks separately cover rectangular physical sampling, regional material registration, texture texel-center placement, bounded mesh normals, worker reuse and superseded-result rejection. Software-rendered Chromium checks establish browser behavior; hardware GPU qualification remains a separate release check.
 
 The larger CPU/browser export profile is explicitly enabled:
 

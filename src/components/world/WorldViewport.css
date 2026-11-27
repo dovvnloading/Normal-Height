@@ -837,6 +837,18 @@
 .wv-terrain-help span {
   opacity: 0.7;
 }
+.wv-material-error {
+  position: absolute;
+  top: 48px;
+  right: 16px;
+  max-width: min(300px, 60%);
+  padding: 9px 12px;
+  border: 1px solid var(--wv-line);
+  border-radius: 8px;
+  background: var(--wv-glass);
+  color: var(--wv-muted);
+  font-size: 11px;
+}
 .wv-3d-error {
   position: absolute;
   inset: 0;

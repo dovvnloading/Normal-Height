@@ -8,3 +8,8 @@ playwright-report/
 mesh-benchmark-results/
 mesh-benchmark-report/
 bench-runs/
+
+# Isolated acceptance outputs and Python integration caches.
+test-results-*/
+__pycache__/
+*.py[cod]

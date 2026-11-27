@@ -2,6 +2,7 @@ import type { TerrainProject } from '../model/types';
 import type { WorldDefinition } from '../model/world';
 import type { WorldGridRequest } from '../hooks/worldProtocol';
 import { canonical, semanticProjectSignature } from './plan/graph';
+import type { HeightRaster } from '../model/heightRaster';
 
 export type WorldPreviewRegion = Pick<WorldGridRequest, 'startX' | 'startZ' | 'cellsX' | 'cellsZ'>;
 export type WorldPreviewQuality = 'draft' | 'detail';
@@ -13,6 +14,7 @@ export function worldEvaluationSignature(
   project: TerrainProject,
   world: WorldDefinition,
   previewNodeId?: string,
+  rasterSignature?: (raster: HeightRaster) => string | number,
 ): string {
   return canonical({
     graph: semanticProjectSignature(
@@ -23,6 +25,7 @@ export function worldEvaluationSignature(
         heightScale: world.domain.heightScale,
       },
       previewNodeId,
+      rasterSignature,
     ),
     world: {
       version: world.version,

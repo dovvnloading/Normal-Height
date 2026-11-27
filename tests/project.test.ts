@@ -44,4 +44,16 @@ describe('project import boundaries', () => {
     p.graph.nodes[0].id = '__proto__';
     expect(() => parseProject(p)).toThrow('identifier');
   });
+  it('pins the current material implementation and rejects unknown explicit versions', () => {
+    const project = createProject();
+    const oldSurface = { ...project.surface };
+    delete oldSurface.modelVersion;
+    const restored = parseProject({ ...project, surface: oldSurface });
+    expect(restored.surface?.modelVersion).toBe(4);
+    expect(parseProject(JSON.parse(JSON.stringify(restored))).surface).toEqual(restored.surface);
+    for (const modelVersion of [0, 1, 2, 3, 5, '4', null])
+      expect(() => parseProject({ ...project, surface: { ...oldSurface, modelVersion } })).toThrow(
+        /material model version/,
+      );
+  });
 });

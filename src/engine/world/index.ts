@@ -8,6 +8,9 @@ import { clamp, mix, Noise, smoothstep } from '../noise';
 import { hydraulicErosion, sampleHeight, thermalErosion } from '../erosion';
 import { reconstructionWeight } from '../erosionMask';
 import { sculptSpline } from '../spline';
+import { COAST_DEFAULTS, shapeCoast } from '../coast';
+import { createImportedHeightSampler } from '../heightImport';
+import { assertRasterBudget, rasterBytes } from '../../model/heightRaster';
 import { createPointwiseBackend } from '../gpu/pointwise';
 import type { ComputeCapability, PointwiseBackend, PointwiseOperation } from '../gpu/pointwise';
 import { createWorldNoiseSampler } from './noise';
@@ -33,7 +36,9 @@ type Channels = {
   wear: Float32Array;
   deposition: Float32Array;
 };
-type Sample = readonly [number, number, number, number];
+// Optional coastal ports are fixed-range scalar fields. They are never
+// normalized as erosion diagnostics or retained on unrelated processors.
+type Sample = readonly [number, number, number, number, number?, number?];
 type Sampler = (x: number, z: number, dx: number, dz: number) => Sample;
 const channels = ['height', 'flow', 'wear', 'deposition'] as const;
 const F = Math.fround;
@@ -48,7 +53,7 @@ function cancelled(signal?: AbortSignal) {
   if (signal?.aborted) throw new DOMException('World build cancelled.', 'AbortError');
 }
 const channelIndex = (channel: string) =>
-  Math.max(0, channels.indexOf(channel as (typeof channels)[number]));
+  Math.max(0, channels.indexOf(channel as (typeof channels)[number])) as 0 | 1 | 2 | 3;
 
 export interface WorldPrepareOptions extends WorldRunOptions {
   previewNodeId?: string;
@@ -168,6 +173,18 @@ export async function prepareWorldEvaluation(
   const plan = compileGraph(project, options.previewNodeId),
     d = world.domain,
     n = world.globalResolution;
+  const importedNodes = plan.stages
+    .map((stage) => plan.byId.get(stage.nodeId)!)
+    .filter((node) => node.kind === 'heightImport');
+  assertRasterBudget(importedNodes);
+  const importedBytes = importedNodes.reduce(
+    (sum, node) => sum + (node.raster ? rasterBytes(node.raster) : 0),
+    0,
+  );
+  const importScratchBytes = importedNodes.reduce(
+    (maximum, node) => Math.max(maximum, node.raster ? rasterBytes(node.raster) * 3 : 0),
+    0,
+  );
   const sampleCosts = new Map<string, number>();
   for (const stage of plan.stages) {
     const node = plan.byId.get(stage.nodeId)!;
@@ -182,7 +199,7 @@ export async function prepareWorldEvaluation(
   }
   const globalCount = description.stages.filter((stage) => stage.mode !== 'native').length;
   const globalBytes = globalCount * n * n * 6 * 4;
-  let globalScratchBytes = world.transport?.enabled ? n * n * 224 : 0;
+  let globalScratchBytes = Math.max(world.transport?.enabled ? n * n * 224 : 0, importScratchBytes);
   for (const stage of plan.stages) {
     const node = plan.byId.get(stage.nodeId)!;
     if (!isGlobal(node, stage.inputs.length > 0)) continue;
@@ -196,6 +213,7 @@ export async function prepareWorldEvaluation(
       scratch = n * n * 64 + solver * solver * 224;
     } else if (node.kind === 'thermal') scratch = n * n * 40;
     else if (node.kind === 'spline') scratch = n * n * 56;
+    else if (node.kind === 'coast') scratch = n * n * 40 + (n + 1) * 32;
     else if (
       node.kind === 'mountain' &&
       ['fluvial', 'orogenic'].includes(String(node.params.profile))
@@ -203,9 +221,9 @@ export async function prepareWorldEvaluation(
       scratch = n * n * 160;
     globalScratchBytes = Math.max(globalScratchBytes, scratch);
   }
-  if (globalBytes + globalScratchBytes > WORLD_REGION_BUDGET)
+  if (importedBytes + globalBytes + globalScratchBytes > WORLD_REGION_BUDGET)
     throw new Error(
-      'The whole-domain reference/transport working fields exceed 128 MiB. Reduce the global reference resolution or the number of global stages.',
+      'The imported rasters and whole-domain reference/transport working fields exceed 128 MiB. Reduce the imported samples, global reference resolution or number of global stages.',
     );
   const backend = options.pointwiseBackend ?? (await createPointwiseBackend(world.backend));
   const ownsBackend = !options.pointwiseBackend;
@@ -265,7 +283,7 @@ export async function prepareWorldEvaluation(
         for (let c = 0; c < 4; c++) {
           if (!Number.isFinite(values[c]))
             throw new Error('A World stage produced a non-finite value. Reduce its strength.');
-          field[channels[c]][at] = values[c];
+          field[channels[c]][at] = values[c]!;
         }
       }
       if ((row & 7) === 7 || row === grid.samplesZ - 1) {
@@ -341,7 +359,15 @@ export async function prepareWorldEvaluation(
       for (const input of stage.inputs) {
         const original = samplers.get(input.nodeId)!;
         if (input.channel === 'height') inputs.set(input.port, original);
-        else {
+        else if (input.channel === 'shore' || input.channel === 'water') {
+          const index = input.channel === 'shore' ? 4 : 5;
+          inputs.set(input.port, (x, z, dx, dz) => [
+            F(clamp(original(x, z, dx, dz)[index] ?? 0)),
+            0,
+            0,
+            0,
+          ]);
+        } else {
           const maximum = await normalize(input.nodeId, input.channel),
             c = channelIndex(input.channel);
           inputs.set(input.port, (x, z, dx, dz) => {
@@ -359,8 +385,25 @@ export async function prepareWorldEvaluation(
         }
       }
       const primary = inputs.get('in') ?? inputs.get('a');
-      if (node.bypassed && primary) samplers.set(node.id, primary);
-      else if (node.kind === 'noise' && node.params.noiseModel === 'v3') {
+      if (node.bypassed && primary && node.kind !== 'maskOutput')
+        samplers.set(
+          node.id,
+          node.kind === 'coast'
+            ? (x, z, dx, dz) => {
+                const value = primary(x, z, dx, dz);
+                return [value[0], value[1], value[2], value[3]];
+              }
+            : primary,
+        );
+      else if (node.kind === 'heightImport') {
+        const source = createImportedHeightSampler(node, d.heightScale);
+        samplers.set(node.id, (x, z) => [
+          F(source.sample((x - d.originX) / d.width, (z - d.originZ) / d.depth)),
+          0,
+          0,
+          0,
+        ]);
+      } else if (node.kind === 'noise' && node.params.noiseModel === 'v3') {
         const noise = createWorldNoiseSampler(node.params, project.seed, d);
         samplers.set(node.id, (x, z, dx, dz) => [F(noise(x, z, dx, dz)), 0, 0, 0]);
       } else if (node.kind === 'mountain' || node.kind === 'noise') {
@@ -389,7 +432,54 @@ export async function prepareWorldEvaluation(
         ]);
       } else {
         if (!primary) throw new Error(`Connect a height input to “${node.label}”.`);
-        if (isGlobal(node, true)) {
+        if (node.kind === 'coast') {
+          options.onProgress?.(stageIndex / plan.stages.length, `Coastal context · ${node.label}`);
+          const input = await renderSampler(primary, coarseGrid);
+          const level = F(number(node, 'seaLevel', COAST_DEFAULTS.seaLevel, -1, 2));
+          const includeLakes = node.params.includeLakes === true;
+          check();
+          const formed = shapeCoast(input.height, n, {
+            worldSize: d.width,
+            worldDepth: d.depth,
+            heightScale: d.heightScale,
+            seaLevel: level,
+            beachWidth: number(node, 'beachWidth', COAST_DEFAULTS.beachWidth, 0, 3000),
+            shelfWidth: number(node, 'shelfWidth', COAST_DEFAULTS.shelfWidth, 0, 5000),
+            beachSlope: number(node, 'beachSlope', COAST_DEFAULTS.beachSlope, 0.1, 35),
+            shelfSlope: number(node, 'shelfSlope', COAST_DEFAULTS.shelfSlope, 0.1, 25),
+            strength: number(node, 'strength', COAST_DEFAULTS.strength, 0, 1),
+            includeLakes,
+          });
+          check();
+          retained.push(input.height, formed.height, formed.shore, formed.water);
+          const dryFloor = level + Math.max(2 ** -149, Math.abs(level) * 2 ** -23);
+          samplers.set(node.id, (x, z, dx, dz) => {
+            const a = primary(x, z, dx, dz);
+            const wet = a[0] <= level;
+            // Connectivity belongs to the single whole-world reference, never
+            // to the requested tile. Keep categorical water binary and avoid
+            // classifying dry native detail as ocean after reconstruction.
+            const selectedWater = wet && (includeLakes || interpolate(formed.water, x, z) >= 0.5);
+            if (wet && !selectedWater) return [a[0], a[1], a[2], a[3], 0, 0];
+            const reconstructed =
+              a[0] + (interpolate(formed.height, x, z) - interpolate(input.height, x, z));
+            const height = wet
+              ? Math.min(level, reconstructed)
+              : reconstructed <= level
+                ? dryFloor
+                : reconstructed;
+            return [
+              F(height),
+              a[1],
+              a[2],
+              a[3],
+              F(clamp(interpolate(formed.shore, x, z))),
+              selectedWater ? 1 : 0,
+            ];
+          });
+        } else if (node.kind === 'maskOutput') {
+          samplers.set(node.id, (x, z, dx, dz) => [F(clamp(primary(x, z, dx, dz)[0])), 0, 0, 0]);
+        } else if (isGlobal(node, true)) {
           options.onProgress?.(stageIndex / plan.stages.length, `Global context · ${node.label}`);
           const input = await renderSampler(primary, coarseGrid);
           const maskSampler = inputs.get('mask'),
@@ -666,10 +756,12 @@ export async function prepareWorldEvaluation(
         return node.kind === 'hydraulic' && !node.bypassed;
       });
     const outputFlowMax = hasFlow ? await normalize(plan.target.id, 'flow') : 0;
-    const retainedBytes = [...new Set(retained.map((array) => array.buffer))].reduce(
-      (sum, buffer) => sum + buffer.byteLength,
-      0,
-    );
+    const retainedBytes =
+      importedBytes +
+      [...new Set(retained.map((array) => array.buffer))].reduce(
+        (sum, buffer) => sum + buffer.byteLength,
+        0,
+      );
     const gpuEligible = new Set(
       plan.stages
         .filter((stage) => {
@@ -733,7 +825,7 @@ export async function prepareWorldEvaluation(
         // Includes retained global fields, region channels, a second render pass,
         // typed-array snapshots and GPU upload/readback staging when selected.
         const peakBytes = Math.max(
-          globalBytes + globalScratchBytes,
+          importedBytes + globalBytes + globalScratchBytes,
           retainedBytes + count * 4 * (8 + 4 * plan.stages.length),
         );
         if (peakBytes > WORLD_REGION_BUDGET)
@@ -789,7 +881,15 @@ export async function prepareWorldEvaluation(
               second = inputs.get('b'),
               mask = inputs.get('mask');
             const op = operation(node);
-            if ((node.bypassed || node.kind === 'output') && primary) field = primary;
+            if (node.kind === 'maskOutput' && primary) {
+              const zero = new Float32Array(count);
+              field = {
+                height: primary.height.map((value) => clamp(value)),
+                flow: zero,
+                wear: zero,
+                deposition: zero,
+              };
+            } else if ((node.bypassed || node.kind === 'output') && primary) field = primary;
             else if (primary && op && stage.inputs.every((input) => input.channel === 'height')) {
               const height =
                 backend.capability.backend === 'webgpu' && gpuEligible.has(node.id)

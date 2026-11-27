@@ -135,6 +135,21 @@ async function waitForTerrainPaint(canvas: Locator) {
   );
 }
 
+async function screenshotPixels(page: Page, png: Buffer) {
+  // Decode the browser's composited screenshot. Reading a WebGL drawing buffer
+  // after presentation can return zeros when preserveDrawingBuffer is disabled.
+  return page.evaluate(async (encoded) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${encoded}`;
+    await image.decode();
+    const surface = document.createElement('canvas');
+    surface.width = surface.height = 128;
+    const context = surface.getContext('2d', { willReadFrequently: true })!;
+    context.drawImage(image, 0, 0, 128, 128);
+    return Array.from(context.getImageData(0, 0, 128, 128).data);
+  }, png.toString('base64'));
+}
+
 test('map navigation preserves physical anchors, keyboard selection, and graph shortcuts', async ({
   page,
 }, info) => {
@@ -291,6 +306,103 @@ test('physical 3D and split views own one renderer and release it when hidden', 
   await expect(page.locator('.wv-terrain-canvas canvas')).toHaveCount(0);
   await page.getByRole('button', { name: 'World Studio', exact: true }).click();
   await expect(canvas).toBeVisible();
+  await expect(studio.locator('.wv-terrain-canvas canvas')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test('World PBR shading uses a worker, preserves the visible renderer across builds and recovers context loss', async ({
+  page,
+}, info) => {
+  test.setTimeout(180_000);
+  const { studio, errors } = await openWorkspace(page);
+  const modes = studio.getByRole('group', { name: 'World view mode', exact: true });
+  await modes.getByRole('button', { name: 'Terrain', exact: true }).click();
+  const canvas = studio.getByRole('img', {
+    name: 'Three-dimensional sampled world terrain',
+    exact: true,
+  });
+  await expect(canvas).toHaveAttribute('data-material-state', 'ready', { timeout: 60_000 });
+  await expect(canvas).toHaveAttribute('data-shading', 'material');
+  const sceneId = await canvas.getAttribute('data-scene-id');
+  const updates = Number(await canvas.getAttribute('data-mesh-updates'));
+  await waitForTerrainPaint(canvas);
+  const material = await screenshotPixels(page, await canvas.screenshot());
+  const toggle = studio.getByRole('button', { name: 'Show authored PBR material', exact: true });
+  await toggle.click();
+  await expect(canvas).toHaveAttribute('data-shading', 'diagnostic');
+  await waitForTerrainPaint(canvas);
+  const diagnostic = await screenshotPixels(page, await canvas.screenshot());
+  let changed = 0,
+    differenceSum = 0,
+    minimumIntensity = 255,
+    maximumIntensity = 0;
+  const colors = new Set<number>();
+  for (let p = 0; p < material.length; p += 4) {
+    const difference =
+      (Math.abs(material[p] - diagnostic[p]) +
+        Math.abs(material[p + 1] - diagnostic[p + 1]) +
+        Math.abs(material[p + 2] - diagnostic[p + 2])) /
+      3;
+    if (difference > 2) changed++;
+    differenceSum += difference;
+    const intensity = (material[p] + material[p + 1] + material[p + 2]) / 3;
+    minimumIntensity = Math.min(minimumIntensity, intensity);
+    maximumIntensity = Math.max(maximumIntensity, intensity);
+    colors.add((material[p] << 16) | (material[p + 1] << 8) | material[p + 2]);
+  }
+  expect(colors.size).toBeGreaterThan(64);
+  expect(maximumIntensity - minimumIntensity).toBeGreaterThan(40);
+  expect(changed / (128 * 128)).toBeGreaterThan(0.02);
+  expect(differenceSum / (128 * 128)).toBeGreaterThan(0.5);
+  await info.attach('world-pbr-render-metrics.json', {
+    body: JSON.stringify({
+      colors: colors.size,
+      minimumIntensity,
+      maximumIntensity,
+      changedFraction: changed / (128 * 128),
+      meanRGBDifference: differenceSum / (128 * 128),
+    }),
+    contentType: 'application/json',
+  });
+  await expect(canvas).toHaveAttribute('data-scene-id', sceneId!);
+  await expect(canvas).toHaveAttribute('data-mesh-updates', String(updates));
+  await toggle.click();
+  await expect(canvas).toHaveAttribute('data-material-state', 'ready');
+  await expect(canvas).toHaveAttribute('data-shading', 'material');
+
+  // A completed replacement changes geometry resources, not the renderer or
+  // camera controller. While the graph is stale it keeps its prior material.
+  await studio.getByRole('tab', { name: 'Setup', exact: true }).click();
+  await studio.getByLabel('Height scale', { exact: true }).fill('600');
+  await studio.getByLabel('Height scale', { exact: true }).press('Tab');
+  await expect(canvas).toHaveAttribute('data-scene-id', sceneId!);
+  await studio.getByRole('button', { name: 'Build preview', exact: true }).click();
+  await expect
+    .poll(async () => Number(await canvas.getAttribute('data-mesh-updates')))
+    .toBeGreaterThan(updates);
+  await expect(canvas).toHaveAttribute('data-material-state', 'ready', { timeout: 60_000 });
+  await expect(canvas).toHaveAttribute('data-scene-id', sceneId!);
+  await expect(studio.locator('.wv-terrain-canvas canvas')).toHaveCount(1);
+  await waitForTerrainPaint(canvas);
+  const screenshot = info.outputPath('world-pbr-ready.png');
+  await canvas.screenshot({ path: screenshot });
+  await info.attach('world-pbr-ready.png', {
+    path: screenshot,
+    contentType: 'image/png',
+  });
+
+  await canvas.evaluate((surface: HTMLCanvasElement) => {
+    const gl = surface.getContext('webgl2');
+    const extension = gl?.getExtension('WEBGL_lose_context');
+    if (!extension)
+      throw new Error('Context-loss extension is unavailable in the qualification browser.');
+    extension.loseContext();
+  });
+  await expect(studio.getByText('3D view unavailable', { exact: true })).toBeVisible();
+  await expect(studio.locator('.wv-terrain-canvas canvas')).toHaveCount(0);
+  await studio.getByRole('button', { name: 'Retry 3D', exact: true }).click();
+  await expect(canvas).toHaveAttribute('data-material-state', 'ready', { timeout: 60_000 });
+  expect(await canvas.getAttribute('data-scene-id')).not.toBe(sceneId);
   await expect(studio.locator('.wv-terrain-canvas canvas')).toHaveCount(1);
   expect(errors).toEqual([]);
 });

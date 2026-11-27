@@ -23,6 +23,7 @@ import {
   Sun,
   Globe2,
   Cpu,
+  FolderArchive,
 } from 'lucide-react';
 import { Library } from './components/Library';
 import { Inspector } from './components/Inspector';
@@ -32,8 +33,10 @@ import { ExportDialog } from './components/ExportDialog';
 import { HelpDialog } from './components/HelpDialog';
 import { Modal } from './components/Modal';
 import { ComputePanel } from './components/ComputePanel';
+import { ProjectLibrary } from './components/ProjectLibrary';
 import { TerrainIcon, PRESET_ICON_NAMES } from './components/TerrainIcon';
 import { createNode } from './model/registry';
+import { MAX_GRAPH_NODES, GRAPH_NODE_LIMIT_ERROR, inputHandle, validateGraph } from './model/graph';
 import { STUDIO_KERNELS } from './model/noiseStudio';
 import { createProject, PRESETS } from './model/presets';
 import { parseProject, saveProject } from './model/project';
@@ -48,6 +51,7 @@ import type { MaterialStroke } from './materials/materialPaint';
 import { applyPaintStrokes, paintCapacity, type PaintLayer } from './materials/paintLayers';
 import type { SplinePoint } from './model/splines';
 import { useTerrainEngine } from './hooks/useTerrainEngine';
+import { useProjectLibraryBinding } from './hooks/useProjectLibraryBinding';
 import type {
   MapChannel,
   HeightField,
@@ -90,6 +94,13 @@ export default function App() {
   const [project, setProject] = useState(initial);
   const projectRef = useRef(project);
   projectRef.current = project;
+  const {
+    binding: libraryBinding,
+    selectProject: selectLibraryProject,
+    newDocument: newLibraryDocument,
+    setBinding: setLibraryBinding,
+    forgetProject: forgetLibraryProject,
+  } = useProjectLibraryBinding(initial);
   const [selectedId, setSelectedId] = useState<string | null>(
     initial.graph.nodes.find((n) => n.kind === 'hydraulic')?.id ?? null,
   );
@@ -110,9 +121,9 @@ export default function App() {
     () => window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false,
   );
   const theme: ThemeMode = themeChoice ?? (systemDark ? 'dark' : 'light');
-  const [modal, setModal] = useState<'export' | 'help' | 'palette' | 'presets' | 'compute' | null>(
-    null,
-  );
+  const [modal, setModal] = useState<
+    'export' | 'help' | 'palette' | 'presets' | 'compute' | 'projects' | null
+  >(null);
   const [leftOpen, setLeftOpen] = useState(() => window.innerWidth > 1050);
   const [rightOpen, setRightOpen] = useState(() => window.innerWidth > 760);
   // Sidebars become temporary overlays at different breakpoints. Close each
@@ -241,6 +252,13 @@ export default function App() {
   const apply = useCallback(
     (next: TerrainProject, group = '', record = true, recovering = false) => {
       const previous = projectRef.current;
+      if (next.graph !== previous.graph) {
+        const graphError = validateGraph(next.graph);
+        if (graphError) {
+          notify(graphError);
+          return false;
+        }
+      }
       const bytes = projectStorageBytes(next);
       // Permit recovery and shrinking of older oversized sessions, but not
       // edits that increase an already oversized project.
@@ -251,7 +269,14 @@ export default function App() {
       const paintChanged =
         next.materialPaint !== previous.materialPaint || next.paintLayers !== previous.paintLayers;
       const changed = paintChanged || projectSnapshot(next) !== projectSnapshot(previous);
-      if (!changed && !pendingMove.current) return true;
+      if (!changed && !pendingMove.current) {
+        // Identical portable documents can still belong to different saved
+        // projects; switching them must update identity without an undo step.
+        selectLibraryProject(previous, next);
+        projectRef.current = next;
+        setProject(next);
+        return true;
+      }
       if (!record) {
         pendingMove.current ??= previous;
       } else {
@@ -269,11 +294,12 @@ export default function App() {
         pendingMove.current = null;
         lastEdit.current = { group, time: now };
       }
+      selectLibraryProject(previous, next);
       projectRef.current = next;
       setProject(next);
       return true;
     },
-    [notify],
+    [notify, selectLibraryProject],
   );
   const undo = useCallback(() => {
     const previous = past.current.pop();
@@ -281,20 +307,22 @@ export default function App() {
     future.current.push(projectRef.current);
     pendingMove.current = null;
     lastEdit.current = { group: '', time: 0 };
+    selectLibraryProject(projectRef.current, previous);
     projectRef.current = previous;
     setProject(previous);
     setHistoryTick((n) => n + 1);
-  }, []);
+  }, [selectLibraryProject]);
   const redo = useCallback(() => {
     const next = future.current.pop();
     if (!next) return;
     past.current.push(projectRef.current);
     pendingMove.current = null;
     lastEdit.current = { group: '', time: 0 };
+    selectLibraryProject(projectRef.current, next);
     projectRef.current = next;
     setProject(next);
     setHistoryTick((n) => n + 1);
-  }, []);
+  }, [selectLibraryProject]);
   useEffect(() => {
     let active = true;
     void Promise.allSettled([loadLastSession(), readSessionBackup()]).then(
@@ -438,8 +466,8 @@ export default function App() {
   const addNode = useCallback(
     (kind: NodeKind, params?: Record<string, ParamValue>) => {
       const p = projectRef.current;
-      if (p.graph.nodes.length >= 128) {
-        notify('This project has reached the 128-node limit.');
+      if (p.graph.nodes.length >= MAX_GRAPH_NODES) {
+        notify(GRAPH_NODE_LIMIT_ERROR);
         return;
       }
       const anchor = p.graph.nodes.find((n) => n.id === selectedId);
@@ -467,7 +495,7 @@ export default function App() {
           p.graph.nodes.find((n) => n.kind === 'output');
         const inputEdge =
           target &&
-          p.graph.edges.find((e) => e.target === target.id && (e.targetHandle ?? 'in') === 'in');
+          p.graph.edges.find((e) => e.target === target.id && inputHandle(e, target) === 'in');
         if (target && inputEdge && !target.parentId) {
           node.position = { ...target.position };
           const affected = p.graph.nodes.map((n) =>
@@ -543,8 +571,8 @@ export default function App() {
     const p = projectRef.current;
     const n = p.graph.nodes.find((n) => n.id === selectedId);
     if (!n || n.kind === 'output' || n.kind === 'group') return;
-    if (p.graph.nodes.length >= 128) {
-      notify('This project has reached the 128-node limit.');
+    if (p.graph.nodes.length >= MAX_GRAPH_NODES) {
+      notify(GRAPH_NODE_LIMIT_ERROR);
       return;
     }
     const copy = {
@@ -594,7 +622,11 @@ export default function App() {
   }, [selectedId, apply]);
   const restoreLastSession = useCallback(() => {
     if (!lastSession) return;
-    apply(lastSession, '', true, true);
+    // A restore is a new editing document. Do not reassign the identity of an
+    // object that may already be retained by Undo or a saved project binding.
+    const restored = { ...lastSession };
+    newLibraryDocument(restored);
+    apply(restored, '', true, true);
     setPaintSession((value) => value + 1);
     setEditingSplineId(null);
     setPreviewNodeId(undefined);
@@ -604,10 +636,11 @@ export default function App() {
         null,
     );
     notify(`Restored ${lastSession.name}.`);
-  }, [apply, lastSession, notify]);
+  }, [apply, lastSession, notify, newLibraryDocument]);
   const loadPreset = useCallback(
     (id: string) => {
       const next = createProject(id);
+      newLibraryDocument(next);
       apply(next);
       setPaintSession((value) => value + 1);
       const designer = next.graph.nodes.find((node) => node.kind === 'spline');
@@ -628,7 +661,7 @@ export default function App() {
         `${PRESETS.find((p) => p.id === id)?.name ?? 'Landscape'} loaded. Undo restores your previous graph.`,
       );
     },
-    [apply, notify],
+    [apply, notify, newLibraryDocument],
   );
   const preview = useCallback((id: string) => {
     const nodes = projectRef.current.graph.nodes;
@@ -654,6 +687,7 @@ export default function App() {
       if (file.size > MAX_PROJECT_FILE_BYTES)
         throw new Error('This project is too large. The maximum file size is 32 MiB.');
       const loaded = parseProject(JSON.parse(await file.text()));
+      newLibraryDocument(loaded);
       apply(loaded, '', true, true);
       setPaintSession((value) => value + 1);
       setEditingSplineId(null);
@@ -911,6 +945,15 @@ export default function App() {
           </button>
           <span className="toolbar-separator" />
           <button
+            type="button"
+            className="icon-button"
+            aria-label="Projects and revisions"
+            title="Saved projects and revision history"
+            onClick={() => setModal('projects')}
+          >
+            <FolderArchive size={17} />
+          </button>
+          <button
             className="icon-button"
             aria-label="Open project"
             title="Open a terrain project"
@@ -1149,6 +1192,7 @@ export default function App() {
                 <NodeGraph
                   theme={theme}
                   graph={project.graph}
+                  project={project}
                   onChange={updateGraph}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
@@ -1271,6 +1315,7 @@ export default function App() {
                 <NodeGraph
                   theme={theme}
                   graph={project.graph}
+                  project={project}
                   onChange={updateGraph}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
@@ -1310,6 +1355,30 @@ export default function App() {
         }}
       />
       {modal === 'export' && <ExportDialog project={project} onClose={() => setModal(null)} />}
+      {modal === 'projects' && (
+        <ProjectLibrary
+          project={project}
+          binding={libraryBinding}
+          onCheckpoint={setLibraryBinding}
+          onDelete={forgetLibraryProject}
+          onOpen={(loaded, binding) => {
+            newLibraryDocument(loaded, binding);
+            if (!apply(loaded, '', true, true)) return false;
+            setPaintSession((value) => value + 1);
+            setEditingSplineId(null);
+            setPreviewNodeId(undefined);
+            setSelectedId(
+              loaded.graph.nodes.find((node) => node.kind === 'hydraulic')?.id ??
+                loaded.graph.nodes[0]?.id ??
+                null,
+            );
+            setModal(null);
+            notify(`Opened ${loaded.name}. Your previous document was checkpointed.`);
+            return true;
+          }}
+          onClose={() => setModal(null)}
+        />
+      )}
       {modal === 'help' && <HelpDialog onClose={() => setModal(null)} />}
       {modal === 'compute' && (
         <ComputePanel

@@ -6,6 +6,9 @@ import { createWorldDefinition, DEFAULT_WORLD_TRANSPORT } from '../src/model/wor
 import { STUDIO_DEFAULTS } from '../src/model/noiseStudio';
 import type { TerrainProject } from '../src/model/types';
 import { generateWorldRegion } from '../src/engine/world';
+import { WORLD_MATERIAL_MAPS } from '../src/materials/worldMaterial';
+import { encodeSamples, MAX_PROJECT_FILE_BYTES } from '../src/model/heightRaster';
+import { parseProject } from '../src/model/project';
 import {
   checkWorldExportBudget,
   estimateWorldExport,
@@ -148,6 +151,131 @@ function png(bytes: Uint8Array) {
 }
 
 describe('World export contracts', () => {
+  it('reports Float32 elevation precision independently of the uint16 range', async () => {
+    const value = options();
+    value.world.domain.datum = 2 ** 20;
+    value.world.domain.heightScale = 1;
+    const { manifest } = await collect(value);
+    expect(manifest.encoding.quantizationStepMeters).toBe(0.125);
+    expect(manifest.encoding.quantization).toContain('Variable IEEE 754 Float32');
+    const integer = await collect({ ...value, format: 'raw16' });
+    expect(integer.manifest.encoding.quantizationStepMeters).toBe(
+      (integer.manifest.encoding.elevationMaxMeters -
+        integer.manifest.encoding.elevationMinMeters) /
+        65535,
+    );
+    expect(integer.manifest.encoding.quantization).toContain('Uniform uint16');
+  });
+  it('rejects ZIP32 file count overflow during preflight', () => {
+    const value = options();
+    value.samplesX = value.samplesZ = 4096;
+    value.tileIntervals = 16;
+    value.format = 'png16';
+    expect(() => estimateWorldExport(value)).toThrow('ZIP32 file count');
+  });
+  it('retains final output samples when lattice extent division rounds down', async () => {
+    const value = options();
+    value.world.domain.cellsX = 9;
+    value.world.domain.cellsZ = 11;
+    value.samplesX = 29;
+    value.samplesZ = 31;
+    value.maps = ['normalGL', 'basecolor', 'materialNormalGL'];
+    const { files, manifest } = await collect(value);
+    for (const tile of manifest.tiles) {
+      const height = files[tile.files.find((file) => file.map === 'height')!.path];
+      expect(height.length).toBe(tile.samples[0] * tile.samples[1] * 4);
+      const values = new Float32Array(height.buffer, height.byteOffset, height.length / 4);
+      expect(values.every(Number.isFinite)).toBe(true);
+      for (const file of tile.files.filter((file) => file.path.endsWith('.png'))) {
+        const decoded = png(files[file.path]);
+        expect([decoded.width, decoded.height]).toEqual(tile.samples);
+      }
+    }
+  });
+  it('streams compact multi-megabyte projects within the actual archive estimate and reloads them', async () => {
+    const value = options();
+    value.samplesX = value.samplesZ = 16;
+    const source = createNode('heightImport', { x: 0, y: 50 }, 'embedded-source');
+    source.raster = {
+      name: 'Embedded heightmap',
+      width: 1536,
+      height: 1024,
+      format: 'u16le',
+      data: encodeSamples(new Uint8Array(1536 * 1024 * 2)),
+    };
+    value.project.graph.nodes.push(source);
+    const { files, manifest } = await collect(value);
+    const encoded = files['project.nhterrain.json'];
+    expect(encoded.length).toBeGreaterThan(4 * 1048576);
+    const text = strFromU8(encoded);
+    expect(text).toBe(JSON.stringify(JSON.parse(text)));
+    expect(
+      parseProject(JSON.parse(text)).graph.nodes.find((node) => node.id === source.id)?.raster,
+    ).toEqual(source.raster);
+    expect(manifest.memory.archiveBytes).toBeGreaterThan(
+      Object.values(files).reduce((sum, bytes) => sum + bytes.length, 0),
+    );
+  });
+  it('rejects an oversized embedded project before evaluating or emitting an archive', async () => {
+    const value = options();
+    value.project.name = 'x'.repeat(MAX_PROJECT_FILE_BYTES);
+    let emitted = 0;
+    await expect(
+      streamWorldExport(value, () => {
+        emitted++;
+      }),
+    ).rejects.toThrow('32 MiB');
+    expect(emitted).toBe(0);
+  });
+  it('encodes all PBR channels with identical decoded pixels across tile sizes and a data alpha channel', async () => {
+    const value = options();
+    value.maps = [...WORLD_MATERIAL_MAPS];
+    value.project.materialPaint = [
+      {
+        layer: 'soil',
+        radius: 0.2,
+        hardness: 0.7,
+        strength: 0.8,
+        texture: 'grain',
+        points: [
+          { u: 0.3, v: 0.4 },
+          { u: 0.7, v: 0.6 },
+        ],
+      },
+    ];
+    const a = await collect(value),
+      b = await collect({ ...value, tileIntervals: 32 });
+    expect(a.manifest.material?.algorithm).toBe('surface-fabric-4');
+    expect(a.manifest.material?.ranges).toEqual(b.manifest.material?.ranges);
+    const assemble = (archive: typeof a, map: string) => {
+      const output = new Uint8Array(value.samplesX * value.samplesZ * 4);
+      for (const tile of archive.manifest.tiles) {
+        const file = tile.files.find((file) => file.map === map)!;
+        const bytes = archive.files[file.path];
+        expect(worldCRC32(bytes)).toBe(file.crc32);
+        const pixels = map === 'relief' ? bytes : png(bytes).pixels;
+        for (let z = 0; z < tile.samples[1]; z++) {
+          const at = ((tile.sampleOffset[1] + z) * value.samplesX + tile.sampleOffset[0]) * 4;
+          const row = pixels.subarray(z * tile.samples[0] * 4, (z + 1) * tile.samples[0] * 4);
+          output.set(row, at);
+        }
+      }
+      return output;
+    };
+    for (const map of WORLD_MATERIAL_MAPS) expect(assemble(a, map), map).toEqual(assemble(b, map));
+    const splat = assemble(a, 'splat'),
+      gl = assemble(a, 'materialNormalGL'),
+      dx = assemble(a, 'materialNormalDX');
+    for (let i = 0; i < splat.length; i += 4) {
+      expect(splat[i] + splat[i + 1] + splat[i + 2] + splat[i + 3]).toBe(255);
+      expect(gl[i + 1] + dx[i + 1]).toBe(255);
+      expect(gl[i]).toBe(dx[i]);
+      expect(gl[i + 2]).toBe(dx[i + 2]);
+      expect(gl[i + 3]).toBe(255);
+    }
+    expect(splat.some((v, i) => i % 4 === 3 && v < 255)).toBe(true);
+  });
+
   it('reports actual tile completions separately for range, encoding and authored masks', async () => {
     const value = options();
     const mask = createNode('mask', { x: 200, y: 200 }, 'progress-mask');
