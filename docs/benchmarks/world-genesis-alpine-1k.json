@@ -1,0 +1,218 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "revision": {
+    "revision": "a02881f4595ef66182b62087d41a1b4e19f4be20",
+    "dirty": false,
+    "source": "git"
+  },
+  "environment": {
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "node": "v24.22.3",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "machine": "x86_64"
+  },
+  "input": {
+    "path": "examples/genesis-alpine.nhterrain.json",
+    "sha256": "f8e0040f6ca1d717fd9700ed322abf7869a398c685faaab183c8c7b396779346"
+  },
+  "archive": {
+    "path": "test-results/genesis-final-alpine-1k.zip",
+    "bytes": 46441669,
+    "sha256": "ae90b063d900ffc7782f5aade6816248d7d38a8952ea80ef60aeb7cb78a12621"
+  },
+  "buildTiming": {
+    "schemaVersion": 1,
+    "command": [
+      "node",
+      "scripts/nh.mjs",
+      "build",
+      "examples/genesis-alpine.nhterrain.json",
+      "--out",
+      "test-results/genesis-final-alpine-1k.zip",
+      "--samples",
+      "1024",
+      "--global-resolution",
+      "256",
+      "--tile-intervals",
+      "128",
+      "--format",
+      "raw32",
+      "--maps",
+      "hardness,lithology,uplift,incision,drainageArea,channel,basecolor,roughness,ao,orm,splat,curvature,materialNormalGL,materialNormalDX,detailNormalGL,relief",
+      "--json"
+    ],
+    "cwd": "/workspace/scratch/2aaef9e90630/Normal-Height",
+    "startedUTC": "2026-11-27T21:14:41.586222+00:00",
+    "finishedUTC": "2026-11-27T21:15:24.536094+00:00",
+    "wallSeconds": 42.949746715999936,
+    "userSeconds": 35.223337,
+    "systemSeconds": 1.486808,
+    "peakRSSBytes": 258830336,
+    "rssDefinition": "Linux resource.getrusage(RUSAGE_CHILDREN).ru_maxrss; child process high-water resident memory, including runtime/source loading, not a live-buffer estimate.",
+    "exitCode": 0,
+    "stdout": "test-results/genesis-final-alpine-1k-build.json",
+    "stderr": "test-results/genesis-final-alpine-1k-build.stderr"
+  },
+  "cliMeasurements": {
+    "elapsedMilliseconds": 42079.36531,
+    "peakProcessRssBytes": 258830336,
+    "scope": "Single process high-water RSS, including source loading and earlier operations; not live-buffer estimates or a process memory cap.",
+    "node": "v24.22.3",
+    "platform": "linux",
+    "architecture": "x64"
+  },
+  "memoryEstimate": {
+    "archiveBytes": 76685017,
+    "peakBytes": 123116262,
+    "retainedArchiveBytes": 0,
+    "tileCount": 64,
+    "tileIntervals": 128,
+    "sampleCountIncludingBorders": 1062961,
+    "budgetBytes": 536870912
+  },
+  "verification": {
+    "archiveBytes": 46441669,
+    "expandedBytes": 46283841,
+    "files": 1091,
+    "tiles": 64,
+    "verifiedMapFiles": 1088,
+    "dimensions": [
+      1024,
+      1024
+    ],
+    "profile": "generic",
+    "build": {
+      "revision": "a02881f4595ef66182b62087d41a1b4e19f4be20",
+      "dirty": false,
+      "source": "git"
+    },
+    "importQualification": "Generic data contract validated. Blender bridge qualification is recorded separately in docs/BLENDER.md; other external application imports remain unverified.",
+    "warnings": [
+      "World Genesis is an artistic landscape evolution model. Its removed-rock and uplift volumes describe the reference grids, not sediment export or a calibrated geological age. Drainage and incision diagnostics precede optional World transport.",
+      "Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion.",
+      "Preflight counts live data buffers and archive retention. JavaScript runtime, garbage collection, renderer and GPU memory are additional; the budget is not a process memory cap.",
+      "Material elevation distribution and diagnostic normalization use the selected export region. A different crop can change climate-dependent coverage. The material appearance is model 4; shader-only close detail is not baked into these terrain maps."
+    ]
+  },
+  "verificationTiming": {
+    "schemaVersion": 1,
+    "command": [
+      "node",
+      "scripts/nh.mjs",
+      "verify",
+      "test-results/genesis-final-alpine-1k.zip",
+      "--json"
+    ],
+    "cwd": "/workspace/scratch/2aaef9e90630/Normal-Height",
+    "startedUTC": "2026-11-27T21:15:28.169979+00:00",
+    "finishedUTC": "2026-11-27T21:15:29.740286+00:00",
+    "wallSeconds": 1.5701985970001715,
+    "userSeconds": 1.446194,
+    "systemSeconds": 0.519764,
+    "peakRSSBytes": 247033856,
+    "rssDefinition": "Linux resource.getrusage(RUSAGE_CHILDREN).ru_maxrss; child process high-water resident memory, including runtime/source loading, not a live-buffer estimate.",
+    "exitCode": 0,
+    "stdout": "test-results/genesis-final-alpine-1k-verify.json",
+    "stderr": "test-results/genesis-final-alpine-1k-verify.stderr"
+  },
+  "mapFilesByChannel": {
+    "height": 64,
+    "hardness": 64,
+    "lithology": 64,
+    "uplift": 64,
+    "incision": 64,
+    "drainageArea": 64,
+    "channel": 64,
+    "basecolor": 64,
+    "roughness": 64,
+    "ao": 64,
+    "orm": 64,
+    "splat": 64,
+    "curvature": 64,
+    "materialNormalGL": 64,
+    "materialNormalDX": 64,
+    "detailNormalGL": 64,
+    "relief": 64
+  },
+  "dimensions": {
+    "samples": [
+      1024,
+      1024
+    ],
+    "intervals": [
+      1023,
+      1023
+    ],
+    "widthMeters": 8000,
+    "depthMeters": 8000,
+    "sampleSpacingMeters": [
+      7.820136852394917,
+      7.820136852394917
+    ],
+    "originMeters": [
+      -4000,
+      -4000
+    ]
+  },
+  "genesisReport": {
+    "algorithmVersion": "world-genesis-1",
+    "mode": "multiscale-stream-power",
+    "width": 256,
+    "height": 256,
+    "spacingX": 31.372549019607842,
+    "spacingZ": 31.372549019607842,
+    "levels": [
+      {
+        "width": 65,
+        "height": 65,
+        "spacingX": 125,
+        "spacingZ": 125,
+        "iterations": 12,
+        "durationYears": 60000
+      },
+      {
+        "width": 129,
+        "height": 129,
+        "spacingX": 62.5,
+        "spacingZ": 62.5,
+        "iterations": 12,
+        "durationYears": 36000
+      },
+      {
+        "width": 256,
+        "height": 256,
+        "spacingX": 31.372549019607842,
+        "spacingZ": 31.372549019607842,
+        "iterations": 12,
+        "durationYears": 24000
+      }
+    ],
+    "durationYears": 120000,
+    "upliftVolumeM3": 6053001995.05668,
+    "incisedVolumeM3": 2244221400.667401,
+    "hillslopeRedistributedVolumeM3": 1839165476.1789217,
+    "hillslopeResidualM3": -8.206895252271806e-08,
+    "reconstructionVolumeM3": -88614.91082906723,
+    "finalVolumeChangeM3": 3808691979.4788346,
+    "outletCount": 1020,
+    "maxDrainageAreaM2": 12059200.98263748,
+    "drainageAreaResidualM2": 6.92903995513916e-07,
+    "durationMs": 1673.711593,
+    "limitations": [
+      "Artist-controlled stream-power evolution with stylized rock competence; parameters are not geologically calibrated.",
+      "Whole-domain reference grids are refined together. Export pixels below the final reference spacing do not receive an independent erosion solve.",
+      "Incision removes rock without transporting or depositing its sediment. Incised volume is not outlet sediment export.",
+      "Coarse-to-fine displacement reconstruction is not mass conservative; its integrated volume change is reported separately.",
+      "Priority-flood spill elevations connect drainage without filling terrain. Implicit incision follows a primary D8 receiver; weighted contributing area splits across downhill neighbors and may cross primary basin divides.",
+      "Open edges have fixed base levels. Hillslope diffusion uses monotone pairwise splitting; it is not an exact large-time-step PDE solution.",
+      "Diagnostics describe the Genesis stage before any optional World water and sediment transport."
+    ]
+  },
+  "notes": [
+    "Build source was clean when CLI provenance was captured.",
+    "The standalone verifier was run after documentation images were restored, so its invocation metadata reports dirty=true; the verified archive embeds dirty=false and the exact source revision above.",
+    "1024-square asset sampling reconstructs a 256-square whole-domain Genesis solution; no finer erosion solve is claimed.",
+    "Live-buffer estimates and process peak RSS are distinct measurements."
+  ]
+}

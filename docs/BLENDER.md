@@ -46,6 +46,14 @@ Each sample maps to the corresponding exported pixel center, including both dupl
 
 The bridge computes physical height gradients once over the complete admitted export region, then assigns those normals to the tile meshes. Internal tile boundaries therefore use the same neighbors instead of clamped per-tile derivatives. Blender encodes custom corner normals internally; qualification measures the resulting angular error rather than claiming bit-identical stored normal vectors.
 
+The [World Genesis qualification](WORLD_GENESIS_QUALIFICATION.md#the-actual-1024-square-alpine-asset)
+also measures a complete 64-tile, 1024-square Alpine asset. Its decoded normals
+have a 0.006574° 99th-percentile error and a 0.175314° maximum; the maximum
+shared-border angular difference is 0.175950°. This larger terrain exceeds the
+small fixture's 0.06° normal bound, and that limitation remains explicit in the
+evidence. Maximum shared-border position difference was 0.1221 mm across the
+8 km footprint. Use the measured precision when setting downstream tolerances.
+
 All imported textures are packed directly from validated PNG bytes in memory. Archive members are never extracted. The `.blend` also stores the manifest and portable project as JSON text datablocks with execution disabled. The source archive can be moved or removed after saving the `.blend`.
 
 ### Large coordinates and elevation datums

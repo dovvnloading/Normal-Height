@@ -150,6 +150,10 @@ The existing Blender bridge can import the package's terrain and PBR maps. Geolo
 
 ## Validation and performance evidence
 
+The [qualification record](WORLD_GENESIS_QUALIFICATION.md) contains clean-source
+CPU measurements, actual before/after field figures, browser acceptance results,
+the complete 1024-square all-map package, and Blender import/render/reopen evidence.
+
 The meaningful regression boundaries are numerical behavior, reproducibility and delivery, rather than screenshots alone:
 
 - zero-evolution identity and non-mutating inputs;

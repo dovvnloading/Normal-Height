@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "a02881f4595ef66182b62087d41a1b4e19f4be20",
+  "workflowRun": "https://github.com/dovvnloading/Normal-Height/actions/runs/46068678314",
+  "jobID": 140740088988,
+  "artifactID": 15231089779,
+  "artifactSHA256": "27378223f3235126c80d73f9c67450807d39c1e86172cbcbcdce91f22481be6d",
+  "reportOrigin": "Parsed unchanged JSON emitted by the completed Blender CI qualification job; full signatures and renders are in the workflow artifact.",
+  "initial": {
+    "ok": true,
+    "blenderVersion": "4.3.2",
+    "numpyVersion": "1.24.3",
+    "formats": {
+      "raw16": {
+        "tiles": 4,
+        "verticesIncludingBorders": 884,
+        "uniqueSamples": 825,
+        "sharedSampleComparisons": 59,
+        "maxGeometryErrorMeters": 0.000010172526060614473,
+        "maxNormalComponentError": 0.00027641614511708656,
+        "maxNormalAngleDegrees": 0.019356820180067805,
+        "maxUVError": 2.80492445936531e-8,
+        "maxDecodedTextureError": 5.960464477539063e-8,
+        "measuredBoundsMeters": [
+          [
+            120,
+            -289.99999237060547,
+            176.28477478027344
+          ],
+          [
+            1080,
+            350,
+            416.4403533935547
+          ]
+        ],
+        "genesisAlgorithm": "world-genesis-1",
+        "genesisFieldsVerified": [
+          "channel",
+          "drainageArea",
+          "hardness",
+          "incision",
+          "lithology",
+          "uplift"
+        ]
+      },
+      "png16": {
+        "tiles": 4,
+        "verticesIncludingBorders": 884,
+        "uniqueSamples": 825,
+        "sharedSampleComparisons": 59,
+        "maxGeometryErrorMeters": 0.000010172526060614473,
+        "maxNormalComponentError": 0.00027641614511708656,
+        "maxNormalAngleDegrees": 0.019356820180067805,
+        "maxUVError": 2.80492445936531e-8,
+        "maxDecodedTextureError": 5.960464477539063e-8,
+        "measuredBoundsMeters": [
+          [
+            120,
+            -289.99999237060547,
+            176.28477478027344
+          ],
+          [
+            1080,
+            350,
+            416.4403533935547
+          ]
+        ],
+        "genesisAlgorithm": "world-genesis-1",
+        "genesisFieldsVerified": [
+          "channel",
+          "drainageArea",
+          "hardness",
+          "incision",
+          "lithology",
+          "uplift"
+        ]
+      },
+      "raw32": {
+        "tiles": 4,
+        "verticesIncludingBorders": 884,
+        "uniqueSamples": 825,
+        "sharedSampleComparisons": 59,
+        "maxGeometryErrorMeters": 0.000010172526060614473,
+        "maxNormalComponentError": 0.00038380325244044555,
+        "maxNormalAngleDegrees": 0.025223251764672126,
+        "maxUVError": 2.80492445936531e-8,
+        "maxDecodedTextureError": 5.960464477539063e-8,
+        "measuredBoundsMeters": [
+          [
+            120,
+            -289.99999237060547,
+            176.28477478027344
+          ],
+          [
+            1080,
+            350,
+            416.4403381347656
+          ]
+        ],
+        "genesisAlgorithm": "world-genesis-1",
+        "genesisFieldsVerified": [
+          "channel",
+          "drainageArea",
+          "hardness",
+          "incision",
+          "lithology",
+          "uplift"
+        ]
+      }
+    },
+    "decoderChecks": [
+      "all five PNG filters and CRC/dimension checks: 16-bit type 0",
+      "all five PNG filters and CRC/dimension checks: 8-bit type 6",
+      "bounded PNG decompression",
+      "vertex and expanded-byte admission",
+      "missing tile rejection",
+      "physical-origin consistency",
+      "shared-height mismatch despite valid CRC",
+      "Genesis categorical IDs despite valid CRC",
+      "Genesis RAW8 exact dimensions",
+      "Genesis physical map units",
+      "central-directory allocation bound",
+      "corrupt ZIP DEFLATE becomes a recoverable import error"
+    ],
+    "failureChecks": [
+      "manifest CRC rejection",
+      "unsafe member path rejection",
+      "post-allocation rollback"
+    ],
+    "largeDatum": {
+      "unrebasedRejected": true,
+      "physicalOffsetMeters": 1000000176.2847733,
+      "maxRebasedHeightErrorMeters": 0.00000762939453125
+    }
+  },
+  "reopened": {
+    "ok": true,
+    "blenderVersion": "4.3.2",
+    "collections": 3,
+    "externalSourceArchivesAvailable": false,
+    "packedAssetsAndGeometryIdentical": true
+  }
+}

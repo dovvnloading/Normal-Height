@@ -1,0 +1,1611 @@
+{
+  "schemaVersion": 1,
+  "scenario": "cold-world-genesis-prepare-and-sample",
+  "measuredAt": "2026-11-27T21:12:01.502Z",
+  "source": {
+    "revision": "a02881f4595ef66182b62087d41a1b4e19f4be20",
+    "dirty": false,
+    "source": "git",
+    "codeFiles": [
+      {
+        "path": "package-lock.json",
+        "bytes": 66683,
+        "sha256": "7b7282b9667044113709ed36feeb6d1395d81821050f650455633beaae1888c6"
+      },
+      {
+        "path": "package.json",
+        "bytes": 1597,
+        "sha256": "b4f21090da492bb191bd7140c548f7b1f32c35b271c921daaf7f755b363e0a61"
+      },
+      {
+        "path": "scripts/genesis-benchmark.mjs",
+        "bytes": 12255,
+        "sha256": "2e262d52dfbcf9b86c5625c99998ecd6359777c116ebb016ab7f82ec79a14ca4"
+      },
+      {
+        "path": "scripts/genesis-visual-report.py",
+        "bytes": 5952,
+        "sha256": "9a040509213c50ad9fab583990d4f40d42009d0fb211d9b7334cbb7f3579ee9f"
+      },
+      {
+        "path": "scripts/mesh-bench-report.mjs",
+        "bytes": 7460,
+        "sha256": "329222a12f5dfb43ac0adee802ce5d16ad5e2a7f0b7928d88b1e39c63e94303b"
+      },
+      {
+        "path": "scripts/nh.mjs",
+        "bytes": 1891,
+        "sha256": "3a6e179b269c9944b0a285ed06b62d1c2dfdd327e89e8676b3a923a8055a7bdd"
+      },
+      {
+        "path": "scripts/readme-media.mjs",
+        "bytes": 15538,
+        "sha256": "6d7c15448b2c1fd0e830fa11487ca2a2ea17aed07db4f472757287443b838720"
+      },
+      {
+        "path": "scripts/render-noise-gallery.py",
+        "bytes": 2564,
+        "sha256": "8d0f5bc2d27b257698228da4261e59150b645cb966195f998a55e9d19fc16c0d"
+      },
+      {
+        "path": "scripts/world-export-profile.mjs",
+        "bytes": 9470,
+        "sha256": "5a60e6de442fd6ead1b8c76683c72af2af0922e850c53c115a070fe091407355"
+      },
+      {
+        "path": "scripts/world-gpu-qualify.mjs",
+        "bytes": 4821,
+        "sha256": "e0adbcdc27e33f6d4890ccfe6a265a465c3d9b3820c598a3d62e384a5562b64e"
+      },
+      {
+        "path": "src/App.tsx",
+        "bytes": 55726,
+        "sha256": "5f54028ec273751c2e11eb3bbe97db4e4f1f9bdb9d44df48c2344c957bde4813"
+      },
+      {
+        "path": "src/cli/archive.ts",
+        "bytes": 21308,
+        "sha256": "6363668fcbb02f13c0a17f2a264e13ea88e33dbeaaa6d1f749d5dd4a3e2cef0e"
+      },
+      {
+        "path": "src/cli/main.ts",
+        "bytes": 17040,
+        "sha256": "4a90ef997e2322545b21e3b4303e17a5d7f7611acc8b5fa65bd02577f6a80d3d"
+      },
+      {
+        "path": "src/components/ComputePanel.css",
+        "bytes": 1841,
+        "sha256": "0b9b2cff0beaa2412d132b779214c8b122aa42a526dab25d45653a7fed8ac28b"
+      },
+      {
+        "path": "src/components/ComputePanel.tsx",
+        "bytes": 4487,
+        "sha256": "540be04f89a0d4a949132762b99c7cdc7b356bcbb07f87eddebb587e0263a962"
+      },
+      {
+        "path": "src/components/Controls.tsx",
+        "bytes": 4830,
+        "sha256": "2de4b4adfc91b09b2335bfa017f0d9521d62788f0acc6b5c63d561d131d55ba0"
+      },
+      {
+        "path": "src/components/ExportDialog.tsx",
+        "bytes": 13177,
+        "sha256": "dae1da52498e7db5206a5bf8e05e0d61bcc44682943eba7a20202eed1bd469b9"
+      },
+      {
+        "path": "src/components/HeightImportControl.css",
+        "bytes": 1663,
+        "sha256": "045e8668214f284c1e5f17f21d59bcb3825186ac2a20ab624e0279fba4fbeb4a"
+      },
+      {
+        "path": "src/components/HeightImportControl.tsx",
+        "bytes": 9475,
+        "sha256": "1918a4af180fe1bbfda2d48f4d1b6bbcb410ffc4ba84ee6e6976633ba61977aa"
+      },
+      {
+        "path": "src/components/HelpDialog.tsx",
+        "bytes": 4985,
+        "sha256": "20a99fad67d117a2ee0dca392e76389a10373740ddffd2072a1c6b6590c13e6c"
+      },
+      {
+        "path": "src/components/Inspector.tsx",
+        "bytes": 30986,
+        "sha256": "1feba4e7682ecae15ae8ddefac949c3c8ab38122c84352e351eecde1caf65d9c"
+      },
+      {
+        "path": "src/components/Library.tsx",
+        "bytes": 9630,
+        "sha256": "254d4894482eaf3fd0ee673753f648c5ed6bd9d7f0bb9df06100436af1f321b0"
+      },
+      {
+        "path": "src/components/MaterialBrush.tsx",
+        "bytes": 11407,
+        "sha256": "013e3874b3d16cb53976e5ad5509af07ac245354f07608fa035c32df5db2814d"
+      },
+      {
+        "path": "src/components/Modal.tsx",
+        "bytes": 3052,
+        "sha256": "10263597d242a642e8e17552e4e6cf68677953512e2f2fa9cc57cc71ff44fddb"
+      },
+      {
+        "path": "src/components/NodeGraph.css",
+        "bytes": 11894,
+        "sha256": "7c7527ff2f579daa54ad203ffefcd2ac41f8ece7c4046f10974cb1652a9cf5b4"
+      },
+      {
+        "path": "src/components/NodeGraph.tsx",
+        "bytes": 45376,
+        "sha256": "38e22b8c488d3b8ed8150275cbc1d069e4eec50e0e0e96ee8ea2881144e07e2d"
+      },
+      {
+        "path": "src/components/NoiseCurveEditor.tsx",
+        "bytes": 9441,
+        "sha256": "4e08a8c4eef68ec052043ffa3e4c84fe2bb2afab19f9e5d453c33b0aa2b05cc9"
+      },
+      {
+        "path": "src/components/NoiseExportDialog.tsx",
+        "bytes": 8414,
+        "sha256": "a514bf5e38d8add44be3a2385db4da04d29a4cfb83c2b8b517daacf1e45a0797"
+      },
+      {
+        "path": "src/components/NoisePreviewCanvas.tsx",
+        "bytes": 2671,
+        "sha256": "3dd9a4d563f1566e150525b9d9bf143725c5ef8582fe06b17eb8a24df3893307"
+      },
+      {
+        "path": "src/components/NoiseStudio.css",
+        "bytes": 22965,
+        "sha256": "3d63f7d7f842f59f70cfd8d255264d0286ae9e34b038766803a56eaa0bdfc9fd"
+      },
+      {
+        "path": "src/components/NoiseStudio.tsx",
+        "bytes": 35539,
+        "sha256": "925a09eddbad6cd396e77c9e80f71da08f8f1f84f42ddb2dd421d34d778ccda6"
+      },
+      {
+        "path": "src/components/PaintWorkspace.css",
+        "bytes": 30368,
+        "sha256": "1bc9d1057951785e67f820ed75d9efe5e63020b56979ede8cb3e424d1183aafc"
+      },
+      {
+        "path": "src/components/PaintWorkspace.tsx",
+        "bytes": 62278,
+        "sha256": "15d625f6a07c0438e17ed3a4d277ea9c41ae2a969ef06393a95247957a5fbf6c"
+      },
+      {
+        "path": "src/components/ProjectLibrary.css",
+        "bytes": 5277,
+        "sha256": "f0d06c2949bb85b8bbccae32a25daa762530a3b4a90e9c3d1774cba4e2a54829"
+      },
+      {
+        "path": "src/components/ProjectLibrary.tsx",
+        "bytes": 16812,
+        "sha256": "a23278a258b9cd773f50864cfb6d0cb406b65ec49da595b7fd601e74e7d3bb97"
+      },
+      {
+        "path": "src/components/SplineMapOverlay.tsx",
+        "bytes": 14527,
+        "sha256": "7266b10d6f98bfb575ba2ce73539b3638ad4cf28279958098dacec87ecd8db0f"
+      },
+      {
+        "path": "src/components/TerrainIcon.css",
+        "bytes": 767,
+        "sha256": "2d6f631b671bac07ecb2e270deef6f181158e61c4596684d0b04bab84fdac4fc"
+      },
+      {
+        "path": "src/components/TerrainIcon.tsx",
+        "bytes": 3923,
+        "sha256": "cf5bb923ad78028bb00fb15df1e02758b23c0e8413c8af2e9f2dca18422d9f7e"
+      },
+      {
+        "path": "src/components/TerrainViewport.css",
+        "bytes": 43578,
+        "sha256": "00225de4e92492e498860df6299761ffc400062c1b3141081c9738361aa9c3dc"
+      },
+      {
+        "path": "src/components/TerrainViewport.tsx",
+        "bytes": 113136,
+        "sha256": "5dd55a25c6d4d2563d1953f0c5f8ce630fdd290d22f0019d53981f23f4078b39"
+      },
+      {
+        "path": "src/components/WorldStudio.css",
+        "bytes": 34395,
+        "sha256": "e74c5246da05413cea9fd73d0a8c2ad17225af32ae71a653b620f990a277a9a6"
+      },
+      {
+        "path": "src/components/WorldStudio.tsx",
+        "bytes": 46571,
+        "sha256": "cbb7b97955baff71e9e412f51e1e213270497ca05c0ec8a59c1cfe84a43e927b"
+      },
+      {
+        "path": "src/components/world/WorldAnalysisPanel.tsx",
+        "bytes": 14474,
+        "sha256": "f4256e4dc753dcfabcca1ccbcaf80f92972a28a792e1ed5cef9de4464c879a40"
+      },
+      {
+        "path": "src/components/world/WorldControls.tsx",
+        "bytes": 5385,
+        "sha256": "ce6ac4b488af20e8f79c8afb6f4c25fe2991719dacd434817de603e9abc5bb60"
+      },
+      {
+        "path": "src/components/world/WorldExportPanel.css",
+        "bytes": 11793,
+        "sha256": "37221b4882287238cfc5eb83a498c296610c6a900903afabc61ad987ff7c614f"
+      },
+      {
+        "path": "src/components/world/WorldExportPanel.tsx",
+        "bytes": 31491,
+        "sha256": "555016dd9e39ba560121f05071aa319e094bd268a0e0c11a586cefa7539edc13"
+      },
+      {
+        "path": "src/components/world/WorldGenesisPanel.tsx",
+        "bytes": 15041,
+        "sha256": "76d33338c18ce66842288494e84031332487fd9e62cdbb36f0ba549978d8fb60"
+      },
+      {
+        "path": "src/components/world/WorldSetupPanel.tsx",
+        "bytes": 9512,
+        "sha256": "1264c86f492db6e06201c1956df55b002349509214a6a557e41b102fa04a0fcb"
+      },
+      {
+        "path": "src/components/world/WorldSimulationPanel.tsx",
+        "bytes": 13377,
+        "sha256": "5b24210608ca3d200515eb2083dbffee528d1b737f00f4d98f26042aed618e28"
+      },
+      {
+        "path": "src/components/world/WorldTerrain3D.tsx",
+        "bytes": 10757,
+        "sha256": "cddcadf63132afc686921b4b12ad9362c1625699c8e914ff644d99a5265648aa"
+      },
+      {
+        "path": "src/components/world/WorldTerrainScene.ts",
+        "bytes": 16391,
+        "sha256": "b77847f74eee8e265cc4bf1ce7a62a91e7e05349d69afe722f42a94900a7f916"
+      },
+      {
+        "path": "src/components/world/WorldViewport.css",
+        "bytes": 22395,
+        "sha256": "81be37c60be64206ae6d283f8fc99cd7b148604d2c951d9a0c33f2b4978f513e"
+      },
+      {
+        "path": "src/components/world/WorldViewport.tsx",
+        "bytes": 49251,
+        "sha256": "5496a59929697f6b2ce17ff89c21d6fdf6599b952f21a06dbd04204a97455274"
+      },
+      {
+        "path": "src/components/world/worldAnalysis.ts",
+        "bytes": 3800,
+        "sha256": "dc6d4999d0b755cc63eb7c55b9cddec95ebd77482f0906bb5089e38d1abaa951"
+      },
+      {
+        "path": "src/components/world/worldTerrainCamera.ts",
+        "bytes": 484,
+        "sha256": "e3092c4ae4be65b1b54aafcced0f5bdc1cd417b31cfc77895ba32fa60f4a4c07"
+      },
+      {
+        "path": "src/components/world/worldTerrainMesh.ts",
+        "bytes": 4138,
+        "sha256": "972e4b1c5e269a6d326b7f46f713dfa0fd2a1c3ec521feb25c041a8a7eb84137"
+      },
+      {
+        "path": "src/components/world/worldViewMath.ts",
+        "bytes": 22446,
+        "sha256": "5017a4748fe354a7b752bf42d49acf70a1ca6e2a4436a4e61f77010e7bd1fbb4"
+      },
+      {
+        "path": "src/components/worldMap.ts",
+        "bytes": 3166,
+        "sha256": "24338bd9e560f48e2e484f02ef6631ac50bf958357e9c8f3cc00aca5a37ba632"
+      },
+      {
+        "path": "src/engine/coast-cache.test.ts",
+        "bytes": 3951,
+        "sha256": "6979d8b0f2942743c5e139d1ed1bc6ce342a4a6d615bcad3cdeb31517bf78443"
+      },
+      {
+        "path": "src/engine/coast.test.ts",
+        "bytes": 6434,
+        "sha256": "0dadb8c0491857a838605093c01a52fc7fee90def0ff5048ad0de9dd6a5fc902"
+      },
+      {
+        "path": "src/engine/coast.ts",
+        "bytes": 6316,
+        "sha256": "65576acd079b9f2116a8294eb82059b5ef8b39ba3cd9491aaaf2c19390c3219e"
+      },
+      {
+        "path": "src/engine/compute/cache.ts",
+        "bytes": 6563,
+        "sha256": "8daa8207859486cc8e6cf12fb4a3f69813e9bb2b5a9f46888f3357fbe4dfff85"
+      },
+      {
+        "path": "src/engine/compute/client.ts",
+        "bytes": 2642,
+        "sha256": "7f6163b7e52a005439c18044f6ec1fd7a4cc82a184c9f7b319bec7b59e83aa6d"
+      },
+      {
+        "path": "src/engine/distanceTransform.ts",
+        "bytes": 1079,
+        "sha256": "8beef2dcc81cd1b9fb527486ad13be963216df84b5cef4ebef62340bea08d5b6"
+      },
+      {
+        "path": "src/engine/erosion.ts",
+        "bytes": 12865,
+        "sha256": "7b9bdf6226c9317f4bf48652438608dc374360850cb08f3e1d618009211661d0"
+      },
+      {
+        "path": "src/engine/erosionMask.test.ts",
+        "bytes": 7868,
+        "sha256": "73e6b20c5aa0885299d5f6aac1ae512f78df4bbdfe9efac8f5945e4c9e0c59de"
+      },
+      {
+        "path": "src/engine/erosionMask.ts",
+        "bytes": 887,
+        "sha256": "8129a4935524240af9e5f1729fbac85396bd01612e4afce2932f40c74b2ddf06"
+      },
+      {
+        "path": "src/engine/fields.ts",
+        "bytes": 3964,
+        "sha256": "76125dc8ab1beeea94e4bec07a47f355ecebe887c3b2f333a44e5add822276d5"
+      },
+      {
+        "path": "src/engine/fluid.test.ts",
+        "bytes": 7310,
+        "sha256": "182a4c5f4833ff67e725579ee53f229cef80c08d886cb18c79c23271a89c3d71"
+      },
+      {
+        "path": "src/engine/fluid.ts",
+        "bytes": 20008,
+        "sha256": "be01e2ded0871cfd3f04857a6b9f61e3f8edf017a71cbac490c5f570cb321de0"
+      },
+      {
+        "path": "src/engine/fluvial.test.ts",
+        "bytes": 17390,
+        "sha256": "e98080d4116d419f0be248c96419e4b7186d874b43a01ea9a26fb15eabac768a"
+      },
+      {
+        "path": "src/engine/fluvial.ts",
+        "bytes": 40138,
+        "sha256": "03ac23db56615ebd12f528707c37fe771374a561177313bd4bf069829b1e8e4e"
+      },
+      {
+        "path": "src/engine/genesis/drainage.ts",
+        "bytes": 7990,
+        "sha256": "8c0a2507f6c02595c2e704ab7b6ec8dbe89b51797c2b5500c096fd7f3f639667"
+      },
+      {
+        "path": "src/engine/genesis/geology.ts",
+        "bytes": 3957,
+        "sha256": "2022d0a3f4927d6696f7904c2e0f80734fed261a0fd602a2219a6221d9f567b5"
+      },
+      {
+        "path": "src/engine/genesis/index.ts",
+        "bytes": 13392,
+        "sha256": "3a62ea2fee4c24e2b0d36147c03e7e73d0345eb4cbe0cba7e9fa99031db60e7a"
+      },
+      {
+        "path": "src/engine/genesis/report.ts",
+        "bytes": 3904,
+        "sha256": "cae65f23be17802e922cf7cafc84d849c3c14a14a330b1f17f1a238c83f994e9"
+      },
+      {
+        "path": "src/engine/genesis/solver.ts",
+        "bytes": 4811,
+        "sha256": "e0debb2efb88c743ee627f056b396c795b509228ebf30edb96dc3f117098dccb"
+      },
+      {
+        "path": "src/engine/genesis/types.ts",
+        "bytes": 1962,
+        "sha256": "97f1bc86748c1be6b5c439637cd8cd18c1ba557e178bf558da99dec3f0483259"
+      },
+      {
+        "path": "src/engine/gpu/pointwise.ts",
+        "bytes": 19100,
+        "sha256": "d163c27a5e6cd69403fd26b84b639dd2fd19698670622348f80b1d67befcab6c"
+      },
+      {
+        "path": "src/engine/heightImport.ts",
+        "bytes": 2892,
+        "sha256": "c481ed3c33fcf525995dcc553f8f9a1b3c01d6376d2406458dd963cd884edd37"
+      },
+      {
+        "path": "src/engine/hillslope.test.ts",
+        "bytes": 3940,
+        "sha256": "76ec3daeab3ab6c74fbecd69736e1a9bcc4b5b23398c9a3b61a9aa712ec0b3ac"
+      },
+      {
+        "path": "src/engine/hillslope.ts",
+        "bytes": 4403,
+        "sha256": "40137aa9a41003b3f1265a220b6b23861e1224424daabfdd614ec096c38e847c"
+      },
+      {
+        "path": "src/engine/hydrology.test.ts",
+        "bytes": 6271,
+        "sha256": "70c6c1419a7d5c2ef72f84f0a51e35203edeed949aaab6e67d8021c1c0c4c77c"
+      },
+      {
+        "path": "src/engine/hydrology.ts",
+        "bytes": 6459,
+        "sha256": "d4420e713a5e5a301c352494cfc13ee3f3e220a3525beba7c2eb63e72ef80ab9"
+      },
+      {
+        "path": "src/engine/index.ts",
+        "bytes": 31779,
+        "sha256": "2dee7e3b76d04bcb6c5ed5cd62d2313d786627c6f7d5e16fabc890d3c6ed8f8f"
+      },
+      {
+        "path": "src/engine/landscape.test.ts",
+        "bytes": 7791,
+        "sha256": "f70b5bb6cdb925e8c80837b3ffa5f6ab8cd5c7892873c7636c339b01cb808fb6"
+      },
+      {
+        "path": "src/engine/landscape.ts",
+        "bytes": 23779,
+        "sha256": "7cb7f7d564f87e96ab5128347122f3acb8d3f27de54115cf10527939cc8316ed"
+      },
+      {
+        "path": "src/engine/landscapeFlow.ts",
+        "bytes": 3388,
+        "sha256": "c642515a9c88cc6467a0d1ae4e7435084179e4678dd3e522da1dea89227b4b58"
+      },
+      {
+        "path": "src/engine/noise.test.ts",
+        "bytes": 6480,
+        "sha256": "902d78e1398098a2fc345cc9c2dc0797ee15be13884650b96494793c6d88d563"
+      },
+      {
+        "path": "src/engine/noise.ts",
+        "bytes": 12270,
+        "sha256": "e0f5757bccbf742f10f9a30a11fe5a69adc3bddff8344ef8f2d6090cf594d381"
+      },
+      {
+        "path": "src/engine/noiseFootprint.test.ts",
+        "bytes": 3951,
+        "sha256": "5ef877770fd0c460ccfa435f979532a8773f6c738240f0f0b9690b4ffb9beeb9"
+      },
+      {
+        "path": "src/engine/noiseStudio/cellular.test.ts",
+        "bytes": 7402,
+        "sha256": "e9aaaedac4a638804b0c953c4f20820773bd952f95a4cae1086589f30767eb32"
+      },
+      {
+        "path": "src/engine/noiseStudio/cellular.ts",
+        "bytes": 5720,
+        "sha256": "60169c638ad5b3d25e81249a131f444d1170c40bd1dc74734b30dd84c0f7ad3c"
+      },
+      {
+        "path": "src/engine/noiseStudio/coverage.test.ts",
+        "bytes": 3811,
+        "sha256": "1968f4c3a68c53cc91253093601670fd8ba9a29fef70b97f62c0fdbef6ffffe4"
+      },
+      {
+        "path": "src/engine/noiseStudio/coverage.ts",
+        "bytes": 1295,
+        "sha256": "791cb1df36e30bd3e59e716c7abdf1e9e22c71323e210b047f80eca2c6305ac4"
+      },
+      {
+        "path": "src/engine/noiseStudio/curve.ts",
+        "bytes": 1556,
+        "sha256": "b382535dd5b3e40a5280a7b2647d2e0e44e7def78a7f026cb2bd674ab068b641"
+      },
+      {
+        "path": "src/engine/noiseStudio/derivative-reference.test.ts",
+        "bytes": 8163,
+        "sha256": "aaba7a24dbc13f0f5cf414e8482857af774fa5ccfb6deca12252210a052173f2"
+      },
+      {
+        "path": "src/engine/noiseStudio/fractal.test.ts",
+        "bytes": 5870,
+        "sha256": "90b6ee22c5be644a1dc49d6f581f3eeb2139f1a0fc1b44354be7c851712a707f"
+      },
+      {
+        "path": "src/engine/noiseStudio/fractal.ts",
+        "bytes": 7449,
+        "sha256": "ef6bb9b57d8bc69eede160b4dead470bd238e7fc638aa8cb1f5edb33b00c61af"
+      },
+      {
+        "path": "src/engine/noiseStudio/index.ts",
+        "bytes": 4738,
+        "sha256": "e7fa242faf2a7742410329479c23f1d5993085fc326ee2d6c643bcaf936085ab"
+      },
+      {
+        "path": "src/engine/noiseStudio/kernels.test.ts",
+        "bytes": 6863,
+        "sha256": "3265cdb2762ef21e0e94fa3e1e294693ffd2acabc2bbb41c2936e0fd8cac0b21"
+      },
+      {
+        "path": "src/engine/noiseStudio/kernels.ts",
+        "bytes": 11429,
+        "sha256": "2b8c7e9eca13371df1d6aaaa9081e8808fab5933e676b7d4dd330236d1aea9e2"
+      },
+      {
+        "path": "src/engine/noiseStudio/math.ts",
+        "bytes": 1323,
+        "sha256": "e9a1914c0ea1886f2c3a497a9a9e75e11c6bce1f26f6c874a502e7dfe0ea4730"
+      },
+      {
+        "path": "src/engine/noiseStudio/perlin.ts",
+        "bytes": 2094,
+        "sha256": "683cc8ebcd2adc647e68766f4ec2c78a8bcf16b51ef168a0a475dbf0a34ee34a"
+      },
+      {
+        "path": "src/engine/noiseStudio/sampler.test.ts",
+        "bytes": 12855,
+        "sha256": "c25361e53d6eb3f541494173b406e18fda770687be70913a07bb7ae8ed081ce8"
+      },
+      {
+        "path": "src/engine/noiseStudio/statistics.ts",
+        "bytes": 3074,
+        "sha256": "dae9ee4c86d9cb2d9b85890690834fe1e59891f9c96913fc8ca7c40c283026f4"
+      },
+      {
+        "path": "src/engine/noiseStudio/vendor/FastNoiseLite.ts",
+        "bytes": 122248,
+        "sha256": "67c13e35897c5cb3a8ea19bfa39ab9ec240bb887c7c79a58102488c15bdc1aaf"
+      },
+      {
+        "path": "src/engine/noiseStudio/vendor/README.md",
+        "bytes": 1237,
+        "sha256": "9cd35c6834d25f58ac6100b7ea0f1899c5b9b56d874f7d1dbbff8321d04ea7f5"
+      },
+      {
+        "path": "src/engine/noiseStudio/warp.ts",
+        "bytes": 3374,
+        "sha256": "80040cd759e119d5c0cf67bf8f909b9f190581decd966c21eb6e90fa6b6e8884"
+      },
+      {
+        "path": "src/engine/orogeny.test.ts",
+        "bytes": 3530,
+        "sha256": "cbef80fdd07736c6872c1065caf79126ad3c532c334e8fd256954cae6b48a284"
+      },
+      {
+        "path": "src/engine/orogeny.ts",
+        "bytes": 1035,
+        "sha256": "8b4073fe86fa10b5d94055d88b48f70096fd89c65ef20b1bfd32c9cdf9b9986c"
+      },
+      {
+        "path": "src/engine/plan/graph.ts",
+        "bytes": 5266,
+        "sha256": "49910b1a9cd0daac8377ce9877fe9dad0077d39a8cec8747fea72639ff48771d"
+      },
+      {
+        "path": "src/engine/spline.ts",
+        "bytes": 4857,
+        "sha256": "b3d8cf23fa677a306d7e86890675ebcff33b0ca5fc2b674344dbb7991d7aa0b3"
+      },
+      {
+        "path": "src/engine/streamCarving.test.ts",
+        "bytes": 3773,
+        "sha256": "6841838bd57f2ad8c476a8b10740193ca1c0ed127ee46ec188afdc84039e1213"
+      },
+      {
+        "path": "src/engine/streamCarving.ts",
+        "bytes": 9632,
+        "sha256": "a5c2adf2201ca345c95bd35a65885bfb17c13255de1102de522751afc8ccc052"
+      },
+      {
+        "path": "src/engine/terrain.worker.ts",
+        "bytes": 1628,
+        "sha256": "7a88156806491e80e5b31a5667f5a0bea8a7da79debfb85fbe46eaa13389f2c7"
+      },
+      {
+        "path": "src/engine/watershed.ts",
+        "bytes": 12098,
+        "sha256": "b79f8cb062f7a513969e11557c00d7ca13aa4d7d8bd315ba98f0c8d7f02660a4"
+      },
+      {
+        "path": "src/engine/world.worker.ts",
+        "bytes": 432,
+        "sha256": "a560bdf2ea2f57af1aaef4f34548bfb489d26a42e080908f0a020bf058329f7a"
+      },
+      {
+        "path": "src/engine/world/capabilities.ts",
+        "bytes": 9433,
+        "sha256": "a69f4549481b998d7d59ccdf7ea4f796b460868bcc2705528810ff313f76ada0"
+      },
+      {
+        "path": "src/engine/world/classification.ts",
+        "bytes": 512,
+        "sha256": "5a5e6c9c5e579e1c2cc678d830828e58a2456e0858e26acf4d1633cfde10d7b3"
+      },
+      {
+        "path": "src/engine/world/grid.ts",
+        "bytes": 7541,
+        "sha256": "6ddf40b1b28cb2d564d901af131c8bb8301b5824fbf770740e11669ec548f53d"
+      },
+      {
+        "path": "src/engine/world/hydrology.ts",
+        "bytes": 16155,
+        "sha256": "c63b589007a53c9167f0d98796b30d7eb351b66d6070a48af1cdc6f7ab04638c"
+      },
+      {
+        "path": "src/engine/world/index.ts",
+        "bytes": 46397,
+        "sha256": "c64ef38d35dbfa13d29c10df605ac6ff3563440f5b51992760ab80f29414e2a6"
+      },
+      {
+        "path": "src/engine/world/memory.ts",
+        "bytes": 3201,
+        "sha256": "394d31e7819a35994399d4f84bd0a0a09794d2fd69c623fba4e74cc674debab0"
+      },
+      {
+        "path": "src/engine/world/noise.ts",
+        "bytes": 3222,
+        "sha256": "900f93868b39047b78b51b8451aff30f7d093613ae3064cfc3eae5f7329f6e4c"
+      },
+      {
+        "path": "src/engine/world/types.ts",
+        "bytes": 2947,
+        "sha256": "8e8a05c3f52fc8bf52db61caa4241a7948474672f05c84d53cc3c5c3a687eb8a"
+      },
+      {
+        "path": "src/engine/worldPreviewClient.ts",
+        "bytes": 6404,
+        "sha256": "b8aeeafe1778d12f29820dc453ec800ed3b60506ea748cf93abb35ba68610372"
+      },
+      {
+        "path": "src/engine/worldPreviewPlan.ts",
+        "bytes": 2767,
+        "sha256": "c999e53f81a4f999c59b93c441f49ec3b8b8f93f9a7fb131f08459ce2078aa83"
+      },
+      {
+        "path": "src/engine/worldPreviewSession.ts",
+        "bytes": 8925,
+        "sha256": "0e6ab680d5707409bba425a906a3e368e0ef2a2941db9f3f6194242d6185e216"
+      },
+      {
+        "path": "src/engine/worldSourceIdentity.ts",
+        "bytes": 3526,
+        "sha256": "5444c4034774aa1074aa62239aba94f095fceac05f238eb8564fff4841de82d0"
+      },
+      {
+        "path": "src/engine/worldStore/codec.ts",
+        "bytes": 6890,
+        "sha256": "3c197f29a41054aa7ce226f6de87165e35283b7f338f9197061bd0b1173a74fa"
+      },
+      {
+        "path": "src/engine/worldStore/index.ts",
+        "bytes": 8220,
+        "sha256": "b3e0081781d5f1e8b545fd72f9b0d18faaa501b439dce7f9478fb92ae62b946d"
+      },
+      {
+        "path": "src/engine/worldStore/storage.ts",
+        "bytes": 7740,
+        "sha256": "e103881a8ff7e99484daaa1e57fc5edc44904d69be00d3b9a53b5ba4f4becc6c"
+      },
+      {
+        "path": "src/export/budget.test.ts",
+        "bytes": 2481,
+        "sha256": "9942b82de2e2a1524b86231b9ba977a626201e0d2ba1215d0bea912ac66dc5a6"
+      },
+      {
+        "path": "src/export/budget.ts",
+        "bytes": 2949,
+        "sha256": "d9d2c74a1efcaf3aaef2b540f0b38b4ada22db3c7424c91d22f1463771ea16c9"
+      },
+      {
+        "path": "src/export/export.worker.ts",
+        "bytes": 2053,
+        "sha256": "42b6d9f4a057e4557a256b2333f666d5da8bded1427977429d8f9af658858bcb"
+      },
+      {
+        "path": "src/export/exportClient.test.ts",
+        "bytes": 9801,
+        "sha256": "20a13e10e08551b324b598a0b5a4a2e4e645d17fb476a12af401af402e2852e8"
+      },
+      {
+        "path": "src/export/exportClient.ts",
+        "bytes": 7263,
+        "sha256": "b14a5ec2db68d519366db4e538e6630f23df41fdb87a1383e813320df7a33666"
+      },
+      {
+        "path": "src/export/exportPlan.test.ts",
+        "bytes": 2519,
+        "sha256": "931c89456dc53a4ffb60ff475821f83fa546358b2ec1d415f5fc4244c1e66487"
+      },
+      {
+        "path": "src/export/exportPlan.ts",
+        "bytes": 3509,
+        "sha256": "0021154f78dcdb4a07e436d3d8174ed7f9e4cb69428e9b93632d126dc80fa68a"
+      },
+      {
+        "path": "src/export/exportProtocol.ts",
+        "bytes": 816,
+        "sha256": "d99a38b986807883c55cf6d5e59dd8191392a09a5966d301a49d0f59c443c5d6"
+      },
+      {
+        "path": "src/export/genesisExport.ts",
+        "bytes": 2408,
+        "sha256": "262dd1d9d58a4ed6936589fa63622909db5d831281bf2f48e950995d07f05975"
+      },
+      {
+        "path": "src/export/heightmap.ts",
+        "bytes": 19103,
+        "sha256": "4d91bddb5b77887c2a605ec2bfb90ecd515039e14265667620b7f02608b64997"
+      },
+      {
+        "path": "src/export/maskOutputs.ts",
+        "bytes": 787,
+        "sha256": "2c626bff82fe346cfd4af47e73071ecab835b41f62d95e459dbfe42bf9f9476c"
+      },
+      {
+        "path": "src/export/noiseExport.ts",
+        "bytes": 8663,
+        "sha256": "2dbb357d2131caad88e2ee5dd9fc463a00263b8cd1a062f4eadebcf23515c54f"
+      },
+      {
+        "path": "src/export/worldExport.ts",
+        "bytes": 54787,
+        "sha256": "8610d7c23229bf5ebb57d83291a3e395fba0ae0ed8915e1ed7d7cedc0522cef3"
+      },
+      {
+        "path": "src/export/worldExport.worker.ts",
+        "bytes": 2290,
+        "sha256": "f0871113ab4632c19ce956df476b8af1bf7a8a3947048f89399c41d343d153fe"
+      },
+      {
+        "path": "src/export/worldExportClient.test.ts",
+        "bytes": 13584,
+        "sha256": "6e52cc144f202d3c96fc148b7ef51d5ee9e4779344d1363134e7c83637bd855f"
+      },
+      {
+        "path": "src/export/worldExportClient.ts",
+        "bytes": 11149,
+        "sha256": "c58488d14f0936d2043c86ad37fa51a43fa7eb5d26d7bd364ed676c3665054c6"
+      },
+      {
+        "path": "src/export/worldExportPlan.test.ts",
+        "bytes": 4367,
+        "sha256": "cf5bd70767ea733632f86b6f30186cc4cbff9ec54aa138d44cb0510fd0232fe8"
+      },
+      {
+        "path": "src/export/worldExportPlan.ts",
+        "bytes": 5171,
+        "sha256": "41ab7b4914fb27eb2f7b8d975831945ba1001e8fd7f0c4283f8af3d8f1cfcb23"
+      },
+      {
+        "path": "src/hooks/noisePreviewProtocol.ts",
+        "bytes": 926,
+        "sha256": "6bdd211a392234c5070300ca0a6d61bad91ba70587a6fb0a6f8660aa989f911c"
+      },
+      {
+        "path": "src/hooks/noiseStudioStorage.ts",
+        "bytes": 4801,
+        "sha256": "692ce6f2a11e3372a3b78fc58c730c9c519f5d69d54da057c2edace1f58b306f"
+      },
+      {
+        "path": "src/hooks/useBrushInput.ts",
+        "bytes": 17371,
+        "sha256": "424415bcf1afb56fb25cfa721729b5888316e4be51703efeb66d8362029588e1"
+      },
+      {
+        "path": "src/hooks/useNoisePreviews.ts",
+        "bytes": 4283,
+        "sha256": "b4088b04e91dfcedfd0abf091604b7e8e3274b5ada2c2d69cdfb9bf288c1fff6"
+      },
+      {
+        "path": "src/hooks/useProjectLibraryBinding.ts",
+        "bytes": 2143,
+        "sha256": "53a8d98d95e23cf1d65be8cac11c82c76929cd223672c56757f568231c958e86"
+      },
+      {
+        "path": "src/hooks/useTerrainEngine.ts",
+        "bytes": 5357,
+        "sha256": "2c714f7763d52d6388e74aa02750384e25cb3dd574d0bc356b7b472e93420646"
+      },
+      {
+        "path": "src/hooks/useWorldEngine.ts",
+        "bytes": 13519,
+        "sha256": "55af55ee8bb58969a6cef373ac502eddd1476d41bb2079290c302bd8272fda3c"
+      },
+      {
+        "path": "src/hooks/worldProtocol.ts",
+        "bytes": 1569,
+        "sha256": "3c7918bfafa88ec6049cb0649a10a9bbbebd808e2c1785e29c9f82d0cafda1a4"
+      },
+      {
+        "path": "src/import/heightImportClient.test.ts",
+        "bytes": 4712,
+        "sha256": "188c60576fdecdf9af696964feb8bfb813bfdb79967589451669cedd5f68455c"
+      },
+      {
+        "path": "src/import/heightImportClient.ts",
+        "bytes": 1995,
+        "sha256": "49c3086203603e4f9f6d9366f7333752c53fc72e982096039026be9755c0d45d"
+      },
+      {
+        "path": "src/import/heightmap.maximum.test.ts",
+        "bytes": 1737,
+        "sha256": "55b0159d6e38aac79385de8e5fdbe9e0d773745ba44869cce98d156ef5614404"
+      },
+      {
+        "path": "src/import/heightmap.test.ts",
+        "bytes": 6880,
+        "sha256": "621ab06025302927a028a67ed85d7824758b81f2d45a3700e31b36938b900ab9"
+      },
+      {
+        "path": "src/import/heightmap.ts",
+        "bytes": 6309,
+        "sha256": "2f6f822c802d024a4e4a87c4b94e2abd758fd8ec284067621ae2deb71d167a45"
+      },
+      {
+        "path": "src/import/heightmap.worker.ts",
+        "bytes": 689,
+        "sha256": "1dbf7ba0ae0fcc409d6a04c1d6a07186f12bde6129b5a9491336d413809c930d"
+      },
+      {
+        "path": "src/import/rawLayout.test.ts",
+        "bytes": 5301,
+        "sha256": "7c8d1122a56bab7a713bd78c1dc39169d6aa75b308c0e1e5dafcdb7cd5561422"
+      },
+      {
+        "path": "src/import/rawLayout.ts",
+        "bytes": 2603,
+        "sha256": "7f7140a639891764758cc4793daf7ff4b857117d63717e3c257b04aabc58f7b2"
+      },
+      {
+        "path": "src/main.tsx",
+        "bytes": 259,
+        "sha256": "ab0b723d886976f7499ae82e5a188475dc46a046ab83a0c72a508419e4dbf2d3"
+      },
+      {
+        "path": "src/materials/brushPath.test.ts",
+        "bytes": 5136,
+        "sha256": "a23024e0e21b11dd32656518a69cda9ac2647cafaefb3d5972ae92a62d5457b4"
+      },
+      {
+        "path": "src/materials/brushPath.ts",
+        "bytes": 5597,
+        "sha256": "0853553cf631c4a1f5245266ecee62f2bc9c11e053b99a6847b30c923d2d477e"
+      },
+      {
+        "path": "src/materials/brushPresets.test.ts",
+        "bytes": 3101,
+        "sha256": "5b0b513b73a6606a6be1f756a6e5da57e963f3989058c84b342bd6e5b6469dca"
+      },
+      {
+        "path": "src/materials/brushPresets.ts",
+        "bytes": 7632,
+        "sha256": "a96067b1559101a1cc9461b0497255867badfa9ed945f2e7b35b9789b729f4f7"
+      },
+      {
+        "path": "src/materials/detailPreview.test.ts",
+        "bytes": 4707,
+        "sha256": "fbac3c4056aeedb572a97aab3ac1f1c1a4d4c623aadf45bf8bfa79428f2c0267"
+      },
+      {
+        "path": "src/materials/detailPreview.ts",
+        "bytes": 2914,
+        "sha256": "6585ed2e05da77c248b9e52a59d779eb55eedecdc5472e1cceacac21c9550cc1"
+      },
+      {
+        "path": "src/materials/detailPreview.worker.ts",
+        "bytes": 741,
+        "sha256": "57629c2734c015dcf4830b9b0e83defdc577ff4b439a390646703d8ab361024e"
+      },
+      {
+        "path": "src/materials/detailPreviewClient.ts",
+        "bytes": 3482,
+        "sha256": "5741d33b6b6d2b0434f68b6b324f0c2376f0ca95a842aee5b59d4092244b6cef"
+      },
+      {
+        "path": "src/materials/detailTiles.test.ts",
+        "bytes": 4383,
+        "sha256": "7029469a9d344ff33ed50bf10ad1608d34a0b6cc0f7085631cb7ed1c536fc789"
+      },
+      {
+        "path": "src/materials/detailTiles.ts",
+        "bytes": 21062,
+        "sha256": "827d49bde59303e70c9418154f498f925c5e58c6160c3bb752d6360c1f87fdd7"
+      },
+      {
+        "path": "src/materials/layerSynthesis.ts",
+        "bytes": 13570,
+        "sha256": "a1970e1456cae247eb54b5f1e8358efbc442b1edd747f605590aed0364beaa10"
+      },
+      {
+        "path": "src/materials/materialContacts.test.ts",
+        "bytes": 2725,
+        "sha256": "dfd3ce0e9713e205552127eae1d4bf3401a21e699cf6429035bcbb163ef71931"
+      },
+      {
+        "path": "src/materials/materialContacts.ts",
+        "bytes": 1391,
+        "sha256": "ea5ac25c83f6ca7ed7a6395d89b9ff3f30616c8b8d28a8b2d0496c3aedcf333a"
+      },
+      {
+        "path": "src/materials/materialPaint.test.ts",
+        "bytes": 5903,
+        "sha256": "ccc4af499a521be9ec1f3902a743f0ea4a5a48b20dc0dc2961c5493e36fda117"
+      },
+      {
+        "path": "src/materials/materialPaint.ts",
+        "bytes": 23160,
+        "sha256": "2c47ad203f15197b0a08cd77b9277a32f548d0e10d3239b53ec55de073be714f"
+      },
+      {
+        "path": "src/materials/materialRegion.ts",
+        "bytes": 2503,
+        "sha256": "b26f0b84150108055cc488a804f886d70fd42eac5df4ab9b544d074ecb152588"
+      },
+      {
+        "path": "src/materials/paintLayers.test.ts",
+        "bytes": 16542,
+        "sha256": "56db2f6a5d8fa3782572e6bbfb7f9002c663df463a22f391986e86a257e4d6fd"
+      },
+      {
+        "path": "src/materials/paintLayers.ts",
+        "bytes": 17891,
+        "sha256": "d017ead1eb7dd7f1873ed61b746ea9fbf9f9754083c850fcac870333a33b2cff"
+      },
+      {
+        "path": "src/materials/pbr.acceptance.test.ts",
+        "bytes": 6668,
+        "sha256": "ad908eb352bda227edb49916212a8547a82c1e371707c74737c44a6bf95b5e35"
+      },
+      {
+        "path": "src/materials/pbr.test.ts",
+        "bytes": 12651,
+        "sha256": "d0a66e3511c4b939434d6719094c43bddbb5424b20bc222bf6b75d8ce31a1489"
+      },
+      {
+        "path": "src/materials/pbr.ts",
+        "bytes": 11043,
+        "sha256": "c04b33b0a4f3b1560ee03eef638cae61c7e64c2e732ae431bdefe9ba92196f45"
+      },
+      {
+        "path": "src/materials/pbr.worker.ts",
+        "bytes": 1029,
+        "sha256": "57a0d28a76f372e66d2fa8052a57345270457d6a147f3709425964f1f5632d7d"
+      },
+      {
+        "path": "src/materials/pbrClient.ts",
+        "bytes": 6113,
+        "sha256": "e7715175e751e15f56cf959c7bf87a19544e46f1b633a42ae61550be94453271"
+      },
+      {
+        "path": "src/materials/previewBake.test.ts",
+        "bytes": 7157,
+        "sha256": "e147c90f31e9ce90d4903b45a9483e493e9a1d530e8285d488529f8d533e523a"
+      },
+      {
+        "path": "src/materials/previewBake.ts",
+        "bytes": 2327,
+        "sha256": "34179d1aef9a187e6a8e7fa8c9e0ea434adc5142bd05c08ae93edc234c6a208d"
+      },
+      {
+        "path": "src/materials/surfaceFabric.test.ts",
+        "bytes": 2801,
+        "sha256": "57062b131d84eb885ac90a34c3d5ffdbe3c3d13d8c17a40e8a58ed3ee8d3e525"
+      },
+      {
+        "path": "src/materials/surfaceFabric.ts",
+        "bytes": 13909,
+        "sha256": "979ebbe9049d555abe2934e6f9ecf52dbba909c3148bcd72da175597d6712750"
+      },
+      {
+        "path": "src/materials/terrainAnalysis.test.ts",
+        "bytes": 6180,
+        "sha256": "00fc395f61be4776f689485dcce94e1ac3904c56c72aba6aa0961239d66062c1"
+      },
+      {
+        "path": "src/materials/terrainAnalysis.ts",
+        "bytes": 6696,
+        "sha256": "c886461d165cceeab6e282473ac98b343b9000568535a7eb544147890d7b5b4d"
+      },
+      {
+        "path": "src/materials/worldMaterial.test.ts",
+        "bytes": 7100,
+        "sha256": "3869231a89ac6bc8fc21889682e8c3487a3c8e62ea2667e61386656f049fe135"
+      },
+      {
+        "path": "src/materials/worldMaterial.ts",
+        "bytes": 4197,
+        "sha256": "674286d0b680854747799168b65392e2c4e2a8a7532e32c0d75ca70f493b4924"
+      },
+      {
+        "path": "src/materials/worldMaterialPreview.test.ts",
+        "bytes": 4458,
+        "sha256": "07bacd0337922b78a964568ffd22b3707dc30f71b697f8dd85d1d08603655e2d"
+      },
+      {
+        "path": "src/materials/worldMaterialPreview.ts",
+        "bytes": 3693,
+        "sha256": "13dd178801c5f9c5724c2abf62941c6d3de367c65417c22146e2ee9278a7e5ab"
+      },
+      {
+        "path": "src/materials/worldMaterialPreview.worker.ts",
+        "bytes": 1337,
+        "sha256": "7647cc3262cd018e23b5e48542df9834d74494c82856412ed812d504122f38f7"
+      },
+      {
+        "path": "src/materials/worldMaterialPreviewClient.test.ts",
+        "bytes": 4318,
+        "sha256": "5dbca953cd3c60203a129e713e2152c90cc43989d6f1889c63dd84ce1e069a06"
+      },
+      {
+        "path": "src/materials/worldMaterialPreviewClient.ts",
+        "bytes": 4715,
+        "sha256": "f9610c018df3bc555e1ce9afeb4d18dadcdbcac2794f3a932034794de9636237"
+      },
+      {
+        "path": "src/model/autosave.ts",
+        "bytes": 2202,
+        "sha256": "ba7d86e845cc6a9930a69337f46a543d70e8ac925c9cb771c9776aff3b68bfd8"
+      },
+      {
+        "path": "src/model/buildInfo.ts",
+        "bytes": 529,
+        "sha256": "9d5d65c9fc2e13126e42686092d9b6f6b3ed0923f7e309736f3be755b026fa2d"
+      },
+      {
+        "path": "src/model/compare.test.ts",
+        "bytes": 528,
+        "sha256": "3cbcd523e486df878e78e688fcec8cff8fa19d495af7779a32465b8920f98abf"
+      },
+      {
+        "path": "src/model/genesis.ts",
+        "bytes": 5530,
+        "sha256": "f8affcd8fe9909e64d9adf5539afdc16b77109a0744bed6f6bf8792621a73b4d"
+      },
+      {
+        "path": "src/model/graph.ts",
+        "bytes": 6411,
+        "sha256": "e9f1012e23b9be4ce83930d5f3e81d310b11a5624ddeeebc4c390c2c6a624e79"
+      },
+      {
+        "path": "src/model/graphClipboard.ts",
+        "bytes": 7571,
+        "sha256": "b9ebc37bb4c15ad8b1b29d807a02c6b47f19aaf0cffe72489c7d46706a92cdf9"
+      },
+      {
+        "path": "src/model/heightRaster.ts",
+        "bytes": 4472,
+        "sha256": "8d6f7ad4f75e7ed90ba632864d09693e30ae6318f1c9e6d773976a72bf4d04b1"
+      },
+      {
+        "path": "src/model/history.test.ts",
+        "bytes": 1533,
+        "sha256": "2458614f9b100637d41e51294f17797112fbff5a9adeebd6561f2313263c4548"
+      },
+      {
+        "path": "src/model/history.ts",
+        "bytes": 1142,
+        "sha256": "4d98f87a75672cca4543b1e2d95d804c1638480de1de97543fe07d302e360cb7"
+      },
+      {
+        "path": "src/model/nodeSummary.ts",
+        "bytes": 2459,
+        "sha256": "1ffdbe0de126eacfb14b8d914ee94273fd74d0b505bd2a1ab800f0a55a28ffe4"
+      },
+      {
+        "path": "src/model/noiseStudio.test.ts",
+        "bytes": 7577,
+        "sha256": "d46dbe6325597607fc563c59bb764bc4d80a6b9642738f0952d8148198c9daec"
+      },
+      {
+        "path": "src/model/noiseStudio.ts",
+        "bytes": 31785,
+        "sha256": "a436438786f56a3993cd05c88089e54992c6559112f220964f59aaf9aa43182b"
+      },
+      {
+        "path": "src/model/pngCrc.ts",
+        "bytes": 361,
+        "sha256": "df38fdd8a02eb9c6e2b35ad98521fd7c8720d8698a329bece5d372e8f5eabdc4"
+      },
+      {
+        "path": "src/model/presets.ts",
+        "bytes": 11815,
+        "sha256": "165fad1a9196f7e7300d7895d403c61c57abe02364ea4a7816cf00f488a42b80"
+      },
+      {
+        "path": "src/model/project.ts",
+        "bytes": 9798,
+        "sha256": "12965d367f1fe18fd0e76c078448824d9d61fe70de6320b1a8cc29033e8d6542"
+      },
+      {
+        "path": "src/model/projectLibrary.ts",
+        "bytes": 12827,
+        "sha256": "4512c4ada18617538a0850f4e15ea1c0c05564a5ef3d566ea03da27c9c5c1615"
+      },
+      {
+        "path": "src/model/projectLibraryPlan.ts",
+        "bytes": 8010,
+        "sha256": "df54cfdf8385124815472685caf60477567f1149d779d3258adf77a70350d327"
+      },
+      {
+        "path": "src/model/projectStorage.ts",
+        "bytes": 2533,
+        "sha256": "092fb7f1ccecd29ca02a66c15c8b4b433ea9ea041a6d6ed1328302fd51631b39"
+      },
+      {
+        "path": "src/model/registry.ts",
+        "bytes": 28926,
+        "sha256": "40d79d6412478a075d970bee2fe38a73e7d8d15e31c2b1179e03f6c6662217bb"
+      },
+      {
+        "path": "src/model/sessionBackup.ts",
+        "bytes": 6401,
+        "sha256": "d951283117c118ea85dc87cfcd5aaf309a0ff5fa7a32f09f088cf8eec05d0e2e"
+      },
+      {
+        "path": "src/model/splines.ts",
+        "bytes": 6757,
+        "sha256": "d0038b7fc671406f185fb69445447ed702951e4ba9285d080dbeb94eaa7dd026"
+      },
+      {
+        "path": "src/model/types.ts",
+        "bytes": 5436,
+        "sha256": "f3fe33c2f43d1c33ddcd10690e7de43df21852bb6d54417cee2262a3586f02bf"
+      },
+      {
+        "path": "src/model/viewSettings.test.ts",
+        "bytes": 2579,
+        "sha256": "43ca4be74b7687a3f8f12778766f6376f3f82381e68bf88788b2301c070df428"
+      },
+      {
+        "path": "src/model/viewSettings.ts",
+        "bytes": 3435,
+        "sha256": "57a9f9f12a44442e15d5ed288a291e351895868ddcb42b37817de0663553a0f9"
+      },
+      {
+        "path": "src/model/viewportUX.test.ts",
+        "bytes": 2379,
+        "sha256": "016c0f052a39ba1d7d86b6da4877e54235ebcec6b8c2389d1b25fe06562e6d77"
+      },
+      {
+        "path": "src/model/viewportUX.ts",
+        "bytes": 4413,
+        "sha256": "9135d12b0b27b3a36637df0a37cdc9dd3bea514afd9b9aa31cbe2f3b858b26f8"
+      },
+      {
+        "path": "src/model/world.ts",
+        "bytes": 6712,
+        "sha256": "d3684e86ec8cb8d28fa712ca6713ee3b159fb1fea27c0eefd6d4659e1c133ba7"
+      },
+      {
+        "path": "src/model/worldViewSettings.ts",
+        "bytes": 5228,
+        "sha256": "ad7ccb338c72de5d9328ca5d54b67b6865ae9ce054a463399c1bd6b344460453"
+      },
+      {
+        "path": "src/render/Atmosphere.ts",
+        "bytes": 11153,
+        "sha256": "5c816ab6b35f8a0d927d5e422d85e52e3b596c8733a6f970855a298d898eba3d"
+      },
+      {
+        "path": "src/render/GroundExtension.ts",
+        "bytes": 17511,
+        "sha256": "524cb3c63a885928b3b3c3c661760575b398cafe266c767e014245810a05f7dc"
+      },
+      {
+        "path": "src/render/TerrainScene.test.ts",
+        "bytes": 10970,
+        "sha256": "ee135f18ee3627d39eca3bfa0731c86131c5a736249a32d29d58d67e843d2bec"
+      },
+      {
+        "path": "src/render/TerrainScene.ts",
+        "bytes": 75289,
+        "sha256": "d32a8141805a708353fe3d02d49829979b20bf910eb41075bcc8c2a195065f67"
+      },
+      {
+        "path": "src/render/WaterSurface.ts",
+        "bytes": 13312,
+        "sha256": "5bb9eb58fe563db4aa26d9a98a2f28468230114c9668ee357a0be77f75b9c367"
+      },
+      {
+        "path": "src/render/brushFeedback.test.ts",
+        "bytes": 11528,
+        "sha256": "76f2c380f1e645f84fb38c947a01c67a947d253e9e1bcaa1a8389b4ffc1deb98"
+      },
+      {
+        "path": "src/render/brushFeedback.ts",
+        "bytes": 14581,
+        "sha256": "3f2583c468474fb91d3218bebc59f9ba2803ad191acbf3a0185d9f1bc09bb499"
+      },
+      {
+        "path": "src/render/compare.worker.ts",
+        "bytes": 491,
+        "sha256": "60a0b8f9bafa505c3eba8db94ea1255c379ad82c72fa88fe931b73464c1e11bd"
+      },
+      {
+        "path": "src/render/compareMap.test.ts",
+        "bytes": 2355,
+        "sha256": "4644a0a0b0cbc1e3f1439c1b75199653de822723bb4923da26c0c94ea47befe5"
+      },
+      {
+        "path": "src/render/compareMap.ts",
+        "bytes": 3626,
+        "sha256": "b4c1e580c8220abb2b04563d1cb0f70643d21a60821531c92995cf0f90446975"
+      },
+      {
+        "path": "src/render/detailCamera.ts",
+        "bytes": 1139,
+        "sha256": "6cbae82a82641bf2dee2eb15b7bc43218214f97380571f0008c32d485496a585"
+      },
+      {
+        "path": "src/render/detailTextureShader.ts",
+        "bytes": 4993,
+        "sha256": "cc89af9b744784324a9c9160122c86d9ccb931aa292a789f49e8ff4acb4752c6"
+      },
+      {
+        "path": "src/render/detailTextures.test.ts",
+        "bytes": 2229,
+        "sha256": "01a34f936441df31213ab7867c12898b28c295089f7e264f4ddd828ba4e939af"
+      },
+      {
+        "path": "src/render/detailTextures.ts",
+        "bytes": 1437,
+        "sha256": "88e6111d89b57318f3b7459a19e503f11e2d8f7c17b90f466c567a26993a93cc"
+      },
+      {
+        "path": "src/render/environment.test.ts",
+        "bytes": 4498,
+        "sha256": "489ee5dfa732e753bb8f4e763222a18acb108546037603c84d90f28263dd900d"
+      },
+      {
+        "path": "src/render/maps.test.ts",
+        "bytes": 3783,
+        "sha256": "3fbf8c6f939567e0a3396cf12eb29028964be5d3e3a66d27a02fd22c8d292e6e"
+      },
+      {
+        "path": "src/render/maps.ts",
+        "bytes": 6644,
+        "sha256": "30e8b9bd5e84153553986d061c89c949c4719833d7f00916fcc1829785f3f471"
+      },
+      {
+        "path": "src/render/materialBrushOverlay.ts",
+        "bytes": 4882,
+        "sha256": "cf099fcb1b4b302b0174981a9926d8376177be1ec3c1d6c9c50205186d3338ba"
+      },
+      {
+        "path": "src/render/meshDiagnostics.test.ts",
+        "bytes": 1441,
+        "sha256": "9b41551675cb521a4960f5a40664f46bf7f9d7ac7d30ddc2dae30436bdf1327e"
+      },
+      {
+        "path": "src/render/meshDiagnostics.ts",
+        "bytes": 1547,
+        "sha256": "7e81221c7877a6c8cfa82ba2788d7d111b970e5534e4f6abfe517b21699f84e9"
+      },
+      {
+        "path": "src/render/nearField.test.ts",
+        "bytes": 7070,
+        "sha256": "9b6cd006575108d0301c3b8db1812a243c7fb9614f78626385e376a1fc5f71cb"
+      },
+      {
+        "path": "src/render/nearField.ts",
+        "bytes": 26523,
+        "sha256": "89dc95696499a46b954beea4f726b84e8e17905dd055feaa8f3a5adbe00ed60c"
+      },
+      {
+        "path": "src/render/orthographicLOD.test.ts",
+        "bytes": 1060,
+        "sha256": "2b61c60affc34d1c54deddcd3c22e48ec2d86b6f8f049e0391801d7749be866c"
+      },
+      {
+        "path": "src/render/paintGuide.worker.ts",
+        "bytes": 2056,
+        "sha256": "955b187ea1f20d207bf11ce8ec1c4787fea09672065117c7ff8c7ad4b0fe1a73"
+      },
+      {
+        "path": "src/render/pbrMaterial.test.ts",
+        "bytes": 2426,
+        "sha256": "904fd555394d214948100f3bdf294aecfedbadd7e502a23f9c389e8e372d9a60"
+      },
+      {
+        "path": "src/render/pbrMaterial.ts",
+        "bytes": 1410,
+        "sha256": "489bc6efc89d0c7230e18726d83418b1697841fe0adaa9881d4a5bd2b1684b68"
+      },
+      {
+        "path": "src/render/pbrTexture.test.ts",
+        "bytes": 2367,
+        "sha256": "8a13c3161780699733c9194c76101d549176f87ccdf350afac46cb7895eee697"
+      },
+      {
+        "path": "src/render/pbrTexture.ts",
+        "bytes": 2065,
+        "sha256": "1e927f66e49a27adc7649ad434b37b599ef618f851b18f230cd72bc962068360"
+      },
+      {
+        "path": "src/render/previewMaterial.ts",
+        "bytes": 2408,
+        "sha256": "63fdf21810d80d4f4028f6ebe3a305e5e9189dbbd48fef0b836fe23fafca7646"
+      },
+      {
+        "path": "src/render/sourceNormals.test.ts",
+        "bytes": 4470,
+        "sha256": "70106ccc18edbff887d46b473fb253a7d11831256f1a5e91f3505f8dcaadf2a8"
+      },
+      {
+        "path": "src/render/sourceNormals.ts",
+        "bytes": 7972,
+        "sha256": "84f23939284c7c86857d4a2e85cadeb27b34c0292bf5c1f0f7f24a9a82a797a9"
+      },
+      {
+        "path": "src/render/terrainDisplacement.test.ts",
+        "bytes": 8857,
+        "sha256": "dc9dc3e4c232c8ca5b8b5b7b12bf74e37ac57513b158704a641b4f8726100039"
+      },
+      {
+        "path": "src/render/terrainDisplacement.ts",
+        "bytes": 5701,
+        "sha256": "d68847536b4fc8e64ed014d13f59efafccce3b64fcd148c8d03df8728b7094b3"
+      },
+      {
+        "path": "src/render/terrainMesh.test.ts",
+        "bytes": 20979,
+        "sha256": "c4be10d69677ce02996e6e45fc948242433203f55abd9164acbbd9c2a652926e"
+      },
+      {
+        "path": "src/render/terrainMesh.ts",
+        "bytes": 32443,
+        "sha256": "0d28f2ba981b8caeb4f0efadc4c8e60346962bb915f2b612c5dd6035c76a63ba"
+      },
+      {
+        "path": "src/render/terrainPicking.test.ts",
+        "bytes": 1893,
+        "sha256": "1d54b2bc53a19d86ee8c4532ee2a619d7bb4b72f56c5b3c5ebb25303b5f69863"
+      },
+      {
+        "path": "src/render/terrainPicking.ts",
+        "bytes": 4259,
+        "sha256": "d4dc76c307c4547e608425292a9c679cff2a65531977daa35a0f61cd37b1cf9c"
+      },
+      {
+        "path": "src/render/water.test.ts",
+        "bytes": 3558,
+        "sha256": "6f577d7bf4c30e3404abeef30d42cedfec5d34c82cac2b49de68bf4249d8016f"
+      },
+      {
+        "path": "src/render/water.ts",
+        "bytes": 3264,
+        "sha256": "bd9a45953110a81f1dce99ecf9dff646ab3cacf66df60f131f708a349f4a3762"
+      },
+      {
+        "path": "src/render/weather.test.ts",
+        "bytes": 2558,
+        "sha256": "9cd41bba7d7c1031190f7201b0af9020fe64df7376b247a6c33a3f7e0d86e1e3"
+      },
+      {
+        "path": "src/render/weather.ts",
+        "bytes": 4666,
+        "sha256": "7b4e41af46e1b431f3e7f3b4eb9a3c46dddb8ace4d2548d2a8260dea7da8e749"
+      },
+      {
+        "path": "src/styles.css",
+        "bytes": 46589,
+        "sha256": "18e9472131c0bb3f801cd485f667b0adaaba9a5f243fcc4f64818ae653637cd5"
+      },
+      {
+        "path": "src/theme-dark.css",
+        "bytes": 34265,
+        "sha256": "aaf9d4cfa5ef5dfb5855a5bb7ff5448c406a1ebdf87514233d1122fec0c6c6d1"
+      },
+      {
+        "path": "src/vite-env.d.ts",
+        "bytes": 38,
+        "sha256": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5"
+      },
+      {
+        "path": "src/workers/noiseExport.worker.ts",
+        "bytes": 1264,
+        "sha256": "c72fe6dfbd581d882bf17bd5c21b745aaf0b212bcf684d5f79d4d43069cf5386"
+      },
+      {
+        "path": "src/workers/noisePreview.worker.ts",
+        "bytes": 2205,
+        "sha256": "9bf36e89012436f4e05d9133edd47347c02acedbfda7053b84c83faa13397416"
+      },
+      {
+        "path": "tsconfig.json",
+        "bytes": 660,
+        "sha256": "d662a60e85c92fbe778e7d9b529c68cbd428599e7a6b5c1d0e7bf0c1b4d5cf19"
+      },
+      {
+        "path": "vite.config.ts",
+        "bytes": 996,
+        "sha256": "a9f5e664cb1462da349987d403bd9e9e2750a8993540ee31b9f380a27726045b"
+      }
+    ],
+    "codeSHA256": "401c2baf0d83bcf7e0ab2c701407d3c6e1ff06b4a003520f43970f3c16fd6f9e",
+    "codeHashScope": "Tracked and untracked src/, scripts/, package manifests, TypeScript and Vite configuration; deleted tracked paths are recorded.",
+    "codeSHA256AtEnd": "401c2baf0d83bcf7e0ab2c701407d3c6e1ff06b4a003520f43970f3c16fd6f9e",
+    "changedDuringRun": false
+  },
+  "input": {
+    "path": "examples/genesis-alpine.nhterrain.json",
+    "sha256": "f8e0040f6ca1d717fd9700ed322abf7869a398c685faaab183c8c7b396779346",
+    "bytes": 4000
+  },
+  "environment": {
+    "node": "v24.22.3",
+    "platform": "linux",
+    "release": "6.18.57",
+    "architecture": "x64",
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "logicalCPUs": 9,
+    "hostMemoryBytes": 10451427328,
+    "typedArrayByteOrder": "LE"
+  },
+  "world": {
+    "version": 1,
+    "domain": {
+      "originX": -4000,
+      "originZ": -4000,
+      "width": 8000,
+      "depth": 8000,
+      "cellsX": 2048,
+      "cellsZ": 2048,
+      "heightScale": 2400,
+      "datum": 0,
+      "boundary": "open"
+    },
+    "tileCells": 128,
+    "globalResolution": 256,
+    "backend": "cpu-reference",
+    "genesis": {
+      "version": 1,
+      "enabled": true,
+      "durationYears": 120000,
+      "upliftMeters": 420,
+      "upliftAngleDegrees": 32,
+      "upliftWidthMeters": 1500,
+      "erosionRate": 0.000018,
+      "rainfall": 1,
+      "rockHardness": 0.58,
+      "hardnessContrast": 0.65,
+      "strataThicknessMeters": 90,
+      "strataDipDegrees": 12,
+      "strataStrikeDegrees": 32,
+      "foldAmplitudeMeters": 85,
+      "foldWavelengthMeters": 1700,
+      "faultThrowMeters": 40,
+      "faultAngleDegrees": 64,
+      "hillslopeRate": 0.035,
+      "iterations": 12
+    }
+  },
+  "outputGrid": {
+    "startX": 0,
+    "startZ": 0,
+    "cellsX": 2048,
+    "cellsZ": 2048,
+    "samplesX": 257,
+    "samplesZ": 257
+  },
+  "measurements": {
+    "prepareMs": 1735.32422,
+    "sampleMs": 279.93352400000003,
+    "totalMeasuredMs": 2015.257744,
+    "processPeakRSSBytes": 493895680,
+    "processRSSAfterSamplingBytes": 493895680,
+    "estimatedPeakLiveDataBytes": 18415616
+  },
+  "result": {
+    "heightRangeAuthored": [
+      0.0679120123386383,
+      0.47701597213745117
+    ],
+    "stages": [
+      {
+        "nodeId": "source",
+        "label": "Mountain scaffold",
+        "kind": "noise",
+        "scope": "pointwise",
+        "mode": "native",
+        "backend": "cpu-reference",
+        "algorithmVersion": "world-1/noise/v3",
+        "samplesX": 257,
+        "samplesZ": 257,
+        "spacingX": 31.25,
+        "spacingZ": 31.25,
+        "simulationResolution": null,
+        "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+      },
+      {
+        "nodeId": "output",
+        "label": "Terrain output",
+        "kind": "output",
+        "scope": "pointwise",
+        "mode": "native",
+        "backend": "cpu-reference",
+        "algorithmVersion": "world-1/output/reference",
+        "samplesX": 257,
+        "samplesZ": 257,
+        "spacingX": 31.25,
+        "spacingZ": 31.25,
+        "simulationResolution": null,
+        "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+      },
+      {
+        "nodeId": "world-genesis",
+        "label": "World Genesis",
+        "kind": "world-genesis",
+        "scope": "iterative",
+        "mode": "reconstructed",
+        "backend": "cpu-reference",
+        "algorithmVersion": "world-genesis-1",
+        "samplesX": 256,
+        "samplesZ": 256,
+        "spacingX": 31.372549019607842,
+        "spacingZ": 31.372549019607842,
+        "simulationResolution": 256,
+        "reason": "One whole-domain coarse-to-fine geological solve: uplift, exposed rock competence, implicit stream-power incision and hillslope diffusion. Its displacement is reconstructed over native input; geology is sampled at physical coordinates."
+      }
+    ],
+    "genesis": {
+      "algorithmVersion": "world-genesis-1",
+      "mode": "multiscale-stream-power",
+      "width": 256,
+      "height": 256,
+      "spacingX": 31.372549019607842,
+      "spacingZ": 31.372549019607842,
+      "levels": [
+        {
+          "width": 65,
+          "height": 65,
+          "spacingX": 125,
+          "spacingZ": 125,
+          "iterations": 12,
+          "durationYears": 60000
+        },
+        {
+          "width": 129,
+          "height": 129,
+          "spacingX": 62.5,
+          "spacingZ": 62.5,
+          "iterations": 12,
+          "durationYears": 36000
+        },
+        {
+          "width": 256,
+          "height": 256,
+          "spacingX": 31.372549019607842,
+          "spacingZ": 31.372549019607842,
+          "iterations": 12,
+          "durationYears": 24000
+        }
+      ],
+      "durationYears": 120000,
+      "upliftVolumeM3": 6053001995.05668,
+      "incisedVolumeM3": 2244221400.667401,
+      "hillslopeRedistributedVolumeM3": 1839165476.1789217,
+      "hillslopeResidualM3": -8.206895252271806e-8,
+      "reconstructionVolumeM3": -88614.91082906723,
+      "finalVolumeChangeM3": 3808691979.4788346,
+      "outletCount": 1020,
+      "maxDrainageAreaM2": 12059200.98263748,
+      "drainageAreaResidualM2": 6.92903995513916e-7,
+      "durationMs": 1724.446177,
+      "limitations": [
+        "Artist-controlled stream-power evolution with stylized rock competence; parameters are not geologically calibrated.",
+        "Whole-domain reference grids are refined together. Export pixels below the final reference spacing do not receive an independent erosion solve.",
+        "Incision removes rock without transporting or depositing its sediment. Incised volume is not outlet sediment export.",
+        "Coarse-to-fine displacement reconstruction is not mass conservative; its integrated volume change is reported separately.",
+        "Priority-flood spill elevations connect drainage without filling terrain. Implicit incision follows a primary D8 receiver; weighted contributing area splits across downhill neighbors and may cross primary basin divides.",
+        "Open edges have fixed base levels. Hillslope diffusion uses monotone pairwise splitting; it is not an exact large-time-step PDE solution.",
+        "Diagnostics describe the Genesis stage before any optional World water and sediment transport."
+      ]
+    },
+    "hashes": {
+      "heights": "b5f1362ed36d0b71da3166d0e80177577036ff8da004994d4611e9ea8dc550a3",
+      "flow": "5cfa314479d42926d003c5d0dcfc7afd2a27332d731e6392e573d1628436e7b2",
+      "wear": "00f19aba276d51f5ba6ada9ca8326e760fdacd8319d8b83b7c584489efba21e1",
+      "deposition": "259ed407692ce420a3c27c9ed3515f5ba1e756c9ac279133e8a53cf21a4d3fd0",
+      "hardness": "3dd8968ecf95b822d465596a008624b5f405d9605890cc3aa5bf57202e70b30d",
+      "lithology": "1bb5123a985a84903c92f99601ba0d839c728687b500231dbb97b643408f9012",
+      "uplift": "ad5f2bbd434b6d3f05d64c8b0dd21995e3027f48d00a0fc7939f9b69b1844e56",
+      "incision": "7e5113ba13ad7c8032af2ab6d6f8b74e128539428d233fd3dc29490dcd7d014b",
+      "drainageArea": "04ea73e9a4aaf8b5b5631991df4602d3a0f63904cc14b1049614cd28326394d9",
+      "channel": "8fd633bfa2efbae2b7d940d3286d7bfbc5981bf2093cf101fb6571e7f03b256e"
+    }
+  },
+  "qualifications": [
+    "Single cold preparation and one region sample in this process; not a statistical distribution.",
+    "Includes the complete reachable authored graph and enabled World stages. Sampling excludes PBR baking and ZIP encoding.",
+    "Process peak RSS includes Vite SSR startup and runtime overhead; estimated live data is not an OS process-memory limit.",
+    "CPU reference only. Host CPU/memory identification does not imply exclusive CPU allocation or available container memory.",
+    "Output checksums use the recorded typed-array byte order; report timings are intentionally not deterministic."
+  ]
+}
