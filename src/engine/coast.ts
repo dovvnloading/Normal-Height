@@ -13,6 +13,8 @@ export const COAST_DEFAULTS = {
 
 export type CoastSettings = typeof COAST_DEFAULTS & {
   worldSize: number;
+  /** Physical north/south extent. Omitted for the legacy square Terrain domain. */
+  worldDepth?: number;
   heightScale: number;
 };
 
@@ -72,10 +74,13 @@ function distancesToCrossings(
   level: number,
   horizontal: boolean,
   distances: Float32Array,
+  depthRatio: number,
 ): void {
   const stride = horizontal ? 1 : n;
   const lineStep = horizontal ? n : 1;
-  const missing = 4 * n * n; // Greater than any true squared distance on this tile.
+  const alongWeight = horizontal ? 1 : depthRatio * depthRatio;
+  const acrossWeight = horizontal ? depthRatio * depthRatio : 1;
+  const missing = 4 * n * n * Math.max(1, depthRatio * depthRatio);
   for (let line = 0; line < n; line++) {
     const start = line * lineStep;
     let crossing = -Infinity;
@@ -85,7 +90,7 @@ function distancesToCrossings(
         const before = input[i - stride];
         crossing = p - 1 + (level - before) / (input[i] - before);
       }
-      distances[i] = Math.min(missing, (p - crossing) ** 2);
+      distances[i] = Math.min(missing, (p - crossing) ** 2 * alongWeight);
     }
     crossing = Infinity;
     for (let p = n - 1; p >= 0; p--) {
@@ -93,7 +98,7 @@ function distancesToCrossings(
       if (p + 1 < n && water[i] !== water[i + stride]) {
         crossing = p + (level - input[i]) / (input[i + stride] - input[i]);
       }
-      distances[i] = Math.min(distances[i], (crossing - p) ** 2);
+      distances[i] = Math.min(distances[i], (crossing - p) ** 2 * alongWeight);
     }
   }
 
@@ -104,7 +109,7 @@ function distancesToCrossings(
   for (let line = 0; line < n; line++) {
     const start = line * stride;
     for (let p = 0; p < n; p++) costs[p] = distances[start + p * lineStep];
-    lowerParabolicEnvelope(costs, result, sites, bounds, 1);
+    lowerParabolicEnvelope(costs, result, sites, bounds, acrossWeight);
     for (let p = 0; p < n; p++) distances[start + p * lineStep] = result[p];
   }
 }
@@ -120,7 +125,12 @@ export function shapeCoast(input: Float32Array, n: number, settings: CoastSettin
   if (!Number.isInteger(n) || n < 2 || n > 2048 || input.length !== n * n) {
     throw new Error('Coastal shaping needs a square terrain with 2–2048 samples per side.');
   }
-  if (!(settings.worldSize > 0 && settings.heightScale > 0)) {
+  const depth = settings.worldDepth ?? settings.worldSize;
+  if (
+    ![settings.worldSize, depth, settings.heightScale].every(
+      (value) => Number.isFinite(value) && value > 0,
+    )
+  ) {
     throw new Error('Coastal shaping needs positive terrain dimensions in meters.');
   }
   const level = Math.fround(settings.seaLevel);
@@ -144,8 +154,9 @@ export function shapeCoast(input: Float32Array, n: number, settings: CoastSettin
     return { height, shore, water };
   }
 
-  distancesToCrossings(input, water, n, level, true, height);
-  distancesToCrossings(input, water, n, level, false, shore);
+  const depthRatio = depth / settings.worldSize;
+  distancesToCrossings(input, water, n, level, true, height, depthRatio);
+  distancesToCrossings(input, water, n, level, false, shore, depthRatio);
 
   const cellMeters = settings.worldSize / (n - 1);
   // Leave at least one Float32 increment above the level for dry samples.

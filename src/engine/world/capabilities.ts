@@ -11,7 +11,8 @@ export function isWorldGlobalNode(node: TerrainNode, hasInput: boolean): boolean
     (node.kind === 'noise' && node.params.noiseModel !== 'v3') ||
     node.kind === 'hydraulic' ||
     node.kind === 'thermal' ||
-    node.kind === 'spline'
+    node.kind === 'spline' ||
+    node.kind === 'coast'
   );
 }
 
@@ -45,12 +46,20 @@ export function describeWorldGraph(
       : 'Evaluated at canonical world coordinates on the requested sample grid.';
     if (global && ['hydraulic', 'thermal', 'spline'].includes(node.kind))
       reason = `One whole-domain solve; ${simulation} × ${simulation} simulation/reference samples. Its displacement is reconstructed over the native input; no independent tile resets.`;
+    if (global && node.kind === 'coast')
+      reason = `One ${simulation} × ${simulation} whole-domain coastal connectivity and physical-distance solve; its displacement is reconstructed over native input. Shore and water masks share this reference; no tile-edge ocean seeds.`;
+    if (node.kind === 'heightImport')
+      reason =
+        'Bilinear samples from the original embedded raster across the authored world rectangle; original gain, elevation offset and north/south orientation are preserved.';
+    if (node.kind === 'maskOutput')
+      reason =
+        'Named scalar output clamped to its fixed linear 0–1 range; independent of per-tile extrema and bypass state.';
     if (node.kind === 'mask' && node.params.mode === 'slope')
       reason = 'Physical central differences query the upstream field beyond internal tile edges.';
     if (node.kind === 'warp')
       reason =
         'Bounded world-space displacement queries the same upstream field across tile boundaries.';
-    if (node.bypassed && stage.inputs.length)
+    if (node.bypassed && stage.inputs.length && node.kind !== 'maskOutput')
       reason = 'Bypassed: forwards the primary field without scheduling secondary inputs.';
     return {
       nodeId: node.id,
@@ -68,7 +77,8 @@ export function describeWorldGraph(
       reason,
     };
   });
-  const legacyGlobal = stages.some((stage) => stage.mode !== 'native');
+  const graphGlobal = stages.some((stage) => stage.mode !== 'native');
+  const legacyGlobal = stages.some((stage) => stage.mode !== 'native' && stage.kind !== 'coast');
   if (transportEnabled) {
     stages.push({
       nodeId: 'world-transport',
@@ -90,7 +100,7 @@ export function describeWorldGraph(
       'World transport is an experimental artistic CPU reference, not a calibrated geophysical simulation. Its mass budget is measured before fine-grid reconstruction.',
     );
   }
-  const requiresGlobal = legacyGlobal || transportEnabled;
+  const requiresGlobal = graphGlobal || transportEnabled;
   let reason: string | undefined;
   if (legacyGlobal && d.width !== d.depth)
     reason =
@@ -98,12 +108,14 @@ export function describeWorldGraph(
   if (requiresGlobal && d.boundary === 'periodic')
     reason =
       'Global transport/legacy solvers do not implement periodic boundary conditions. Use an open or closed domain, or disable global stages.';
-  const unsupported = stages.find(
-    (stage) =>
-      stage.kind === 'heightImport' || stage.kind === 'coast' || stage.kind === 'maskOutput',
-  );
-  if (unsupported)
-    reason = `“${unsupported.label}” is available in the single-domain Terrain workspace. World tiles do not yet implement imported rasters, coastal shelf shaping or named-mask output nodes.`;
+  if (d.boundary === 'periodic' && stages.some((stage) => stage.kind === 'heightImport'))
+    reason =
+      'Imported rasters require an open or closed World domain. Their authored opposite borders are not assumed to be periodic.';
+  const missingImport = plan.stages
+    .map((stage) => plan.byId.get(stage.nodeId)!)
+    .find((node) => node.kind === 'heightImport' && !node.raster);
+  if (missingImport)
+    reason = `Choose a heightmap file in the inspector for “${missingImport.label}”.`;
   if (requiresGlobal)
     warnings.push(
       'Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion.',
@@ -113,6 +125,10 @@ export function describeWorldGraph(
       'Legacy global solvers retain their authored outer-boundary rules; the World boundary setting does not rewrite their numerical model.',
     );
   }
+  if (stages.some((stage) => stage.kind === 'coast' && stage.mode !== 'native'))
+    warnings.push(
+      'Coastal connectivity and distance are measured once at the reported whole-domain reference resolution. Narrow channels and islands below that spacing are not resolved by increasing export samples. Open and closed domains both seed ocean connectivity only at the outer world boundary.',
+    );
   if (
     stages.some(
       (stage) => stage.kind === 'mountain' || (stage.kind === 'noise' && stage.mode !== 'native'),
@@ -121,7 +137,11 @@ export function describeWorldGraph(
     warnings.push(
       'Legacy sources are anchored to the whole authored domain; the origin georeferences those fields. Studio v3 sources are anchored to absolute world coordinates.',
     );
-  if (plan.stages.some((stage) => stage.inputs.some((input) => input.channel !== 'height')))
+  if (
+    plan.stages.some((stage) =>
+      stage.inputs.some((input) => ['flow', 'wear', 'deposition'].includes(input.channel)),
+    )
+  )
     warnings.push(
       'Diagnostic routes use one whole-domain normalization at the global reference resolution.',
     );
@@ -133,8 +153,8 @@ export function describeWorldGraph(
     stages,
     capability: {
       supported: !reason,
-      native: !requiresGlobal && !unsupported,
-      fullGraph: !unsupported,
+      native: !requiresGlobal,
+      fullGraph: true,
       requiresGlobal,
       warnings,
       reason,

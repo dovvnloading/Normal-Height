@@ -1,5 +1,18 @@
 # Normal Height
 
+## Production workflow expansion
+
+The production implementation adds **Projects & revisions**, shared graph validation,
+portable graph snippets, World heightmap/coast/named-mask parity, physical World PBR
+baking and preview, a headless build/verify CLI, and a qualified Blender bridge. The implementation and remaining
+qualification gates are tracked in [Production implementation](docs/PRODUCTION_IMPLEMENTATION.md).
+
+- [Project checkpoints and recovery](docs/PROJECT_LIBRARY.md)
+- [Cross-project graph reuse](docs/GRAPH_REUSE.md)
+- [Headless delivery commands](docs/CLI.md)
+- [Blender import and qualification](docs/BLENDER.md)
+- [World engine contracts](docs/WORLD_ENGINE.md)
+
 **A procedural terrain studio for shaping mountain ranges, simulating erosion, and exporting precise heightmaps.**
 
 Normal Height is a React and TypeScript web application. Its visual node graph drives a real Float32 terrain pipeline in a persistent, incrementally cached Web Worker. Three.js renders the displaced terrain; a separate 2D view inspects height, normals, slope, flow, wear, and deposition. **World Studio** extends the graph into continuous Cartesian worlds, regional builds, and tiled export.
@@ -42,24 +55,27 @@ physical extent.
 
 ![Recorded World Studio terrain workflow: overview, tile selection, regional detail, height and flow maps, stage report, and export](docs/images/world-workflow.gif)
 
-| Capability           | Current implementation                                                                                                                                                                  |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| World workspace      | Persistent Explore/Setup/Simulate/Analyze/Deliver modes; continuous map, bounded World 3D, regional refinement, layers, probes, elevation profiles, pinned comparison and named regions |
-| Persistent compute   | Immutable, byte-bounded per-node cache; downstream edits reuse valid upstream fields; diagnostics show hits, misses, timings and memory estimates                                       |
-| World coordinates    | Explicit project v2, rectangular local Cartesian meters, independent origins and dimensions, canonical shared samples, partial tiles, region builds                                     |
-| Native graph detail  | Noise Studio v3, remap, terrace, blend, height/slope masks and bounded warp; global stages share one reference solution and reconstruct their displacement over the native input        |
-| Compute selection    | CPU reference, Auto, or WebGPU; remap/terrace/blend/height-mask WGSL kernels must pass a runtime numerical probe before use; unsupported/device failures are reported                   |
-| Coupled transport    | Optional experimental whole-domain water, sediment and thermal transport, global drainage, open/closed boundaries, synchronized shared-face exchange, and separate conservation ledgers |
-| World export         | Exact 4K/8K sample profiles, bounded tiles, PNG16/UInt16/Float32 height, flow/wear/deposition/slope, halo-aware normals, selected named masks, checksums and reproduction manifest      |
-| Delivery profiles    | Generic Cartesian output plus experimental Unreal/Unity grids and import settings; real engine import qualification remains pending                                                     |
-| Local region storage | Optional 64 MiB IndexedDB cache of completed CPU regions, version/checksum validation, atomic admission and memory fallback; separate from authored project storage                     |
+| Capability           | Current implementation                                                                                                                                                                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| World workspace      | Persistent Explore/Setup/Simulate/Analyze/Deliver modes; continuous map, bounded World 3D, regional refinement, layers, probes, elevation profiles, pinned comparison and named regions                            |
+| Persistent compute   | Immutable, byte-bounded per-node cache; downstream edits reuse valid upstream fields; diagnostics show hits, misses, timings and memory estimates                                                                  |
+| World coordinates    | Explicit project v2, rectangular local Cartesian meters, independent origins and dimensions, canonical shared samples, partial tiles, region builds                                                                |
+| Native graph detail  | Original imported rasters, Noise Studio v3, remap, terrace, blend, height/slope masks, named mask outputs and bounded warp; erosion and coast share a whole-world reference solution                               |
+| Compute selection    | CPU reference, Auto, or WebGPU; remap/terrace/blend/height-mask WGSL kernels must pass a runtime numerical probe before use; unsupported/device failures are reported                                              |
+| Coupled transport    | Optional experimental whole-domain water, sediment and thermal transport, global drainage, open/closed boundaries, synchronized shared-face exchange, and separate conservation ledgers                            |
+| World export         | Exact 4K/8K sample profiles, bounded tiles, PNG16/UInt16/Float32 height, flow/wear/deposition/slope, physical PBR maps, saved paint, halo-aware normals, selected named masks, checksums and reproduction manifest |
+| Delivery profiles    | Generic Cartesian output plus experimental Unreal/Unity grids and import settings; real engine import qualification remains pending                                                                                |
+| Local region storage | Optional 64 MiB IndexedDB cache of completed CPU regions, version/checksum validation, atomic admission and memory fallback; separate from authored project storage                                                |
 
 **Resolution is reported per stage.** An 8192² package may include a coarse
 global erosion or transport solution. The manifest records that simulation's
 actual spacing. Legacy single-tile exports retain their existing 2048² cap;
-World Studio is the separate tiled path. Full World PBR baking, raster/coast
-integration from #42, hardware GPU performance qualification, production engine
-imports, and 32K export qualification remain follow-up work.
+World Studio is the separate tiled path. Imported rasters, coastal shaping and
+named mask outputs also work in World, with explicit coastal reference spacing.
+World PBR baking and authored-material preview now share the physical material pipeline.
+Hardware GPU performance qualification, Unreal/Unity editor imports, and 32K export
+qualification remain follow-up work. See the [production implementation](docs/PRODUCTION_IMPLEMENTATION.md)
+for tested delivery channels, project recovery and remaining release gates.
 
 ![Measured per-node cache reuse in the running program](docs/images/compute-cache.png)
 

@@ -1,0 +1,148 @@
+{
+  "version": 2,
+  "name": "Production alpine study",
+  "seed": 48271,
+  "resolution": 256,
+  "worldSize": 8000,
+  "heightScale": 2400,
+  "presetId": "alpine",
+  "surface": {
+    "modelVersion": 4,
+    "biome": "alpine",
+    "snowLine": 0.73,
+    "rockSlope": 38,
+    "moisture": 0.52,
+    "detailMeters": 24,
+    "detailStrength": 0.65,
+    "aoStrength": 0.7,
+    "strataMeters": 76,
+    "fractureMeters": 68
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "range",
+        "kind": "mountain",
+        "label": "Alpine spine",
+        "position": { "x": 0, "y": 100 },
+        "params": {
+          "profile": "fluvial",
+          "scale": 3.2,
+          "direction": -24,
+          "width": 0.62,
+          "relief": 0.78,
+          "base": 0.05,
+          "dissection": 0.86,
+          "concavity": 0.56,
+          "lithology": 0.75,
+          "floodplain": 0.85,
+          "accordance": 0.8,
+          "criticalSlope": 46,
+          "crestRounding": 0.2,
+          "dissectionDepth": 0.5,
+          "sharpness": 1.25,
+          "warp": 0.85,
+          "octaves": 6,
+          "roughness": 0.42,
+          "lacunarity": 2.1,
+          "seed": 0
+        }
+      },
+      {
+        "id": "warp",
+        "kind": "warp",
+        "label": "Break the symmetry",
+        "position": { "x": 270, "y": 100 },
+        "params": { "strength": 0, "scale": 2.8, "octaves": 3, "seed": 0 }
+      },
+      {
+        "id": "erosion",
+        "kind": "hydraulic",
+        "label": "Carve the watershed",
+        "position": { "x": 540, "y": 100 },
+        "params": {
+          "method": "landscape",
+          "droplets": 70000,
+          "multiscale": true,
+          "cycles": 24,
+          "featureMeters": 140,
+          "erosion": 0.28,
+          "capacity": 4,
+          "deposition": 0.28,
+          "soilDepthMeters": 1.5,
+          "bedrockResistance": 0.6,
+          "hillslope": 0.03,
+          "bankAngle": 38,
+          "bedrockPreserve": true,
+          "inertia": 0.18,
+          "evaporation": 0.018,
+          "lifetime": 64,
+          "radius": 3,
+          "gravity": 4,
+          "seed": 1
+        }
+      },
+      {
+        "id": "thermal",
+        "kind": "thermal",
+        "label": "Settle the scree",
+        "position": { "x": 810, "y": 100 },
+        "params": { "iterations": 3, "talus": 0.03, "strength": 0.18 }
+      },
+      {
+        "id": "output",
+        "kind": "output",
+        "label": "Terrain output",
+        "position": { "x": 1080, "y": 100 },
+        "params": {}
+      }
+    ],
+    "edges": [
+      {
+        "id": "range-warp",
+        "source": "range",
+        "target": "warp",
+        "sourceHandle": "height",
+        "targetHandle": "in"
+      },
+      {
+        "id": "warp-erosion",
+        "source": "warp",
+        "target": "erosion",
+        "sourceHandle": "height",
+        "targetHandle": "in"
+      },
+      {
+        "id": "erosion-thermal",
+        "source": "erosion",
+        "target": "thermal",
+        "sourceHandle": "height",
+        "targetHandle": "in"
+      },
+      {
+        "id": "thermal-output",
+        "source": "thermal",
+        "target": "output",
+        "sourceHandle": "height",
+        "targetHandle": "in"
+      }
+    ]
+  },
+  "world": {
+    "version": 1,
+    "domain": {
+      "originX": -2000,
+      "originZ": -2000,
+      "width": 8000,
+      "depth": 8000,
+      "cellsX": 1024,
+      "cellsZ": 1024,
+      "heightScale": 2400,
+      "datum": 0,
+      "boundary": "closed"
+    },
+    "tileCells": 128,
+    "globalResolution": 128,
+    "backend": "cpu-reference"
+  }
+}

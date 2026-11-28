@@ -83,7 +83,8 @@ describe('World delivery preflight', () => {
 
   it('does not offer a smaller grid for unsupported graphs or invalid masks', () => {
     const request = options();
-    request.project.graph.nodes[0].kind = 'heightImport';
+    request.project.graph.nodes[0].params.noiseModel = 'legacy';
+    request.world.domain.boundary = 'periodic';
     const plan = planWorldExport(request);
     expect(plan.memory.error).not.toBeNull();
     expect(plan.file.error).not.toBeNull();

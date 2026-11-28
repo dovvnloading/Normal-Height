@@ -1,5 +1,11 @@
 import { clamp, mix, smoothstep } from '../engine/noise';
 import type { HeightField, TerrainProject } from '../model/types';
+import {
+  fieldCoordinate,
+  heightFieldGrid,
+  validateMaterialField,
+  type FieldSampling,
+} from '../engine/fields';
 import type { TexelRect } from './materialRegion';
 import { createProjectPaintRaster, getPaintStrokes } from './paintLayers';
 import type { MaterialBuffers, SurfaceSettings } from './pbr';
@@ -47,10 +53,12 @@ function createSurfaceSampler(
   project: TerrainProject,
   params: SurfaceSettings,
   ranges: MaterialRanges,
+  sampling?: FieldSampling,
 ) {
-  const n = field.resolution,
-    cell = project.worldSize / (n - 1);
-  const analyze = createTerrainAnalyzer(field, project);
+  const grid = sampling?.grid ?? heightFieldGrid(field, project);
+  const n = grid.width,
+    cell = Math.max(grid.spacingX, grid.spacingZ);
+  const analyze = createTerrainAnalyzer(field, project, grid);
   const metrics: TerrainFactors = {
     grade: 0,
     gradientX: 0,
@@ -88,7 +96,13 @@ function createSurfaceSampler(
       landform,
       occlusion,
     } = analyze(x, y, metrics);
-    fabric.sample(x * cell, y * cell, h * project.heightScale, gradientX, gradientY);
+    fabric.sample(
+      fieldCoordinate(grid, 'X', x),
+      fieldCoordinate(grid, 'Z', y),
+      h * grid.heightScale + grid.datum,
+      gradientX,
+      gradientY,
+    );
     const valley = smoothstep(0.006, 0.105, landform);
     const ridge = smoothstep(0.006, 0.105, -landform);
     const worn = smoothstep(0.02, 0.95, field.wear[i] / wearReference);
@@ -175,9 +189,26 @@ export function synthesizeMaterials(
   encodeSrgb: (value: number) => number,
   rect: TexelRect,
   ranges: MaterialRanges,
+  sampling?: FieldSampling,
 ): MaterialBuffers {
-  const n = field.resolution;
-  const count = n * n;
+  const grid = sampling?.grid ?? heightFieldGrid(field, project);
+  validateMaterialField(field, grid);
+  if (
+    !Object.values(ranges).every(Number.isFinite) ||
+    ranges.span <= 0 ||
+    ranges.wearReference <= 0 ||
+    ranges.depositionReference <= 0
+  )
+    throw new Error('Material reference ranges must be finite and positive.');
+  if (
+    sampling?.paint &&
+    (!Object.values(sampling.paint).every(Number.isFinite) ||
+      sampling.paint.width <= 0 ||
+      sampling.paint.depth <= 0)
+  )
+    throw new Error('Paint coordinates require a finite positive whole-world domain.');
+  const n = grid.width;
+  const count = n * grid.height;
   if (
     !Number.isInteger(n) ||
     n < 2 ||
@@ -192,6 +223,16 @@ export function synthesizeMaterials(
   ) {
     throw new Error('PBR generation requires aligned height and erosion fields.');
   }
+  if (
+    ![rect.left, rect.top, rect.right, rect.bottom].every(Number.isSafeInteger) ||
+    rect.left < 0 ||
+    rect.top < 0 ||
+    rect.right > n ||
+    rect.bottom > grid.height ||
+    rect.right <= rect.left ||
+    rect.bottom <= rect.top
+  )
+    throw new Error('Material region must lie inside its source field.');
   const width = rect.right - rect.left;
   const pixels = width * (rect.bottom - rect.top);
   const basecolor = new Uint8ClampedArray(pixels * 4);
@@ -200,16 +241,19 @@ export function synthesizeMaterials(
   const ao = new Uint8Array(pixels);
   const curvature = new Uint8Array(pixels);
   const detail = new Float32Array(pixels);
-  const surface = createSurfaceSampler(field, project, params, ranges);
+  const surface = createSurfaceSampler(field, project, params, ranges, sampling);
   const fabric = surface.fabric;
   // A separate sampler prevents neighbour reads from changing the main pixel's
   // procedural fabric, roughness or relief values during a Blend stroke.
   const needsBlend = getPaintStrokes(project).some((stroke) => stroke.mode === 'blend');
-  const neighbour = needsBlend ? createSurfaceSampler(field, project, params, ranges) : null;
+  const neighbour = needsBlend
+    ? createSurfaceSampler(field, project, params, ranges, sampling)
+    : null;
   const paint = createProjectPaintRaster(
     project,
     field,
     neighbour ? (x, y) => neighbour.sample(x, y).weights : undefined,
+    sampling,
   );
   const arid = params.biome === 'arid';
   const basalt = params.biome === 'volcanic';
@@ -242,11 +286,15 @@ export function synthesizeMaterials(
           0.21 * fabric.grit +
           0.19 * worn -
           0.2 * deposited +
-          (arid ? 0.11 * fabric.sorting : 0) + 0.15 * fabric.facies,
+          (arid ? 0.11 * fabric.sorting : 0) +
+          0.15 * fabric.facies,
       );
       const litter = clamp(
-        (arid ? 0.37 : 0.13) + fabric.straw * 0.73 + 0.21 * elevation - 0.54 * wet
-          - 0.13 * fabric.facies,
+        (arid ? 0.37 : 0.13) +
+          fabric.straw * 0.73 +
+          0.21 * elevation -
+          0.54 * wet -
+          0.13 * fabric.facies,
       );
       const powder = clamp(
         0.64 + 0.21 * leeward + 0.29 * fabric.patch - 0.28 * fabric.scour + 0.13 * valley,
@@ -254,18 +302,22 @@ export function synthesizeMaterials(
       // Facies are pigment/constituent changes, not ambient shadows. A
       // resistant pale face and dark mineral-rich matrix read differently
       // under every light direction; wetting remains a separate response.
-      const rockValue = (1 - 0.28 * fabric.joint + 0.12 * fabric.grit + 0.18 * fabric.facies)
-        * (1 - 0.23 * wet);
+      const rockValue =
+        (1 - 0.28 * fabric.joint + 0.12 * fabric.grit + 0.18 * fabric.facies) * (1 - 0.23 * wet);
       const soilValue =
         (1 +
           0.18 * fabric.formation +
           0.15 * fabric.patch +
           0.095 * fabric.sorting +
-          0.12 * fabric.grit - 0.17 * fabric.facies) *
+          0.12 * fabric.grit -
+          0.17 * fabric.facies) *
         (1 - (arid ? 0.43 : 0.52) * wet);
       const plantValue =
-        (0.81 + 0.33 * fabric.hummock + 0.17 * fabric.fleck + 0.08 * fabric.grit
-          + 0.14 * fabric.facies) *
+        (0.81 +
+          0.33 * fabric.hummock +
+          0.17 * fabric.fleck +
+          0.08 * fabric.grit +
+          0.14 * fabric.facies) *
         (1 - 0.15 * wet);
       for (let c = 0; c < 3; c++) {
         const rockColor = palette[0][c] * rockValue * rockReflectance(fabric, params.biome, c);
@@ -286,12 +338,26 @@ export function synthesizeMaterials(
 
       // Three.js uses alpha = perceptualRoughness². Area-average this GGX
       // parameter as a single-lobe approximation to the four substrate lobes.
-      const rr = clamp(0.85 - 0.19 * fabric.mineral + 0.1 * fabric.joint - 0.23 * wet
-        - 0.065 * fabric.facies - 0.045 * fabric.clasts, 0.24, 1);
-      const rs = clamp(0.96 - 0.19 * stone - 0.4 * wet + 0.018 * fabric.sorting
-        + 0.045 * fabric.facies, 0.28, 1);
-      const rv = clamp(0.77 + 0.15 * litter + 0.052 * fabric.hummock - 0.07 * wet
-        - 0.045 * fabric.facies, 0.45, 1);
+      const rr = clamp(
+        0.85 -
+          0.19 * fabric.mineral +
+          0.1 * fabric.joint -
+          0.23 * wet -
+          0.065 * fabric.facies -
+          0.045 * fabric.clasts,
+        0.24,
+        1,
+      );
+      const rs = clamp(
+        0.96 - 0.19 * stone - 0.4 * wet + 0.018 * fabric.sorting + 0.045 * fabric.facies,
+        0.28,
+        1,
+      );
+      const rv = clamp(
+        0.77 + 0.15 * litter + 0.052 * fabric.hummock - 0.07 * wet - 0.045 * fabric.facies,
+        0.45,
+        1,
+      );
       const rn = clamp(0.48 + 0.35 * powder + 0.018 * fabric.scour);
       roughness[output] = Math.round(
         255 * Math.sqrt(rock * rr * rr + soil * rs * rs + vegetation * rv * rv + snow * rn * rn),

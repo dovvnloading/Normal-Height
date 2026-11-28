@@ -2,6 +2,23 @@ import { strToU8, Zip, ZipPassThrough, zlibSync } from 'fflate';
 import { prepareWorldEvaluation } from '../engine/world';
 import type { WorldRegionResult, WorldSampleGrid, WorldStageReport } from '../engine/world/types';
 import { slug } from '../model/project';
+import {
+  projectFileBytes,
+  serializeProjectFile,
+  PROJECT_STORAGE_ERROR,
+} from '../model/projectStorage';
+import { MAX_PROJECT_FILE_BYTES } from '../model/heightRaster';
+import { resolveSurface } from '../materials/pbr';
+import { createDiagnosticAccumulator } from '../materials/terrainAnalysis';
+import {
+  bakeWorldMaterial,
+  isWorldMaterialMap,
+  worldMaterialHalo,
+  worldMaterialValues,
+  WORLD_MATERIAL_MAPS,
+  type WorldMaterialMap,
+} from '../materials/worldMaterial';
+import type { FieldSampling, FieldDescriptor } from '../engine/fields';
 import { BUILD_INFO } from '../model/buildInfo';
 import type { BuildInfo } from '../model/buildInfo';
 import type { TerrainProject } from '../model/types';
@@ -10,7 +27,8 @@ import type { WorldDefinition } from '../model/world';
 
 export type WorldExportFormat = 'png16' | 'raw16' | 'raw32';
 export type WorldExportProfile = 'generic' | 'unreal' | 'unity';
-export type WorldExportMap = 'height' | 'flow' | 'wear' | 'deposition' | 'normalGL' | 'slope';
+export type WorldExportMap =
+  'height' | 'flow' | 'wear' | 'deposition' | 'normalGL' | 'slope' | WorldMaterialMap;
 export interface WorldExportOptions {
   project: TerrainProject;
   world: WorldDefinition;
@@ -30,6 +48,7 @@ export interface WorldExportOptions {
 }
 export interface WorldExportEstimate {
   archiveBytes: number;
+  /** Estimated live buffers and archive retention, not total JS/process/GPU memory. */
   peakBytes: number;
   retainedArchiveBytes: number;
   tileCount: number;
@@ -68,7 +87,9 @@ export interface WorldExportManifest {
     heightUnits: string;
     elevationMinMeters: number;
     elevationMaxMeters: number;
+    /** Uniform uint16 step, or the largest Float32 ULP over the encoded range. */
     quantizationStepMeters: number;
+    quantization: string;
     decode: string;
     rawByteOrder: string;
     diagnosticUnits: Record<string, string>;
@@ -86,6 +107,16 @@ export interface WorldExportManifest {
   normalConvention: string;
   memory: WorldExportEstimate;
   tiles: WorldExportTile[];
+  material?: {
+    algorithm: 'surface-fabric-4';
+    parameters: ReturnType<typeof resolveSurface>;
+    ranges: { min: number; span: number; wearReference: number; depositionReference: number };
+    rangeScope: string;
+    analysisRadiiMeters: number[];
+    coordinates: string;
+    channels: Partial<Record<WorldMaterialMap, FieldDescriptor>>;
+    paint: string;
+  };
   warnings: string[];
   checksum: string;
 }
@@ -113,7 +144,15 @@ export type WorldExportResponse =
 
 const MiB = 1048576;
 const UNREAL_SIZES = [127, 253, 505, 1009, 2017, 4033, 8129];
-const MAPS: WorldExportMap[] = ['height', 'flow', 'wear', 'deposition', 'normalGL', 'slope'];
+const MAPS: WorldExportMap[] = [
+  'height',
+  'flow',
+  'wear',
+  'deposition',
+  'normalGL',
+  'slope',
+  ...WORLD_MATERIAL_MAPS,
+];
 const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
   let c = n;
   for (let i = 0; i < 8; i++) c = (c >>> 1) ^ (c & 1 ? 0xedb88320 : 0);
@@ -217,13 +256,28 @@ function validateOptions(options: WorldExportOptions) {
     throw new Error('Select at most 16 mask outputs for one export.');
   for (const mask of options.masks || []) {
     const node = options.project.graph.nodes.find((n) => n.id === mask.nodeId);
-    if (!node || node.kind !== 'mask')
-      throw new Error('Mask export requires an existing mask node.');
+    if (!node || (node.kind !== 'mask' && node.kind !== 'maskOutput'))
+      throw new Error('Mask export requires an existing mask or named mask output node.');
     const name = slug(mask.name);
     if (!name || names.has(name))
       throw new Error('Mask filenames must have unique nonempty names.');
     names.add(name);
   }
+}
+function exportProject(options: WorldExportOptions): TerrainProject {
+  return {
+    ...options.project,
+    version: 2,
+    world: options.world,
+    surface: resolveSurface(options.project.surface),
+  };
+}
+function materialFootprint(options: WorldExportOptions) {
+  const d = options.world.domain,
+    r = regions(options);
+  const dx = (d.width * r.cellsX) / d.cellsX / (options.samplesX - 1);
+  const dz = (d.depth * r.cellsZ) / d.cellsZ / (options.samplesZ - 1);
+  return { dx, dz, halo: worldMaterialHalo(options.project, options.world, dx, dz) };
 }
 export function estimateWorldExport(options: WorldExportOptions): WorldExportEstimate {
   validateOptions(options);
@@ -233,27 +287,72 @@ export function estimateWorldExport(options: WorldExportOptions): WorldExportEst
   const sampleCountIncludingBorders =
     (options.samplesX + tilesX - 1) * (options.samplesZ + tilesZ - 1);
   const maps = mapsFor(options);
+  const materials = maps.some(isWorldMaterialMap);
+  if (materials && options.world.domain.boundary === 'periodic')
+    throw new Error(
+      'World materials require open or closed boundaries. Periodic material synthesis is not yet qualified.',
+    );
+  const projectBytes = projectFileBytes(exportProject(options));
+  if (projectBytes > MAX_PROJECT_FILE_BYTES) throw new Error(PROJECT_STORAGE_ERROR);
   const bpp =
     (options.format === 'raw32' ? 4 : 2) +
     maps
       .filter((map) => map !== 'height')
-      .reduce((sum, map) => sum + (map === 'normalGL' ? 4 : 2), 0) +
+      .reduce((sum, map) => sum + (map === 'normalGL' || isWorldMaterialMap(map) ? 4 : 2), 0) +
     (options.masks?.length || 0) * 2;
   const fileCount = tilesX * tilesZ * (maps.length + (options.masks?.length || 0));
+  if (fileCount + 3 > 65534)
+    throw new Error(
+      'This package exceeds the supported ZIP32 file count. Increase the tile size, choose fewer maps, or export a smaller region.',
+    );
   // Deflate can expand incompressible input. Include row filters, PNG/ZIP entry
   // headers, checksums, the reproducible project and runtime bookkeeping.
   const archiveBytes = Math.ceil(
-    sampleCountIncludingBorders * bpp * 1.015 + fileCount * 4096 + 2 * MiB,
+    sampleCountIncludingBorders * bpp * 1.015 + fileCount * 4096 + projectBytes + 2 * MiB,
   );
   const retainedArchiveBytes = options.sink === 'file' ? 0 : archiveBytes * 2;
   const graphNodes = options.project.graph.nodes.filter(
     (n) => n.kind !== 'group' && n.kind !== 'note',
   ).length;
-  const tileBytes = (tileIntervals + 3) ** 2 * (32 + Math.min(graphNodes, 256) * 16);
+  // Material halos are sampled in up to 128² graph chunks even when the
+  // encoded tiles are smaller. Budget the executed region, not the PNG size.
+  const graphRegionSide = materials ? Math.max(tileIntervals + 3, 128) : tileIntervals + 3;
+  const tileBytes = graphRegionSide ** 2 * (32 + Math.min(graphNodes, 256) * 16);
   const globalBytes =
     options.world.globalResolution ** 2 *
     (128 + Math.min(graphNodes, 256) * 16 + (options.world.transport?.enabled ? 224 : 0));
-  const peakBytes = Math.ceil(64 * MiB + globalBytes + tileBytes + retainedArchiveBytes);
+  let materialBytes = 0;
+  if (materials) {
+    const { dx, dz, halo } = materialFootprint(options);
+    const width = Math.min(
+      Math.ceil(options.world.domain.width / dx) + 1,
+      tileIntervals + 1 + 2 * halo.x,
+    );
+    const height = Math.min(
+      Math.ceil(options.world.domain.depth / dz) + 1,
+      tileIntervals + 1 + 2 * halo.z,
+    );
+    // Full physical analysis halo, compact material/normal buffers, and caches.
+    materialBytes = width * height * 16 + (tileIntervals + 3) ** 2 * 32 + 24 * MiB;
+    if (width > 32769 || height > 32769 || width * height > 8 * 1024 * 1024)
+      throw new Error(
+        'The physical material analysis halo exceeds the bounded region budget. Use fewer samples, a larger physical region, or fewer overlapping Blend strokes.',
+      );
+  }
+  const rasterSizes = options.project.graph.nodes.map((node) =>
+    node.raster ? node.raster.width * node.raster.height * 4 : 0,
+  );
+  const importBytes =
+    rasterSizes.reduce((sum, bytes) => sum + bytes, 0) + Math.max(0, ...rasterSizes) * 3;
+  const peakBytes = Math.ceil(
+    64 * MiB +
+      globalBytes +
+      tileBytes +
+      materialBytes +
+      importBytes +
+      projectBytes * 4 +
+      retainedArchiveBytes,
+  );
   const budgetBytes = options.memoryBudgetBytes ?? 512 * MiB;
   if (!Number.isFinite(budgetBytes) || budgetBytes < 64 * MiB || budgetBytes > 2048 * MiB)
     throw new Error('World export memory budget must be between 64 and 2048 MiB.');
@@ -412,9 +511,16 @@ export async function streamWorldExport(
     reportedProgress = Math.max(reportedProgress, Math.min(1, Math.max(0, fraction)));
     onProgress(reportedProgress, stage, detail);
   };
+  // Capture a stable project before the first asynchronous evaluation. Callers
+  // cannot change the authored graph halfway through a multi-tile package.
+  options = structuredClone(options);
   const memory = checkWorldExportBudget(options),
     tiles = tileList(options, memory.tileIntervals),
     maps = mapsFor(options);
+  const materials = maps.filter(isWorldMaterialMap);
+  const projectJSON = serializeProjectFile(exportProject(options));
+  const wearAccumulator = createDiagnosticAccumulator(),
+    depositionAccumulator = createDiagnosticAccumulator();
   const exportStages = (stages: WorldStageReport[]) =>
     stages.map((stage) =>
       stage.mode === 'native'
@@ -517,14 +623,16 @@ export async function streamWorldExport(
           const value = values(x, y0 + row);
           if (!Number.isFinite(value)) throw new Error('Export encountered a non-finite sample.');
           if (format === 'raw32') {
+            if (!Number.isFinite(Math.fround(value)))
+              throw new Error('Export sample exceeds the finite Float32 elevation range.');
             view.setFloat32(offset, value, true);
             offset += 4;
           } else if (rgba) {
             for (let component = 0; component < 4; component++) {
-              const v =
-                component === 3
-                  ? 255
-                  : Math.round(Math.max(0, Math.min(1, values(x, y0 + row, component))) * 255);
+              const channel = values(x, y0 + row, component);
+              if (!Number.isFinite(channel))
+                throw new Error('Export encountered a non-finite channel.');
+              const v = Math.round(Math.max(0, Math.min(1, channel)) * 255);
               bytes[offset++] = (v - previous[component]) & 255;
               previous[component] = v;
             }
@@ -577,13 +685,24 @@ export async function streamWorldExport(
       lastStages = exportStages(result.stages);
       backend = result.backend;
       for (const map of maps) {
-        if (map === 'normalGL' || map === 'slope' || map === 'flow') continue;
+        if (isWorldMaterialMap(map) || map === 'normalGL' || map === 'slope' || map === 'flow')
+          continue;
         for (let i = 0; i < result.heights.length; i++) {
           const value = scalar(result, map, i, options.world);
           if (!Number.isFinite(value)) throw new Error('The world contains non-finite map values.');
           ranges[map][0] = Math.min(ranges[map][0], value);
           ranges[map][1] = Math.max(ranges[map][1], value);
         }
+      }
+      if (materials.length) {
+        // Shared borders are counted once, so histogram references cannot
+        // change when the user chooses a different export tile size.
+        for (let z = tile.z ? 1 : 0; z < result.height; z++)
+          for (let x = tile.x ? 1 : 0; x < result.width; x++) {
+            const i = z * result.width + x;
+            wearAccumulator.add(result.wear[i]);
+            depositionAccumulator.add(result.deposition[i]);
+          }
       }
       report(
         0.08 + (0.35 * (index + 1)) / tiles.length,
@@ -606,7 +725,7 @@ export async function streamWorldExport(
       profile: options.profile,
       importQualification:
         options.profile === 'generic'
-          ? 'Generic data contract validated; external application imports unverified.'
+          ? 'Generic data contract validated. Blender bridge qualification is recorded separately in docs/BLENDER.md; other external application imports remain unverified.'
           : 'Experimental profile. Byte encoding and dimensions validated; real engine import not yet verified.',
       dimensions: {
         samples: [options.samplesX, options.samplesZ],
@@ -630,7 +749,21 @@ export async function streamWorldExport(
         heightUnits: 'Metres',
         elevationMinMeters: range[0],
         elevationMaxMeters: range[1],
-        quantizationStepMeters: (range[1] - range[0]) / 65535,
+        quantizationStepMeters:
+          options.format === 'raw32'
+            ? Math.max(
+                2 ** -149,
+                2 **
+                  (Math.floor(
+                    Math.log2(Math.fround(Math.max(Math.abs(range[0]), Math.abs(range[1])))),
+                  ) -
+                    23),
+              )
+            : (range[1] - range[0]) / 65535,
+        quantization:
+          options.format === 'raw32'
+            ? 'Variable IEEE 754 Float32 spacing. quantizationStepMeters is the largest ULP over the encoded range, not a uniform 16-bit step; rounding error is at most half that spacing.'
+            : 'Uniform uint16 spacing over the common elevation range; rounding error is at most half quantizationStepMeters. Constant maps decode exactly to the common minimum.',
         decode:
           options.format === 'raw32'
             ? 'Little-endian IEEE 754 Float32 elevation in metres, no header.'
@@ -663,13 +796,54 @@ export async function streamWorldExport(
       tiles,
       warnings: [
         ...prepared.capability.warnings,
-        'Allocation numbers are conservative preflight estimates, not measured process memory.',
+        'Preflight counts live data buffers and archive retention. JavaScript runtime, garbage collection, renderer and GPU memory are additional; the budget is not a process memory cap.',
       ],
       checksum:
         'CRC32 per encoded file, lowercase hexadecimal; integrity check, not cryptographic authentication.',
     };
+    const materialRanges = {
+      min: (range[0] - d.datum) / d.heightScale,
+      span: Math.max(1e-8, (range[1] - range[0]) / d.heightScale),
+      wearReference: wearAccumulator.reference(),
+      depositionReference: depositionAccumulator.reference(),
+    };
+    if (materials.length) {
+      manifest.material = {
+        algorithm: 'surface-fabric-4',
+        parameters: resolveSurface(options.project.surface),
+        ranges: materialRanges,
+        rangeScope:
+          'One measured range and unique-sample diagnostic histogram for the complete selected export region; never normalized per tile.',
+        analysisRadiiMeters: [50, 150, 425],
+        coordinates:
+          'Physical east/south metres on the canonical output lattice, including the authored world origin and elevation datum. Full physical analysis halos cross internal tile boundaries.',
+        channels: Object.fromEntries(
+          materials.map((map) => [
+            map,
+            {
+              semantic:
+                map === 'basecolor'
+                  ? 'color'
+                  : map.includes('Normal')
+                    ? 'normal'
+                    : map === 'relief'
+                      ? 'elevation'
+                      : 'coverage',
+              units: map === 'basecolor' ? 'srgb' : map === 'relief' ? 'meters' : 'unitless',
+              components: map === 'relief' ? 1 : 4,
+              algorithm: 'surface-fabric-4',
+            } satisfies FieldDescriptor,
+          ]),
+        ),
+        paint:
+          'Saved paint uses normalized whole-world coordinates. Splat RGBA is rock/soil/vegetation/snow coverage and sums to 255; alpha is data. ORM is linear AO/roughness/zero metallic/opaque alpha. Relief is signed Float32 metres; geometry-normal and material-normal maps are distinct.',
+      };
+      manifest.warnings.push(
+        'Material elevation distribution and diagnostic normalization use the selected export region. A different crop can change climate-dependent coverage. The material appearance is model 4; shader-only close detail is not baked into these terrain maps.',
+      );
+    }
     for (const map of maps)
-      if (map !== 'height' && map !== 'normalGL')
+      if (!isWorldMaterialMap(map) && map !== 'height' && map !== 'normalGL')
         manifest.encoding.diagnosticRanges[map] = ranges[map];
     report(0.43, 'Encoding world maps', {
       phase: 'encode',
@@ -683,10 +857,34 @@ export async function streamWorldExport(
         [x0, z0] = tile.sampleOffset,
         [width, height] = tile.samples;
       const needHalo = maps.includes('normalGL') || maps.includes('slope');
-      const left = needHalo && exportGridIndex(options, 'X', x0 - 1) >= 0 ? 1 : 0;
-      const north = needHalo && exportGridIndex(options, 'Z', z0 - 1) >= 0 ? 1 : 0;
-      const right = needHalo && exportGridIndex(options, 'X', x0 + width) <= d.cellsX ? 1 : 0;
-      const south = needHalo && exportGridIndex(options, 'Z', z0 + height) <= d.cellsZ ? 1 : 0;
+      const halo = materials.length
+        ? materialFootprint(options).halo
+        : { x: +needHalo, z: +needHalo };
+      const stepX = r.cellsX / (options.samplesX - 1),
+        stepZ = r.cellsZ / (options.samplesZ - 1);
+      // The requested lattice endpoints are always legal. Division by a
+      // non-binary sample step may round 28 to 27.999999999999996; never
+      // trim an actual output sample while discovering optional outside halo.
+      let minimumX = Math.min(0, Math.ceil(-r.startX / stepX - 1e-9));
+      let minimumZ = Math.min(0, Math.ceil(-r.startZ / stepZ - 1e-9));
+      let maximumX = Math.max(
+        options.samplesX - 1,
+        Math.floor((d.cellsX - r.startX) / stepX + 1e-9),
+      );
+      let maximumZ = Math.max(
+        options.samplesZ - 1,
+        Math.floor((d.cellsZ - r.startZ) / stepZ + 1e-9),
+      );
+      while (minimumX < 0 && exportGridIndex(options, 'X', minimumX) < 0) minimumX++;
+      while (minimumZ < 0 && exportGridIndex(options, 'Z', minimumZ) < 0) minimumZ++;
+      while (maximumX > options.samplesX - 1 && exportGridIndex(options, 'X', maximumX) > d.cellsX)
+        maximumX--;
+      while (maximumZ > options.samplesZ - 1 && exportGridIndex(options, 'Z', maximumZ) > d.cellsZ)
+        maximumZ--;
+      const left = Math.min(halo.x, x0 - minimumX),
+        north = Math.min(halo.z, z0 - minimumZ);
+      const right = Math.min(halo.x, maximumX - (x0 + width - 1));
+      const south = Math.min(halo.z, maximumZ - (z0 + height - 1));
       const samplingGrid = gridFor(
         options,
         x0 - left,
@@ -694,7 +892,46 @@ export async function streamWorldExport(
         width + left + right,
         height + north + south,
       );
-      const result = await prepared.sampleRegion(samplingGrid, { signal });
+      let result: WorldRegionResult;
+      if (!materials.length) result = await prepared.sampleRegion(samplingGrid, { signal });
+      else {
+        const fullWidth = samplingGrid.samplesX,
+          fullHeight = samplingGrid.samplesZ;
+        const count = fullWidth * fullHeight;
+        const channels = {
+          heights: new Float32Array(count),
+          flow: new Float32Array(count),
+          wear: new Float32Array(count),
+          deposition: new Float32Array(count),
+        };
+        let last: WorldRegionResult | undefined;
+        // Avoid multiplying the complete material halo by every graph stage's
+        // temporary arrays. The engine sees only bounded 128² rectangles.
+        for (let z = 0; z < fullHeight; z += 128)
+          for (let x = 0; x < fullWidth; x += 128) {
+            assertNotAborted(signal);
+            const w = Math.min(128, fullWidth - x),
+              h = Math.min(128, fullHeight - z);
+            last = await prepared.sampleRegion(
+              gridFor(options, x0 - left + x, z0 - north + z, w, h),
+              { signal },
+            );
+            for (const key of ['heights', 'flow', 'wear', 'deposition'] as const)
+              for (let row = 0; row < h; row++)
+                channels[key].set(
+                  last[key].subarray(row * w, (row + 1) * w),
+                  (z + row) * fullWidth + x,
+                );
+          }
+        result = {
+          ...last!,
+          ...channels,
+          width: fullWidth,
+          height: fullHeight,
+          spacingX: dx,
+          spacingZ: dz,
+        };
+      }
       // At the true outer boundary, periodic derivatives need the neighboring
       // sample from the opposite side. Fetch only the missing row/column, not a
       // full-world buffer; keep the same sample footprint on both sides.
@@ -764,8 +1001,53 @@ export async function streamWorldExport(
             ((s - n + +northWrapped + +southWrapped) * dz),
         ];
       };
+      const sampling: FieldSampling = {
+        grid: {
+          width: result.width,
+          height: result.height,
+          originX: d.originX + (exportGridIndex(options, 'X', x0 - left) / d.cellsX) * d.width,
+          originZ: d.originZ + (exportGridIndex(options, 'Z', z0 - north) / d.cellsZ) * d.depth,
+          spacingX: dx,
+          spacingZ: dz,
+          heightScale: d.heightScale,
+          datum: d.datum,
+          lattice: {
+            originX: d.originX + (r.startX / d.cellsX) * d.width,
+            originZ: d.originZ + (r.startZ / d.cellsZ) * d.depth,
+            extentX: (d.width * r.cellsX) / d.cellsX,
+            extentZ: (d.depth * r.cellsZ) / d.cellsZ,
+            cellsX: options.samplesX - 1,
+            cellsZ: options.samplesZ - 1,
+            offsetX: x0 - left,
+            offsetZ: z0 - north,
+          },
+        },
+        paint: { originX: d.originX, originZ: d.originZ, width: d.width, depth: d.depth },
+      };
+      const material = materials.length
+        ? bakeWorldMaterial(
+            {
+              resolution: result.width,
+              height: result.heights,
+              flow: result.flow,
+              wear: result.wear,
+              deposition: result.deposition,
+            },
+            options.project,
+            materialRanges,
+            sampling,
+            { left, top: north, right: left + width, bottom: north + height },
+          )
+        : null;
       for (const map of maps) {
-        const format = map === 'height' ? options.format : map === 'normalGL' ? 'rgba8' : 'png16';
+        const format =
+          map === 'height'
+            ? options.format
+            : map === 'relief'
+              ? 'raw32'
+              : map === 'normalGL' || isWorldMaterialMap(map)
+                ? 'rgba8'
+                : 'png16';
         const extension =
           format === 'png16' || format === 'rgba8'
             ? 'png'
@@ -781,19 +1063,29 @@ export async function streamWorldExport(
           width,
           height,
           format,
-          (x, z, component = 0) => {
-            if (map === 'normalGL' || map === 'slope') {
-              const [gx, gz] = gradient(x, z);
-              if (map === 'slope') return (Math.atan(Math.hypot(gx, gz)) * 180) / Math.PI;
-              const length = Math.hypot(gx, gz, 1);
-              return ((component === 0 ? -gx : component === 1 ? gz : 1) / length) * 0.5 + 0.5;
-            }
-            return scalar(result, map, sampleIndex(x, z), options.world);
-          },
+          material && isWorldMaterialMap(map)
+            ? worldMaterialValues(material, options.project, map)
+            : (x, z, component = 0) => {
+                if (map === 'normalGL' || map === 'slope') {
+                  const [gx, gz] = gradient(x, z);
+                  if (map === 'slope') return (Math.atan(Math.hypot(gx, gz)) * 180) / Math.PI;
+                  if (component === 3) return 1;
+                  const length = Math.hypot(gx, gz, 1);
+                  return ((component === 0 ? -gx : component === 1 ? gz : 1) / length) * 0.5 + 0.5;
+                }
+                return scalar(result, map, sampleIndex(x, z), options.world);
+              },
           ranges[map] || [0, 1],
         );
         tile.files.push(
-          file.record(map, format === 'rgba8' ? 'RGBA8 PNG (linear/non-color)' : format),
+          file.record(
+            map,
+            format === 'rgba8'
+              ? map === 'basecolor'
+                ? 'RGBA8 PNG (sRGB)'
+                : 'RGBA8 PNG (linear/non-color)'
+              : format,
+          ),
         );
       }
       report(
@@ -860,10 +1152,7 @@ export async function streamWorldExport(
     report(0.97, 'Packing manifest, import notes and project', { phase: 'archive' });
     const notes = `NORMAL HEIGHT WORLD EXPORT\n\n${manifest.approximation}\n\n${manifest.borders}\n\n${manifest.importQualification}\n\nRead manifest.json for common height encoding, physical origin, stage spacing, byte order and per-file checksums.\n\nThe project file retains the authored graph and world. Neither a high output size nor a GPU pointwise pass means every simulation ran at that resolution or on the GPU.\n\n${JSON.stringify(manifest.profileSettings, null, 2)}\n`;
     add('README.txt').push(strToU8(notes), true);
-    add('project.nhterrain.json').push(
-      strToU8(JSON.stringify({ ...options.project, version: 2, world: options.world }, null, 2)),
-      true,
-    );
+    add('project.nhterrain.json').push(strToU8(projectJSON), true);
     add('manifest.json').push(strToU8(JSON.stringify(manifest, null, 2)), true);
     zip.end();
     await flush();

@@ -14,15 +14,23 @@ export function updatePreviewTexture(
   size: number,
   srgb: boolean,
   anisotropy: number,
+  height = size,
 ): THREE.DataTexture {
-  if (!Number.isInteger(size) || size < 1 || rgba.byteLength !== size * size * 4) {
+  if (
+    !Number.isInteger(size) ||
+    size < 1 ||
+    !Number.isInteger(height) ||
+    height < 1 ||
+    rgba.byteLength !== size * height * 4
+  ) {
     throw new Error('Preview PBR texture dimensions do not match its RGBA pixels.');
   }
   const colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
   const data = new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength);
   if (
     existing &&
-    existing.image.width === size && existing.image.height === size &&
+    existing.image.width === size &&
+    existing.image.height === height &&
     existing.format === THREE.RGBAFormat &&
     existing.colorSpace === colorSpace
   ) {
@@ -33,12 +41,12 @@ export function updatePreviewTexture(
   }
 
   existing?.dispose();
-  const result = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  const result = new THREE.DataTexture(data, size, height, THREE.RGBAFormat);
   // UV=0 and UV=1 are DEM sample positions, while texture coordinates
   // put texel centres at (index + 0.5)/size. Without this transform every
   // channel drifts by up to half a texel against the mesh and paint cursor.
-  result.offset.setScalar(0.5 / size);
-  result.repeat.setScalar((size - 1) / size);
+  result.offset.set(0.5 / size, 0.5 / height);
+  result.repeat.set((size - 1) / size, (height - 1) / height);
   result.flipY = true; // row zero is north; PlaneGeometry's top row has v=1
   result.colorSpace = colorSpace;
   result.generateMipmaps = true;

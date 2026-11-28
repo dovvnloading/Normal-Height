@@ -79,7 +79,7 @@ filtered levels can intentionally differ. Point-sampled coincident positions
 remain identical.
 
 Native pointwise/local stages include Studio noise, blend, remap, terrace,
-height/slope masks and bounded warp. Slope and warp query upstream context across
+original imported rasters, height/slope masks, named mask outputs and bounded warp. Slope and warp query upstream context across
 internal tile boundaries. Legacy mountains/noise are evaluated once over the
 authored domain. Hydraulic, thermal and spline operations use one bounded
 whole-domain reference; the solver displacement is reconstructed over the
@@ -89,6 +89,41 @@ Legacy global solvers currently require square physical domains and retain
 their original boundary rules. The application refuses rectangular legacy
 graphs and periodic global simulations with an actionable error. Native
 rectangular graphs and the new rectangular transport reference are supported.
+
+### Imported rasters, coasts and named masks
+
+`heightImport` samples the original embedded UInt16 or Float32 raster with the
+same bilinear sampler, gain, offset and north/south orientation as Terrain.
+Its footprint is the whole authored rectangle, not each output tile. UInt16
+values represent normalized heights; Float32 values and offsets are meters
+relative to the World datum. Export adds the datum once. Source dimensions
+remain bounded to 2048 samples per side and 16 MiB of decoded project samples.
+Those are source limits; the World output may sample the source at a different
+resolution without claiming to invent new survey detail. Opposite source borders
+are not assumed periodic, so imported graphs require open or closed domains.
+
+`coast` performs one whole-domain flood classification and physical-distance
+solve at the reported global reference resolution. Its rectangular distance
+metric uses independent east/west and north/south spacing. It reconstructs the
+coastal displacement over the native input and preserves its wet/dry side of
+the authored sea level. Only the outer World boundary seeds ocean connectivity;
+requesting a smaller tile never turns an inland lake into an ocean. The
+`includeLakes` setting explicitly includes inland water. Shore masks remain
+linear 0–1; water masks remain categorical 0/1. Narrow channels and islands below
+the reference spacing need a finer reference solve, not merely more output
+samples. Periodic coastal topology is not implemented.
+
+`maskOutput` is available as a World preview/export target and always clamps
+the authored scalar field to 0–1, including when the node is marked bypassed.
+Coastal ports feed it directly without erosion-diagnostic normalization. A
+bypassed coastal node retains incoming heights and exposes zero coastal masks.
+Decoded source buffers and coastal scratch are included in World preflight.
+
+World worker prepared and persistent identities hash embedded source content
+with SHA-256, including its dimensions and encoding. Process-local raster IDs
+are used only for fast UI invalidation; they cannot restore a stale disk result
+after a worker restart. If secure-context Web Crypto is unavailable, imported
+World evaluation still works and persistent caching for those graphs is disabled.
 
 ![Earlier stage-report capture recording per-stage execution, backend and spacing](images/world-stage-report.png)
 
@@ -202,8 +237,11 @@ native/reconstructed classification and conservation data.
 Unreal profiles enforce supported landscape dimensions and shared quantized
 vertical transforms. Unity profiles use power-of-two interval tiles and
 little-endian UInt16 RAW. Both include import guidance and are explicitly
-experimental until verified in real editors. Full world PBR baking, OpenEXR,
-GeoTIFF/CRS export and additional production profiles are not claimed.
+experimental until verified in real editors. World PBR baking now provides ten material
+channels through the shared physical raster contract, including saved paint and full
+analysis halos. See [production implementation](PRODUCTION_IMPLEMENTATION.md#shared-physical-material-synthesis)
+for encoding, normal conventions, crop normalization and qualified limits. OpenEXR
+and GeoTIFF/CRS export remain follow-up work.
 
 The manifest also records the source Git revision and whether the build tree
 was modified. Builds outside Git state `unknown`; no revision is invented.
@@ -323,13 +361,16 @@ identity participates in persistent cache keys, and raster allocations are inclu
 in working-memory preflight and history accounting. Authored raster/session storage
 remains separate from rebuildable World cache data.
 
-World tiles explicitly reject `heightImport`, `coast` and `maskOutput` nodes.
-Extending those merged node contracts into World evaluation and tiled export
-remains follow-up work; their availability in Terrain does not imply native World
-support. The World exporter's existing named-mask branches are distinct from the
-unsupported `maskOutput` node type.
+World now shares the imported raster sampler, coastal distance solver and named
+mask contracts described above. Imported sources and named outputs are native
+sampled stages; coastal connectivity is a bounded whole-domain reference. The
+tests in `world-node-parity.test.ts` verify analytic raster sampling, exact tile
+stitching, rectangular coastal distances, inland water connectivity and fixed
+mask ranges. `world-source-identity.test.ts` verifies content-safe cache recovery
+and prepared-context reuse across worker-message clones.
 
-Production imports, full World PBR exports, broader GPU coverage and real
-hardware benchmarks, spatially adaptive multiresolution transport, qualified
-32K packages, advanced geology, ecosystem/cinematic tools and GIS are separate
-follow-ups. The application and documentation avoid implying they have shipped.
+World PBR export and preview, local project revisions, graph reuse and headless
+build/verification are implemented in the [production workflow expansion](PRODUCTION_IMPLEMENTATION.md).
+Unreal/Unity editor imports, broader GPU coverage and real hardware benchmarks,
+spatially adaptive multiresolution transport, qualified 32K packages, advanced
+geology, ecosystem/cinematic tools and GIS remain separate follow-ups. The application and documentation avoid implying they have shipped.

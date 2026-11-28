@@ -17,6 +17,10 @@ import {
 import type { Connection, Edge, Node, NodeProps, OnSelectionChangeParams } from '@xyflow/react';
 import {
   Copy,
+  ClipboardCopy,
+  ClipboardPaste,
+  Download,
+  Upload,
   Eye,
   Folder,
   Frame,
@@ -31,16 +35,33 @@ import {
   Workflow,
 } from 'lucide-react';
 import { TerrainIcon, NODE_ICON_NAMES } from './TerrainIcon';
-import { assertRasterBudget } from '../model/heightRaster';
+import { assertRasterBudget, MAX_PROJECT_FILE_BYTES } from '../model/heightRaster';
 import { createNode, NODE_DEFINITIONS } from '../model/registry';
-import type { TerrainGraph, TerrainNode } from '../model/types';
+import { nodeSummary } from '../model/nodeSummary';
+import {
+  createGraphSnippet,
+  parseGraphSnippet,
+  pasteGraphSnippet,
+  serializeGraphSnippet,
+} from '../model/graphClipboard';
+import { downloadBlob, slug } from '../model/project';
+import {
+  MAX_GRAPH_NODES,
+  GRAPH_NODE_LIMIT_ERROR,
+  inputHandle,
+  outputHandle,
+  graphOutputPorts,
+  validateGraph,
+} from '../model/graph';
+import type { TerrainGraph, TerrainNode, TerrainProject } from '../model/types';
 import '@xyflow/react/dist/style.css';
 import './NodeGraph.css';
 
 export interface NodeGraphProps {
   theme: 'light' | 'dark';
   graph: TerrainGraph;
-  onChange: (graph: TerrainGraph, history?: boolean) => void;
+  project: TerrainProject;
+  onChange: (graph: TerrainGraph, history?: boolean) => boolean;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   previewNodeId?: string;
@@ -55,6 +76,7 @@ const NODE_WIDTH = 188;
 
 type EditorNodeData = {
   model: TerrainNode;
+  outputPorts: { id: string; label: string }[];
   thumbnail?: Float32Array;
   timing?: number;
   previewed: boolean;
@@ -64,46 +86,6 @@ type EditorNodeData = {
   onResize: (id: string, bounds: { x: number; y: number; width: number; height: number }) => void;
 };
 type EditorNode = Node<EditorNodeData, 'terrain' | 'annotation' | 'terrainGroup'>;
-
-function nodeSummary(node: TerrainNode) {
-  const p = node.params;
-  switch (node.kind) {
-    case 'mountain':
-      return p.ridges ? `${p.ridges} ridge lines` : 'Connected mountain ranges';
-    case 'noise':
-      return (
-        NODE_DEFINITIONS.noise.params
-          .find((param) => param.key === 'mode')
-          ?.options?.find((option) => option.value === p.mode)?.label ?? 'Fractal noise'
-      );
-    case 'heightImport':
-      return node.raster ? `${node.raster.width} × ${node.raster.height} · ${node.raster.name}` : 'Choose a heightmap';
-    case 'coast':
-      return `${p.beachWidth} m beach · ${p.shelfWidth} m shelf`;
-    case 'maskOutput':
-      return 'Linear 16-bit mask';
-    case 'spline':
-      return `${node.params.mode === 'ridge' ? 'Mountain ridge' : 'River valley'} · ${node.path?.length ?? 0} points`;
-    case 'hydraulic':
-      return `${Math.round(Number(p.droplets ?? 70000) / 1000)}k drops / 512²`;
-    case 'thermal':
-      return `${p.iterations ?? 24} relaxation passes`;
-    case 'warp':
-      return 'Domain displacement';
-    case 'terrace':
-      return `${p.steps ?? 8} elevation bands`;
-    case 'remap':
-      return 'Elevation & contrast';
-    case 'blend':
-      return String(p.mode ?? 'mix').replaceAll('-', ' ');
-    case 'mask':
-      return String(p.mode ?? p.type ?? 'Elevation mask').replaceAll('-', ' ');
-    case 'output':
-      return 'Final heightfield';
-    default:
-      return '';
-  }
-}
 
 const Thumbnail = memo(function Thumbnail({
   values,
@@ -152,7 +134,12 @@ const Thumbnail = memo(function Thumbnail({
   }, [values, mask]);
   return (
     <div className={`ng-thumbnail ${values?.length ? '' : 'ng-thumbnail-empty'}`}>
-      <canvas ref={canvas} width={48} height={48} aria-label={`${label} ${mask ? 'mask' : 'height'} preview`} />
+      <canvas
+        ref={canvas}
+        width={48}
+        height={48}
+        aria-label={`${label} ${mask ? 'mask' : 'height'} preview`}
+      />
       {!values?.length && <Mountain size={20} aria-hidden="true" />}
     </div>
   );
@@ -163,10 +150,10 @@ const TerrainGraphNode = memo(function TerrainGraphNode({
   data,
   selected,
 }: NodeProps<EditorNode>) {
-  const { model, timing } = data;
+  const { model, timing, outputPorts } = data;
   const definition = NODE_DEFINITIONS[model.kind];
   const iconName = NODE_ICON_NAMES[model.kind];
-  const portCount = Math.max(definition.inputs.length, definition.outputs.length);
+  const portCount = Math.max(definition.inputs.length, outputPorts.length);
   return (
     <div
       className={`ng-node ${selected ? 'ng-node-selected' : ''} ${data.previewed ? 'ng-node-previewed' : ''} ${model.bypassed ? 'ng-node-bypassed' : ''}`}
@@ -234,7 +221,7 @@ const TerrainGraphNode = memo(function TerrainGraphNode({
         {Array.from({ length: portCount }, (_, index) => (
           <div className="ng-port-row" key={index}>
             <span>{definition.inputs[index]?.label}</span>
-            <span>{definition.outputs[index]?.label}</span>
+            <span>{outputPorts[index]?.label}</span>
           </div>
         ))}
       </div>
@@ -249,7 +236,7 @@ const TerrainGraphNode = memo(function TerrainGraphNode({
           aria-label={`${model.label}: ${input.label} input`}
         />
       ))}
-      {definition.outputs.map((output, index) => (
+      {outputPorts.map((output, index) => (
         <Handle
           key={`output-${output.id}`}
           type="source"
@@ -352,26 +339,18 @@ function connectionError(graph: TerrainGraph, connection: Connection, replacingI
   const source = graph.nodes.find((node) => node.id === connection.source);
   const target = graph.nodes.find((node) => node.id === connection.target);
   if (!source || !target) return 'One of these nodes no longer exists.';
-  if (!NODE_DEFINITIONS[source.kind].outputs.some((port) => port.id === connection.sourceHandle))
+  if (!graphOutputPorts(source, graph.edges).some((port) => port.id === connection.sourceHandle))
     return 'Choose a labeled output port.';
   if (!NODE_DEFINITIONS[target.kind].inputs.some((port) => port.id === connection.targetHandle))
     return 'Choose a labeled input port.';
   const edges = graph.edges.filter(
     (edge) =>
       edge.id !== replacingId &&
-      !(edge.target === connection.target && edge.targetHandle === connection.targetHandle),
+      !(edge.target === connection.target && inputHandle(edge, target) === connection.targetHandle),
   );
-  const queue = [connection.target];
-  const visited = new Set<string>();
-  while (queue.length) {
-    const id = queue.pop()!;
-    if (id === connection.source)
-      return 'That connection creates a loop. Terrain must flow toward the output.';
-    if (visited.has(id)) continue;
-    visited.add(id);
-    for (const edge of edges) if (edge.source === id) queue.push(edge.target);
-  }
-  return null;
+  let candidateId = replacingId ?? 'pending-connection';
+  while (edges.some((edge) => edge.id === candidateId)) candidateId += '-new';
+  return validateGraph({ ...graph, edges: [...edges, { ...connection, id: candidateId }] });
 }
 
 /** Arrange each group independently, treating groups as single units in their parent scope. */
@@ -387,7 +366,7 @@ function arrangeGraph(graph: TerrainGraph): TerrainGraph {
         : 118 +
           Math.max(
             NODE_DEFINITIONS[node.kind].inputs.length,
-            NODE_DEFINITIONS[node.kind].outputs.length,
+            graphOutputPorts(node, graph.edges).length,
           ) *
             18),
   });
@@ -467,6 +446,9 @@ function GraphCanvas(props: NodeGraphProps) {
   const latest = useRef(props);
   latest.current = props;
   const wrapper = useRef<HTMLDivElement>(null);
+  const snippetInput = useRef<HTMLInputElement>(null);
+  const transferPending = useRef(false);
+  const [transferring, setTransferring] = useState(false);
   const dragging = useRef(false);
   const selected = useRef(new Set(selectedId ? [selectedId] : []));
   const selectedEdges = useRef(new Set<string>());
@@ -583,6 +565,7 @@ function GraphCanvas(props: NodeGraphProps) {
           ariaLabel: `${model.label}, ${NODE_DEFINITIONS[model.kind].label}`,
           data: {
             model,
+            outputPorts: graphOutputPorts(model, graph.edges),
             thumbnail: thumbnails?.[model.id],
             timing: nodeTimings?.[model.id],
             previewed: previewNodeId === model.id || (!previewNodeId && model.kind === 'output'),
@@ -596,8 +579,11 @@ function GraphCanvas(props: NodeGraphProps) {
     setEdges(
       graph.edges.map((edge) => ({
         ...edge,
-        sourceHandle: edge.sourceHandle ?? 'height',
-        targetHandle: edge.targetHandle ?? 'in',
+        sourceHandle: outputHandle(edge),
+        targetHandle: inputHandle(
+          edge,
+          graph.nodes.find((node) => node.id === edge.target)!,
+        ),
         type: 'default',
         reconnectable: true,
         selected: selectedEdges.current.has(edge.id),
@@ -699,7 +685,10 @@ function GraphCanvas(props: NodeGraphProps) {
               edge.id !== replacingId &&
               !(
                 edge.target === connection.target &&
-                (edge.targetHandle ?? 'in') === connection.targetHandle
+                inputHandle(
+                  edge,
+                  current.nodes.find((node) => node.id === edge.target)!,
+                ) === connection.targetHandle
               ),
           ),
           { ...connection, id: replacingId ?? uid('edge') },
@@ -751,8 +740,8 @@ function GraphCanvas(props: NodeGraphProps) {
   );
 
   const addNote = () => {
-    if (latest.current.graph.nodes.length >= 128) {
-      props.onError('This project has reached the 128-node limit.');
+    if (latest.current.graph.nodes.length >= MAX_GRAPH_NODES) {
+      props.onError(GRAPH_NODE_LIMIT_ERROR);
       return;
     }
     const bounds = wrapper.current?.getBoundingClientRect();
@@ -800,8 +789,8 @@ function GraphCanvas(props: NodeGraphProps) {
       latest.current.onSelect(null);
       return;
     }
-    if (current.nodes.length >= 128) {
-      props.onError('This project has reached the 128-node limit.');
+    if (current.nodes.length >= MAX_GRAPH_NODES) {
+      props.onError(GRAPH_NODE_LIMIT_ERROR);
       return;
     }
     const members = getNodes().filter((node) => selected.current.has(node.id));
@@ -858,8 +847,8 @@ function GraphCanvas(props: NodeGraphProps) {
     for (let pass = 0; pass < current.nodes.length; pass++)
       for (const node of current.nodes)
         if (node.parentId && ids.has(node.parentId)) ids.add(node.id);
-    if (current.nodes.length + ids.size > 128) {
-      props.onError('Duplicating this selection would exceed the 128-node limit.');
+    if (current.nodes.length + ids.size > MAX_GRAPH_NODES) {
+      props.onError(`Duplicating this selection would exceed the ${MAX_GRAPH_NODES}-node limit.`);
       return;
     }
     const newIds = new Map([...ids].map((id) => [id, uid('node')]));
@@ -877,7 +866,9 @@ function GraphCanvas(props: NodeGraphProps) {
             : { x: node.position.x + 32, y: node.position.y + 32 },
       }));
     const nextNodes = [...current.nodes, ...clones];
-    try { assertRasterBudget(nextNodes); } catch (error) {
+    try {
+      assertRasterBudget(nextNodes);
+    } catch (error) {
       props.onError((error as Error).message);
       return;
     }
@@ -902,6 +893,103 @@ function GraphCanvas(props: NodeGraphProps) {
     latest.current.onSelect(clones[0]?.id ?? null);
   };
 
+  const selectedSnippet = () => createGraphSnippet(latest.current.project, selected.current);
+  const transfer = async (work: () => Promise<void>) => {
+    if (transferPending.current) return;
+    transferPending.current = true;
+    setTransferring(true);
+    try {
+      await work();
+    } catch (error) {
+      latest.current.onError(error instanceof Error ? error.message : 'Graph transfer failed.');
+    } finally {
+      transferPending.current = false;
+      setTransferring(false);
+    }
+  };
+  const acceptSnippet = (raw: unknown, expectedProject: TerrainProject) => {
+    if (latest.current.project !== expectedProject)
+      throw new Error(
+        'The document changed while reading this graph. Please retry the import or paste.',
+      );
+    const bounds = wrapper.current?.getBoundingClientRect();
+    const anchor = bounds
+      ? screenToFlowPosition({
+          x: bounds.x + bounds.width / 2 - 90,
+          y: bounds.y + bounds.height / 2 - 60,
+        })
+      : { x: 100, y: 100 };
+    const pasted = pasteGraphSnippet(expectedProject, raw, anchor);
+    if (!latest.current.onChange(pasted.project.graph, true)) return;
+    selected.current = new Set(pasted.nodeIds);
+    selectedEdges.current = new Set(pasted.edgeIds);
+    setSelectedCount(pasted.nodeIds.length);
+    latest.current.onSelect(pasted.nodeIds[0] ?? null);
+    latest.current.onError(
+      `Added ${pasted.nodeIds.length} nodes. Undo removes this paste in one step.`,
+    );
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        void fitView({
+          nodes: pasted.nodeIds.map((id) => ({ id })),
+          padding: 0.3,
+          maxZoom: 1.15,
+          duration: 200,
+        });
+      }),
+    );
+  };
+  const copySelection = () =>
+    void transfer(async () => {
+      const text = serializeGraphSnippet(selectedSnippet());
+      if (!navigator.clipboard?.writeText)
+        throw new Error(
+          'Clipboard access is unavailable. Use Export selected graph to transfer these nodes.',
+        );
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        throw new Error('Clipboard access was denied. Use Export selected graph instead.');
+      }
+      latest.current.onError(
+        'Selected graph copied. Paste it into this or another Normal Height project.',
+      );
+    });
+  const pasteSelection = () =>
+    void transfer(async () => {
+      const project = latest.current.project;
+      if (!navigator.clipboard?.readText)
+        throw new Error(
+          'Clipboard access is unavailable. Use Import graph to open a .nhgraph.json file.',
+        );
+      let text: string;
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        throw new Error('Clipboard access was denied. Use Import graph instead.');
+      }
+      acceptSnippet(text, project);
+    });
+  const exportSelection = () => {
+    try {
+      const snippet = selectedSnippet();
+      downloadBlob(
+        new Blob([serializeGraphSnippet(snippet)], { type: 'application/json' }),
+        `${slug(snippet.name)}.nhgraph.json`,
+      );
+    } catch (error) {
+      latest.current.onError(error instanceof Error ? error.message : 'Graph export failed.');
+    }
+  };
+  const importSnippet = (file: File) =>
+    void transfer(async () => {
+      const project = latest.current.project;
+      if (file.size > MAX_PROJECT_FILE_BYTES)
+        throw new Error('This graph snippet exceeds the 32 MiB file limit.');
+      const snippet = parseGraphSnippet(await file.text());
+      acceptSnippet(snippet, project);
+    });
+
   const keyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable="true"]'))
       return;
@@ -916,6 +1004,12 @@ function GraphCanvas(props: NodeGraphProps) {
           .filter((edge) => edge.selected)
           .map((edge) => ({ id: edge.id })),
       });
+    }
+    if ((event.ctrlKey || event.metaKey) && ['c', 'v'].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key.toLowerCase() === 'c') copySelection();
+      else pasteSelection();
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
       event.preventDefault();
@@ -983,6 +1077,59 @@ function GraphCanvas(props: NodeGraphProps) {
           </span>
         </div>
         <div className="ng-toolbar-actions">
+          <button
+            type="button"
+            className="ng-tool ng-icon-tool"
+            disabled={!selectedCount || transferring}
+            onClick={copySelection}
+            title="Copy selected graph (⌘/Ctrl C)"
+            aria-label="Copy selected graph"
+          >
+            <ClipboardCopy size={14} />
+          </button>
+          <button
+            type="button"
+            className="ng-tool ng-icon-tool"
+            disabled={transferring}
+            onClick={pasteSelection}
+            title="Paste graph (⌘/Ctrl V)"
+            aria-label="Paste graph"
+          >
+            <ClipboardPaste size={14} />
+          </button>
+          <button
+            type="button"
+            className="ng-tool ng-icon-tool"
+            disabled={!selectedCount || transferring}
+            onClick={exportSelection}
+            title="Export selected graph (.nhgraph.json)"
+            aria-label="Export selected graph"
+          >
+            <Download size={14} />
+          </button>
+          <button
+            type="button"
+            className="ng-tool ng-icon-tool"
+            disabled={transferring}
+            onClick={() => snippetInput.current?.click()}
+            title="Import graph (.nhgraph.json)"
+            aria-label="Import graph"
+          >
+            <Upload size={14} />
+          </button>
+          <input
+            ref={snippetInput}
+            type="file"
+            hidden
+            accept=".nhgraph.json,application/json"
+            aria-label="Import graph snippet file"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) importSnippet(file);
+            }}
+          />
+          <span className="ng-divider" />
           <button
             type="button"
             className="ng-tool ng-icon-tool"

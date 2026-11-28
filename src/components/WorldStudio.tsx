@@ -979,6 +979,7 @@ export function WorldStudio({
           </div>
           <div className="we-viewport-container">
             <WorldViewport
+              materialProject={engine.stale ? engine.builtProject : project}
               result={engine.result}
               world={engine.builtWorld ?? world}
               grid={engine.builtGrid}

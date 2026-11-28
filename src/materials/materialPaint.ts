@@ -1,4 +1,5 @@
 import type { HeightField, TerrainProject } from '../model/types';
+import { fieldCoordinate, type FieldSampling } from '../engine/fields';
 import { createTerrainAnalyzer, type TerrainFactors } from './terrainAnalysis';
 
 /** Points and radii use tile fractions. Row zero is the north edge. */
@@ -265,10 +266,16 @@ const rangeWeight = (value: number, range: [number, number] | undefined, feather
 export interface PaintRasterContext {
   field: HeightField;
   project: TerrainProject;
+  sampling?: FieldSampling;
 }
 const analyzerCache = new WeakMap<
   HeightField,
-  { worldSize: number; heightScale: number; analyze: ReturnType<typeof createTerrainAnalyzer> }
+  {
+    worldSize: number;
+    heightScale: number;
+    sampling?: FieldSampling;
+    analyze: ReturnType<typeof createTerrainAnalyzer>;
+  }
 >();
 function analyzer(context: PaintRasterContext) {
   const { field, project } = context;
@@ -276,12 +283,14 @@ function analyzer(context: PaintRasterContext) {
   if (
     !entry ||
     entry.worldSize !== project.worldSize ||
-    entry.heightScale !== project.heightScale
+    entry.heightScale !== project.heightScale ||
+    entry.sampling !== context.sampling
   ) {
     entry = {
       worldSize: project.worldSize,
       heightScale: project.heightScale,
-      analyze: createTerrainAnalyzer(field, project),
+      sampling: context.sampling,
+      analyze: createTerrainAnalyzer(field, project, context.sampling?.grid),
     };
     analyzerCache.set(field, entry);
   }
@@ -323,8 +332,12 @@ export function createMaskEvaluator(
   return (x: number, y: number) => {
     const i = y * n + x;
     let amount =
-      rangeWeight(field.height[i] * project.heightScale, mask.elevation, feather) *
-      rangeWeight(clampPaint(field.flow[i]), mask.flow, feather);
+      rangeWeight(
+        field.height[i] * (context.sampling?.grid.heightScale ?? project.heightScale) +
+          (context.sampling?.grid.datum ?? 0),
+        mask.elevation,
+        feather,
+      ) * rangeWeight(clampPaint(field.flow[i]), mask.flow, feather);
     if (!amount) return 0;
     if (analyze) {
       const m = analyze(x, y, metrics);
@@ -345,8 +358,12 @@ export function createMaskEvaluator(
     if (mask.breakup) {
       const scale = mask.scale ?? Math.max(1, project.worldSize * 0.012);
       const sample = noise(
-        ((x / (n - 1)) * project.worldSize) / scale,
-        ((y / (n - 1)) * project.worldSize) / scale,
+        (context.sampling
+          ? fieldCoordinate(context.sampling.grid, 'X', x)
+          : (x / (n - 1)) * project.worldSize) / scale,
+        (context.sampling
+          ? fieldCoordinate(context.sampling.grid, 'Z', y)
+          : (y / (n - 1)) * project.worldSize) / scale,
         seed,
       );
       amount *= 1 - mask.breakup + mask.breakup * smooth((sample - 0.2) / 0.6);
@@ -393,7 +410,8 @@ export function pointInPaintSelection(
     let lo = 0,
       hi = runs.length / 3;
     while (lo < hi) {
-      const mid = (lo + hi) >>> 1, k = mid * 3;
+      const mid = (lo + hi) >>> 1,
+        k = mid * 3;
       if (runs[k] < y || (runs[k] === y && runs[k + 1] <= x)) lo = mid + 1;
       else hi = mid;
     }
@@ -428,8 +446,28 @@ export function createStrokeRaster(
   size: number,
   context?: PaintRasterContext,
 ): StrokeRaster {
-  const last = size - 1,
+  const sampling = context?.sampling,
+    domain = sampling?.paint;
+  const regional = Boolean(domain && sampling);
+  const rows = sampling?.grid.height ?? size;
+  // In a regional raster, stroke geometry stays in authored whole-world UV.
+  // Never rescale a brush to the dimensions or origin of the current tile.
+  const last = regional ? 1 : size - 1,
     radius = stroke.radius * last;
+  const originU = regional
+    ? (fieldCoordinate(sampling!.grid, 'X', 0) - domain!.originX) / domain!.width
+    : 0;
+  const originV = regional
+    ? (fieldCoordinate(sampling!.grid, 'Z', 0) - domain!.originZ) / domain!.depth
+    : 0;
+  const stepU = regional ? sampling!.grid.spacingX / domain!.width : 1;
+  const stepV = regional ? sampling!.grid.spacingZ / domain!.depth : 1;
+  const authorX = (x: number) =>
+    regional ? (fieldCoordinate(sampling!.grid, 'X', x) - domain!.originX) / domain!.width : x;
+  const authorY = (y: number) =>
+    regional ? (fieldCoordinate(sampling!.grid, 'Z', y) - domain!.originZ) / domain!.depth : y;
+  const lower = (value: number) => (regional ? value : Math.ceil(value));
+  const upper = (value: number) => (regional ? value : Math.floor(value));
   const angle = ((stroke.angle ?? 0) * Math.PI) / 180,
     cos = Math.cos(angle),
     sin = Math.sin(angle);
@@ -449,10 +487,10 @@ export function createStrokeRaster(
       y,
       dx,
       dy,
-      top: Math.ceil(Math.min(y, y + dy) - radius),
-      bottom: Math.floor(Math.max(y, y + dy) + radius),
-      left: Math.ceil(Math.min(x, x + dx) - radius),
-      right: Math.floor(Math.max(x, x + dx) + radius),
+      top: lower(Math.min(y, y + dy) - radius),
+      bottom: upper(Math.max(y, y + dy) + radius),
+      left: lower(Math.min(x, x + dx) - radius),
+      right: upper(Math.max(x, x + dx) + radius),
       p0: a.pressure ?? 1,
       p1: b.pressure ?? 1,
     });
@@ -506,13 +544,20 @@ export function createStrokeRaster(
     for (let i = 0; i < Math.max(1, stroke.points.length - 1); i++)
       add(stroke.points[i], stroke.points[i + 1] ?? stroke.points[i]);
   }
-  const firstRow = stroke.fullTile ? 0 : Math.max(0, Math.min(...segments.map((s) => s.top)));
+  const firstRow = stroke.fullTile
+    ? 0
+    : Math.max(0, Math.ceil((Math.min(...segments.map((s) => s.top)) - originV) / stepV));
   const lastRow = stroke.fullTile
-    ? last
-    : Math.min(last, Math.max(...segments.map((s) => s.bottom)));
+    ? rows - 1
+    : Math.min(
+        rows - 1,
+        Math.floor((Math.max(...segments.map((s) => s.bottom)) - originV) / stepV),
+      );
   const output = new Float32Array(size);
-  const weight = (x: number, y: number, candidates = segments) => {
-    if (y < firstRow || y > lastRow) return 0;
+  const weight = (pixelX: number, pixelY: number, candidates = segments) => {
+    if (pixelY < firstRow || pixelY > lastRow) return 0;
+    const x = authorX(pixelX),
+      y = authorY(pixelY);
     const u = x / last,
       v = y / last;
     if (stroke.selection && !pointInPaintSelection(stroke.selection, { u, v })) return 0;
@@ -542,7 +587,7 @@ export function createStrokeRaster(
       const fine = noise(u / (scale * 0.28), v / (scale * 0.28), seed + 17);
       coverage *= 0.18 + 0.82 * smooth((coarse * 0.65 + fine * 0.35 - 0.15) / 0.7);
     }
-    return clampPaint(coverage * stroke.strength * mask(x, y));
+    return clampPaint(coverage * stroke.strength * mask(pixelX, pixelY));
   };
   return {
     firstRow,
@@ -552,9 +597,17 @@ export function createStrokeRaster(
       output.fill(0);
       if (y < firstRow || y > lastRow) return output;
       // Skip unpainted margins even for small dabs on large maps.
-      const relevant = segments.filter((s) => y >= s.top && y <= s.bottom);
-      const lo = stroke.fullTile ? 0 : Math.max(0, Math.min(...relevant.map((s) => s.left)));
-      const hi = stroke.fullTile ? last : Math.min(last, Math.max(...relevant.map((s) => s.right)));
+      const ay = authorY(y);
+      const relevant = segments.filter((s) => ay >= s.top && ay <= s.bottom);
+      const lo = stroke.fullTile
+        ? 0
+        : Math.max(0, Math.ceil((Math.min(...relevant.map((s) => s.left)) - originU) / stepU));
+      const hi = stroke.fullTile
+        ? size - 1
+        : Math.min(
+            size - 1,
+            Math.floor((Math.max(...relevant.map((s) => s.right)) - originU) / stepU),
+          );
       for (let x = lo; x <= hi; x++) output[x] = weight(x, y, relevant);
       return output;
     },

@@ -35,6 +35,7 @@ import {
   type WorldExportSinkPlan,
 } from '../../export/worldExportPlan';
 import './WorldExportPanel.css';
+import { WORLD_MATERIAL_MAPS } from '../../materials/worldMaterial';
 
 type Region = Pick<WorldGridRequest, 'startX' | 'startZ' | 'cellsX' | 'cellsZ'>;
 export interface WorldExportActivity {
@@ -166,7 +167,7 @@ function DestinationPlan({
       </div>
       <p>
         {plan.estimate
-          ? `${mib(plan.estimate.peakBytes)} estimated peak memory`
+          ? `${mib(plan.estimate.peakBytes)} estimated live export data`
           : 'Check the settings above'}
       </p>
       {plan.error && (
@@ -303,6 +304,7 @@ export function WorldExportPanel({
   }, [regionRequest, region]);
   const [diagnostics, setDiagnostics] = useState(true);
   const [normals, setNormals] = useState(true);
+  const [materials, setMaterials] = useState(false);
   const [maskIds, setMaskIds] = useState<string[]>([]);
   const [state, setState] = useState<WorldExportState>({ status: 'idle' });
   const [receipt, setReceipt] = useState<WorldExportReceipt | null>(null);
@@ -400,8 +402,12 @@ export function WorldExportPanel({
       tileIntervals: world.tileCells,
       diagnostics,
       normals,
+      maps: materials ? [...WORLD_MATERIAL_MAPS] : [],
       masks: project.graph.nodes
-        .filter((node) => node.kind === 'mask' && maskIds.includes(node.id))
+        .filter(
+          (node) =>
+            (node.kind === 'mask' || node.kind === 'maskOutput') && maskIds.includes(node.id),
+        )
         .map((node) => ({ nodeId: node.id, name: node.label })),
     };
   }, [
@@ -414,11 +420,14 @@ export function WorldExportPanel({
     region,
     diagnostics,
     normals,
+    materials,
     maskIds,
   ]);
   const shownOptions = busy && lockedOptions ? lockedOptions : options;
   const shownProfile = shownOptions.profile;
-  const masks = shownOptions.project.graph.nodes.filter((node) => node.kind === 'mask');
+  const masks = shownOptions.project.graph.nodes.filter(
+    (node) => node.kind === 'mask' || node.kind === 'maskOutput',
+  );
   const shownMasks = shownOptions.masks?.map((mask) => mask.nodeId) ?? [];
   const plan = useMemo(() => planWorldExport(shownOptions), [shownOptions]);
   const estimate = plan.memory.estimate ?? plan.file.estimate;
@@ -701,6 +710,21 @@ export function WorldExportPanel({
               Terrain normal map<small>OpenGL +Y · continuous derivatives across tiles</small>
             </span>
           </label>
+          <label className="we-export-check">
+            <input
+              type="checkbox"
+              aria-label="PBR material maps"
+              checked={!!shownOptions.maps?.includes('basecolor')}
+              onChange={(event) => setMaterials(event.target.checked)}
+            />
+            <span>
+              PBR material maps
+              <small>
+                Base color, roughness, AO, ORM, coverage, curvature, GL/DX normals, detail normal &
+                signed relief. Includes saved paint and continuous tile borders.
+              </small>
+            </span>
+          </label>
           {masks.length > 0 && (
             <div className="we-export-masks">
               <span className="we-export-label">
@@ -769,8 +793,9 @@ export function WorldExportPanel({
             </p>
           )}
           <p className="we-export-caption">
-            Memory and archive sizes are conservative estimates. Direct saving writes tiles as they
-            finish, keeping the archive out of browser memory.
+            These estimates cover live export data and the archive. Total app memory is higher and
+            depends on the browser and its garbage collector. Direct saving writes tiles as they
+            finish without retaining the complete archive.
           </p>
         </section>
         <div className="we-export-action-dock" role="group" aria-label="Deliver world package">

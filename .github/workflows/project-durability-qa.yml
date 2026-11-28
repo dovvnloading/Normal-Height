@@ -1,0 +1,52 @@
+name: Project durability browser acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/App.tsx'
+      - 'src/components/ProjectLibrary*'
+      - 'src/components/Modal.tsx'
+      - 'src/hooks/useProjectLibraryBinding.ts'
+      - 'src/model/project*'
+      - 'src/model/sessionBackup.ts'
+      - 'src/model/autosave.ts'
+      - 'tests/project-library.test.ts'
+      - 'tests/project-library-storage.test.ts'
+      - 'tests/e2e/project-library.spec.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/project-durability-qa.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-durability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  project-durability:
+    name: Atomic checkpoints, recovery, conflicts and responsive UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run tests/project-library.test.ts tests/project-library-storage.test.ts
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test tests/e2e/project-library.spec.ts --workers=1 --retries=0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: project-durability-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14

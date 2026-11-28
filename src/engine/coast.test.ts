@@ -115,6 +115,35 @@ describe('coastal shelf', () => {
     expect(waterOnly.shore.every((v) => v === 0)).toBe(true);
   });
 
+  it('measures anisotropic physical distance on a rectangular world without changing square results', () => {
+    const n = 65;
+    const source = grid(n, (x, y) => (x === 32 && y === 32 ? 1 : 0));
+    const rectangular = { ...settings, worldSize: 640, worldDepth: 1280, shelfWidth: 1000 };
+    const formed = shapeCoast(source, n, rectangular);
+    const sites = [
+      [5, 0],
+      [-5, 0],
+      [0, 10],
+      [0, -10],
+    ];
+    for (const [dx, dz] of [
+      [11, 2],
+      [3, 5],
+      [8, 8],
+      [-2, 11],
+      [5, -10],
+    ]) {
+      const meters = Math.min(...sites.map(([x, z]) => Math.hypot(dx * 10 - x, dz * 20 - z)));
+      expect(formed.height[(32 + dz) * n + 32 + dx]).toBeCloseTo(
+        0.5 - (meters * Math.tan((3 * Math.PI) / 180)) / 200,
+        6,
+      );
+    }
+    expect(shapeCoast(source, n, { ...settings, worldDepth: settings.worldSize })).toEqual(
+      shapeCoast(source, n, settings),
+    );
+  });
+
   it('returns the footprint without inventing a coastline at the tile border', () => {
     for (const level of [0.1, 0.5, 0.8]) {
       const source = new Float32Array(32 * 32).fill(level);

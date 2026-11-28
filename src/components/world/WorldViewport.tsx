@@ -22,6 +22,7 @@ import {
 import type { WorldRegionResult } from '../../engine/world';
 import type { WorldGridRequest } from '../../hooks/worldProtocol';
 import type { WorldDefinition } from '../../model/world';
+import type { TerrainProject } from '../../model/types';
 import {
   WORLD_LAYERS,
   canCompareWorldSnapshots,
@@ -57,6 +58,7 @@ import { WorldTerrain3D } from './WorldTerrain3D';
 import './WorldViewport.css';
 
 export interface WorldViewportProps {
+  materialProject?: TerrainProject | null;
   result: WorldRegionResult | null;
   world: WorldDefinition;
   grid: WorldGridRequest | null;
@@ -227,6 +229,7 @@ function Legend({
 }
 
 export function WorldViewport({
+  materialProject,
   result,
   world,
   grid,
@@ -1242,6 +1245,8 @@ export function WorldViewport({
         {snapshot ? (
           <WorldTerrain3D
             snapshot={snapshot}
+            project={materialProject}
+            rangeSnapshot={usableOverview}
             layer={layer}
             scale={scale}
             region={region}

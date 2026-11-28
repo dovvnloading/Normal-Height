@@ -1,4 +1,5 @@
 import type { HeightField, TerrainProject } from '../model/types';
+import type { FieldSampling } from '../engine/fields';
 import { MAX_PROJECT_FILE_BYTES } from '../model/heightRaster';
 import { assertProjectStorageBudget, projectStorageBytes } from '../model/projectStorage';
 import {
@@ -83,7 +84,11 @@ export function paintCapacity(project: TerrainProject) {
     maxLayers: MAX_PAINT_LAYERS,
     bytes,
     maxBytes: MAX_PROJECT_FILE_BYTES,
-    ratio: Math.max(strokes.length / MAX_PAINT_STROKES, points / MAX_PAINT_POINTS, bytes / MAX_PROJECT_FILE_BYTES),
+    ratio: Math.max(
+      strokes.length / MAX_PAINT_STROKES,
+      points / MAX_PAINT_POINTS,
+      bytes / MAX_PROJECT_FILE_BYTES,
+    ),
   };
 }
 function assertCapacity(layers: readonly PaintLayer[]) {
@@ -259,7 +264,8 @@ export function floodPaintSelection(
       p = source(x, y);
     let distance = 0;
     for (let c = 0; c < 4; c++) distance += Math.abs(splat[p + c] - target[c]);
-    if (distance > limit || !pointInPaintSelection(restriction, { u: x / (n - 1), v: y / (n - 1) })) continue;
+    if (distance > limit || !pointInPaintSelection(restriction, { u: x / (n - 1), v: y / (n - 1) }))
+      continue;
     selected[i] = 1;
     const neighbours = [
       x > 0 ? i - 1 : -1,
@@ -307,13 +313,15 @@ export function createProjectPaintRaster(
   project: TerrainProject,
   field: HeightField,
   proceduralSample?: (x: number, y: number) => Weights,
+  sampling?: FieldSampling,
 ): ProjectPaintRaster | undefined {
   const layers = getPaintLayers(project).filter(
     (layer) => layer.visible && layer.opacity > 0 && layer.strokes.length,
   );
   if (!layers.length) return undefined;
   const n = field.resolution,
-    context = { field, project };
+    rows = sampling?.grid.height ?? n,
+    context = { field, project, sampling };
   const output = new Float32Array(n * 4);
   let currentRow = -1;
   const advanced = layers.some((layer) =>
@@ -438,18 +446,26 @@ export function createProjectPaintRaster(
         } else if (stroke.mode === 'blend') {
           const visible = mixCoverage(result, local),
             average = [0, 0, 0, 0];
-          const distance = Math.max(1, Math.min(8, Math.round(stroke.radius * (n - 1) * 0.22)));
+          const domain = sampling?.paint;
+          const radiusX = domain
+            ? (stroke.radius * domain.width) / sampling!.grid.spacingX
+            : stroke.radius * (n - 1);
+          const radiusZ = domain
+            ? (stroke.radius * domain.depth) / sampling!.grid.spacingZ
+            : stroke.radius * (n - 1);
+          const distanceX = Math.max(1, Math.min(8, Math.round(radiusX * 0.22)));
+          const distanceZ = Math.max(1, Math.min(8, Math.round(radiusZ * 0.22)));
           const offsets = [
             [0, 0],
-            [-distance, 0],
-            [distance, 0],
-            [0, -distance],
-            [0, distance],
+            [-distanceX, 0],
+            [distanceX, 0],
+            [0, -distanceZ],
+            [0, distanceZ],
           ];
           for (const [dx, dy] of offsets) {
             const sx = Math.max(0, Math.min(n - 1, x + dx)),
-              sy = Math.max(0, Math.min(n - 1, y + dy));
-            const key = order * n * n + sy * n + sx;
+              sy = Math.max(0, Math.min(rows - 1, y + dy));
+            const key = order * n * rows + sy * n + sx;
             let sample = cached(memo, key);
             if (!sample) {
               sample = evaluate(sx, sy, baseAt(sx, sy, base), order, true);

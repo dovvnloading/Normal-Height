@@ -2,6 +2,16 @@ import { MAX_PROJECT_RASTER_BYTES, parseHeightRaster, rasterBytes } from './heig
 import { parseMaterialPaint } from '../materials/materialPaint';
 import { parsePaintLayers } from '../materials/paintLayers';
 import { serializeProjectFile } from './projectStorage';
+import {
+  GRAPH_LIMIT_ERROR,
+  MAX_GRAPH_NODES,
+  MAX_GRAPH_EDGES,
+  inputHandle,
+  outputHandle,
+  supportsOutput,
+  validGraphIdentifier,
+  validateGraph,
+} from './graph';
 import { MAX_SPLINE_POINTS, validSplinePoint } from './splines';
 import { resolveSurface, SPLAT_LAYERS, SURFACE_LIMITS } from '../materials/pbr';
 import { NODE_DEFINITIONS, createNode } from './registry';
@@ -32,23 +42,17 @@ export function parseProject(raw: unknown): TerrainProject {
     !g ||
     !Array.isArray(g.nodes) ||
     !Array.isArray(g.edges) ||
-    g.nodes.length > 128 ||
-    g.edges.length > 512
+    g.nodes.length > MAX_GRAPH_NODES ||
+    g.edges.length > MAX_GRAPH_EDGES
   )
-    throw new Error('The project graph is missing or exceeds the 128-node limit.');
+    throw new Error('The project graph is missing or invalid. ' + GRAPH_LIMIT_ERROR);
   let remainingRasterBytes = MAX_PROJECT_RASTER_BYTES;
   const ids = new Set<string>();
   const nodes: TerrainNode[] = g.nodes.map((rawNode) => {
     if (!rawNode || typeof rawNode !== 'object') throw new Error('A node is not valid.');
     const n = rawNode as Record<string, unknown>;
     const kind = n.kind as NodeKind;
-    if (
-      !Object.hasOwn(NODE_DEFINITIONS, kind) ||
-      typeof n.id !== 'string' ||
-      !n.id ||
-      ['__proto__', 'constructor', 'prototype'].includes(n.id) ||
-      ids.has(n.id)
-    )
+    if (!Object.hasOwn(NODE_DEFINITIONS, kind) || !validGraphIdentifier(n.id) || ids.has(n.id))
       throw new Error('The project contains an unknown node or duplicate identifier.');
     ids.add(n.id);
     const pos = n.position as { x: number; y: number } | undefined;
@@ -106,45 +110,33 @@ export function parseProject(raw: unknown): TerrainProject {
     if (finite(n.height, 60, 10000)) clean.height = n.height;
     return clean;
   });
-  for (const n of nodes) {
-    if (
-      n.parentId &&
-      (!ids.has(n.parentId) ||
-        nodes.find((p) => p.id === n.parentId)?.kind !== 'group' ||
-        n.parentId === n.id)
-    )
-      throw new Error('A group has an invalid parent.');
-    const seen = new Set([n.id]);
-    let parent = n.parentId;
-    while (parent) {
-      if (seen.has(parent)) throw new Error('Groups cannot contain one another in a cycle.');
-      seen.add(parent);
-      parent = nodes.find((p) => p.id === parent)?.parentId;
-    }
-  }
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const edgeIds = new Set<string>();
   const edges: TerrainEdge[] = g.edges.map((rawEdge) => {
     const e = rawEdge as TerrainEdge;
     if (
       !e ||
-      typeof e.id !== 'string' ||
+      !validGraphIdentifier(e.id) ||
       edgeIds.has(e.id) ||
       !ids.has(e.source) ||
       !ids.has(e.target)
     )
       throw new Error('The project contains an invalid connection.');
     edgeIds.add(e.id);
-    const source = nodes.find((n) => n.id === e.source)!;
-    const target = nodes.find((n) => n.id === e.target)!;
-    const sh = e.sourceHandle ?? 'height';
-    const th = e.targetHandle ?? 'in';
+    const source = nodesById.get(e.source)!;
+    const target = nodesById.get(e.target)!;
+    const sh = outputHandle(e);
+    const th = inputHandle(e, target);
     if (
-      !NODE_DEFINITIONS[source.kind].outputs.some((p) => p.id === sh) ||
+      !supportsOutput(source, sh) ||
       !NODE_DEFINITIONS[target.kind].inputs.some((p) => p.id === th)
     )
       throw new Error('A connection uses an unknown input or output.');
     return { id: e.id, source: e.source, target: e.target, sourceHandle: sh, targetHandle: th };
   });
+  const graph = { nodes, edges };
+  const graphError = validateGraph(graph);
+  if (graphError) throw new Error(graphError);
   if (
     !finite(p.seed, 0, 2147483647) ||
     !finite(p.worldSize, 100, 100000) ||
@@ -157,6 +149,10 @@ export function parseProject(raw: unknown): TerrainProject {
     if (!p.surface || typeof p.surface !== 'object' || Array.isArray(p.surface))
       throw new Error('Invalid PBR surface settings.');
     const rawSurface = p.surface as Record<string, unknown>;
+    if (rawSurface.modelVersion !== undefined && rawSurface.modelVersion !== 4)
+      throw new Error(
+        'Unsupported PBR material model version. This build supports surface model 4.',
+      );
     const biome = rawSurface.biome;
     if (
       biome !== undefined &&
@@ -203,7 +199,7 @@ export function parseProject(raw: unknown): TerrainProject {
       ? { materialPaint: parseMaterialPaint(p.materialPaint) }
       : {}),
     ...(p.paintLayers !== undefined ? { paintLayers: parsePaintLayers(p.paintLayers) } : {}),
-    graph: { nodes, edges },
+    graph,
   };
 }
 export function downloadBlob(blob: Blob, filename: string) {
