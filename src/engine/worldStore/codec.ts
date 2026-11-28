@@ -1,8 +1,10 @@
 import type { WorldRegionResult } from '../world';
+import { GENESIS_CHANNELS } from '../world/types';
+import { isGenesisReport } from '../genesis/report';
 import { canonical } from '../plan/graph';
 
 /** Change whenever world sampling or the stored field contract changes. */
-export const WORLD_REGION_CACHE_VERSION = 'world-region-cpu-2';
+export const WORLD_REGION_CACHE_VERSION = 'world-region-cpu-3/genesis-1';
 export const REGION_CHANNELS = ['heights', 'flow', 'wear', 'deposition'] as const;
 const encoder = new TextEncoder();
 const crcTable = Uint32Array.from({ length: 256 }, (_, value) => {
@@ -37,18 +39,41 @@ function metadata(result: WorldRegionResult) {
       reason: stage.reason,
     })),
     transportBudget: result.transportBudget,
+    genesisReport: result.genesis?.report,
   };
 }
 
 /** Persist the declared contract only; never retain hidden solver scratch fields. */
 export function snapshotRegion(result: WorldRegionResult): WorldRegionResult {
+  const { genesisReport: _genesisReport, ...meta } = metadata(result);
   return structuredClone({
-    ...metadata(result),
+    ...meta,
     heights: result.heights,
     flow: result.flow,
     wear: result.wear,
     deposition: result.deposition,
+    ...(result.genesis
+      ? {
+          genesis: {
+            hardness: result.genesis.hardness,
+            lithology: result.genesis.lithology,
+            uplift: result.genesis.uplift,
+            incision: result.genesis.incision,
+            drainageArea: result.genesis.drainageArea,
+            channel: result.genesis.channel,
+            report: result.genesis.report,
+          },
+        }
+      : {}),
   });
+}
+
+/** One list for hashing, buffer admission and worker transfer accounting. */
+export function regionArrays(result: WorldRegionResult): (Float32Array | Uint8Array)[] {
+  return [
+    ...REGION_CHANNELS.map((channel) => result[channel]),
+    ...(result.genesis ? GENESIS_CHANNELS.map((channel) => result.genesis![channel]) : []),
+  ];
 }
 
 /** CRC32 covers metadata and every semantic channel, including shared arrays. */
@@ -59,8 +84,7 @@ export function regionChecksum(result: WorldRegionResult): string {
       crc = crcTable[(crc ^ bytes[index]) & 255] ^ (crc >>> 8);
   };
   feed(encoder.encode(canonical(metadata(result))));
-  for (const channel of REGION_CHANNELS) {
-    const array = result[channel];
+  for (const array of regionArrays(result)) {
     feed(new Uint8Array(array.buffer, array.byteOffset, array.byteLength));
   }
   return ((crc ^ 0xffffffff) >>> 0).toString(16).padStart(8, '0');
@@ -68,7 +92,7 @@ export function regionChecksum(result: WorldRegionResult): string {
 
 /** Includes retained backing buffers, serialized metadata/key, and record overhead. */
 export function regionBytes(key: string, result: WorldRegionResult): number {
-  const buffers = new Set(REGION_CHANNELS.map((channel) => result[channel].buffer));
+  const buffers = new Set(regionArrays(result).map((array) => array.buffer));
   return (
     [...buffers].reduce((sum, buffer) => sum + buffer.byteLength, 0) +
     encoder.encode(canonical(metadata(result))).byteLength +
@@ -140,6 +164,24 @@ export function validRegion(value: unknown): value is WorldRegionResult {
   )
     return false;
   const size = result.width * result.height;
+  if (result.genesis !== undefined) {
+    const g = result.genesis;
+    if (!g || typeof g !== 'object' || !isGenesisReport(g.report)) return false;
+    for (const key of GENESIS_CHANNELS) {
+      const array = g[key];
+      if (
+        (key === 'lithology' ? !(array instanceof Uint8Array) : !(array instanceof Float32Array)) ||
+        array.length !== size
+      )
+        return false;
+      for (const value of array) {
+        if (!Number.isFinite(value)) return false;
+        if ((key === 'hardness' || key === 'channel') && (value < 0 || value > 1)) return false;
+        if (key === 'lithology' && value > 3) return false;
+        if ((key === 'incision' || key === 'drainageArea') && value < 0) return false;
+      }
+    }
+  }
   for (const channel of REGION_CHANNELS) {
     const array = result[channel];
     if (!(array instanceof Float32Array) || array.length !== size) return false;

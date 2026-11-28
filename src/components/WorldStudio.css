@@ -827,6 +827,76 @@
 .we-layer-swatch.layer-deposition {
   background: linear-gradient(140deg, #263d32, #68a280, #c6e8b2);
 }
+.we-layer-swatch.layer-hardness {
+  background: linear-gradient(140deg, #e3c58b, #977867, #374555);
+}
+.we-layer-swatch.layer-lithology {
+  background: linear-gradient(140deg, #7e7160 25%, #9b8265 25% 50%, #c69e69 50% 75%, #c6c4ad 75%);
+}
+.we-layer-swatch.layer-uplift {
+  background: linear-gradient(140deg, #2f86b9, #e0e6db, #da8944);
+}
+.we-layer-swatch.layer-incision {
+  background: linear-gradient(140deg, #2f2a25, #ad6a41, #f7d193);
+}
+.we-layer-swatch.layer-drainageArea,
+.we-layer-swatch.layer-channel {
+  background: linear-gradient(140deg, #192c35, #2e7489, #a9ece8);
+}
+.we-genesis-toggle {
+  background: linear-gradient(
+    130deg,
+    var(--we-panel),
+    color-mix(in srgb, var(--we-accent) 8%, var(--we-panel))
+  );
+}
+.we-genesis-toggle strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.we-genesis-scale {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 10px;
+  border: 1px solid var(--we-border);
+  border-radius: 6px;
+  color: var(--we-muted);
+}
+.we-genesis-scale > svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.we-genesis-scale strong,
+.we-genesis-scale small {
+  display: block;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.we-genesis-scale strong {
+  color: var(--we-text);
+}
+.we-genesis-rocks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.we-genesis-rocks > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: var(--we-muted);
+}
+.we-genesis-rocks i {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgb(0 0 0 / 14%);
+  border-radius: 3px;
+}
 .we-empty-inline {
   display: flex;
   align-items: flex-start;

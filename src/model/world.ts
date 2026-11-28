@@ -1,4 +1,6 @@
 import type { TerrainProject } from './types';
+import type { GenesisSettings } from './genesis';
+import { normalizeGenesisSettings, validateGenesisSettings } from './genesis';
 
 export type WorldBackend = 'auto' | 'cpu-reference' | 'webgpu';
 export type WorldBoundary = 'closed' | 'open' | 'periodic';
@@ -56,6 +58,8 @@ export interface WorldDefinition {
   globalResolution: number;
   backend: WorldBackend;
   transport?: WorldTransportSettings;
+  /** Opt-in geological formation, evaluated before World water/sediment transport. */
+  genesis?: GenesisSettings;
 }
 
 export const WORLD_MAX_CELLS = 32768;
@@ -130,6 +134,10 @@ export function validateWorldDefinition(value: unknown): string | null {
     return 'Global reference resolution must be an integer from 64 to 1024 samples.';
   if (!['auto', 'cpu-reference', 'webgpu'].includes(world.backend))
     return 'Choose Auto, CPU reference, or WebGPU.';
+  if (world.genesis !== undefined) {
+    const genesisError = validateGenesisSettings(world.genesis);
+    if (genesisError) return genesisError;
+  }
   if (world.transport !== undefined) {
     const t = world.transport;
     if (!t || typeof t !== 'object' || typeof t.enabled !== 'boolean')
@@ -172,5 +180,6 @@ export function normalizeWorldDefinition(
     globalResolution: world.globalResolution,
     backend: world.backend,
     ...(world.transport ? { transport: { ...world.transport } } : {}),
+    ...(world.genesis ? { genesis: normalizeGenesisSettings(world.genesis) } : {}),
   };
 }

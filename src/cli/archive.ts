@@ -8,6 +8,14 @@ import { MAX_PROJECT_FILE_BYTES } from '../model/heightRaster';
 import { parseProject } from '../model/project';
 import { canonical } from '../engine/plan/graph';
 import type { WorldExportManifest } from '../export/worldExport';
+import { GENESIS_ALGORITHM_VERSION, GENESIS_LITHOLOGIES } from '../model/genesis';
+import { genesisGridSize } from '../engine/genesis';
+import { isGenesisReport } from '../engine/genesis/report';
+import {
+  genesisMapDescriptor,
+  isWorldGenesisMap,
+  type WorldGenesisMap,
+} from '../export/genesisExport';
 
 const MiB = 1024 * 1024;
 const ARCHIVE_LIMIT = 2 ** 31 - 1;
@@ -308,6 +316,62 @@ export async function verifyWorldArchive(
       project.seed !== rawManifest.projectSeed
     )
       fail('embedded project does not match the manifest world or seed.');
+    const genesisChannels = new Map<WorldGenesisMap, Record<string, unknown>>();
+    if (rawManifest.genesis !== undefined) {
+      const genesis = object(rawManifest.genesis, 'Genesis provenance');
+      if (
+        genesis.schemaVersion !== 1 ||
+        genesis.algorithm !== GENESIS_ALGORITHM_VERSION ||
+        genesis.fieldStage !== 'before-world-transport' ||
+        !project.world?.genesis?.enabled ||
+        canonical(genesis.settings) !== canonical(project.world.genesis)
+      )
+        fail('Genesis provenance does not match the authored project.');
+      const report = genesis.report;
+      if (!isGenesisReport(report)) fail('invalid Genesis numerical report.');
+      const expectedGrid = genesisGridSize(project.world!.domain, project.world!.globalResolution);
+      if (
+        report.width !== expectedGrid.width ||
+        report.height !== expectedGrid.height ||
+        report.durationYears !== project.world!.genesis!.durationYears ||
+        report.spacingX !== project.world!.domain.width / (report.width - 1) ||
+        report.spacingZ !== project.world!.domain.depth / (report.height - 1) ||
+        canonical(genesis.lithologies) !== canonical(GENESIS_LITHOLOGIES)
+      )
+        fail('Genesis report or lithology legend disagrees with its provenance.');
+      const channels = object(genesis.channels, 'Genesis channels');
+      for (const [map, rawChannel] of Object.entries(channels)) {
+        if (!isWorldGenesisMap(map)) fail(`unknown Genesis map descriptor: ${map}.`);
+        const channel = object(rawChannel, `Genesis ${map} descriptor`);
+        const range = channel.range;
+        if (
+          !Array.isArray(range) ||
+          range.length !== 2 ||
+          !range.every(Number.isFinite) ||
+          range[0] > range[1]
+        )
+          fail(`invalid Genesis ${map} range.`);
+        const expected = genesisMapDescriptor(
+          map,
+          GENESIS_ALGORITHM_VERSION,
+          range as [number, number],
+        );
+        for (const key of [
+          'semantic',
+          'units',
+          'components',
+          'algorithm',
+          'storage',
+          'byteOrder',
+          'sampling',
+        ] as const)
+          if (channel[key] !== expected[key]) fail(`invalid Genesis ${map} ${key}.`);
+        genesisChannels.set(map, channel);
+      }
+    } else if (project.world?.genesis?.enabled) {
+      fail('an enabled Genesis project requires its generation provenance.');
+    }
+    const genesisEntries = new Map<string, WorldGenesisMap>();
     const dimensions = object(rawManifest.dimensions, 'manifest dimensions');
     const samples = positivePair(dimensions.samples, 'manifest sample dimensions');
     const tiles = rawManifest.tiles;
@@ -367,10 +431,24 @@ export async function verifyWorldArchive(
           parseInt(record.crc32, 16) !== entry.crc
         )
           fail(`manifest file size or CRC32 disagrees: ${record.path}.`);
+        if (isWorldGenesisMap(record.map)) {
+          const descriptor = genesisChannels.get(record.map);
+          const bpp = record.map === 'lithology' ? 1 : 4;
+          if (
+            !descriptor ||
+            record.format !== descriptor.storage ||
+            entry.size !== tileSamples[0] * tileSamples[1] * bpp ||
+            tileSamples.some((count) => count > 513)
+          )
+            fail(`Genesis file encoding or dimensions disagree: ${record.path}.`);
+          genesisEntries.set(record.path, record.map);
+        }
         expected.add(record.path);
         verifiedMapFiles++;
       }
       if (!maps.has('height')) fail('a tile is missing its height map.');
+      for (const map of genesisChannels.keys())
+        if (!maps.has(map)) fail(`a tile is missing its Genesis ${map} map.`);
     }
     if (tiles.length !== columns.size * rows.size) fail('tile coverage contains holes.');
     for (const [axis, bands] of [
@@ -390,8 +468,26 @@ export async function verifyWorldArchive(
       fail('archive files do not exactly match the manifest.');
     for (const entry of entries) {
       check(options.signal);
-      if (entry !== manifestEntry && entry !== projectEntry)
-        await verifyEntry(file, entry, false, options.signal);
+      if (entry !== manifestEntry && entry !== projectEntry) {
+        const genesisMap = genesisEntries.get(entry.path);
+        const data = await verifyEntry(file, entry, !!genesisMap, options.signal);
+        if (genesisMap && data) {
+          if (genesisMap === 'lithology') {
+            for (const id of data) if (id > 3) fail(`unknown lithology ID in ${entry.path}.`);
+          } else {
+            for (let offset = 0; offset < data.length; offset += 4) {
+              const value = data.readFloatLE(offset);
+              if (
+                !Number.isFinite(value) ||
+                ((genesisMap === 'hardness' || genesisMap === 'channel') &&
+                  (value < 0 || value > 1)) ||
+                ((genesisMap === 'incision' || genesisMap === 'drainageArea') && value < 0)
+              )
+                fail(`invalid physical Genesis value in ${entry.path}.`);
+            }
+          }
+        }
+      }
     }
     const build = object(rawManifest.build, 'build provenance');
     if (

@@ -1,0 +1,451 @@
+{
+  "schemaVersion": 1,
+  "status": {
+    "packageBuild": "passed",
+    "archiveVerification": "passed",
+    "actualAssetImport": "completed",
+    "geometryUVAndPackedTextureChecks": "passed",
+    "actualAssetRender": "completed",
+    "packedBlendSaved": "completed",
+    "strictSmallFixtureNormalThresholdsOnLargeAsset": "failed-observed-and-documented"
+  },
+  "source": {
+    "revision": "a02881f4595ef66182b62087d41a1b4e19f4be20",
+    "dirty": false,
+    "source": "git"
+  },
+  "environment": {
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "node": "v24.22.3",
+    "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+    "machine": "x86_64"
+  },
+  "input": {
+    "path": "examples/genesis-alpine.nhterrain.json",
+    "sha256": "f8e0040f6ca1d717fd9700ed322abf7869a398c685faaab183c8c7b396779346"
+  },
+  "package": {
+    "command": [
+      "node",
+      "scripts/nh.mjs",
+      "build",
+      "examples/genesis-alpine.nhterrain.json",
+      "--out",
+      "test-results/genesis-final-alpine-1k.zip",
+      "--samples",
+      "1024",
+      "--global-resolution",
+      "256",
+      "--tile-intervals",
+      "128",
+      "--format",
+      "raw32",
+      "--maps",
+      "hardness,lithology,uplift,incision,drainageArea,channel,basecolor,roughness,ao,orm,splat,curvature,materialNormalGL,materialNormalDX,detailNormalGL,relief",
+      "--json"
+    ],
+    "timing": {
+      "wallSeconds": 42.949746715999936,
+      "cliElapsedSeconds": 42.07936531,
+      "userSeconds": 35.223337,
+      "systemSeconds": 1.486808,
+      "peakProcessRSSBytes": 258830336
+    },
+    "artifact": {
+      "path": "test-results/genesis-final-alpine-1k.zip",
+      "bytes": 46441669,
+      "sha256": "ae90b063d900ffc7782f5aade6816248d7d38a8952ea80ef60aeb7cb78a12621"
+    },
+    "verification": {
+      "archiveBytes": 46441669,
+      "expandedBytes": 46283841,
+      "files": 1091,
+      "tiles": 64,
+      "verifiedMapFiles": 1088,
+      "dimensions": [
+        1024,
+        1024
+      ],
+      "profile": "generic",
+      "build": {
+        "revision": "a02881f4595ef66182b62087d41a1b4e19f4be20",
+        "dirty": false,
+        "source": "git"
+      },
+      "importQualification": "Generic data contract validated. Blender bridge qualification is recorded separately in docs/BLENDER.md; other external application imports remain unverified.",
+      "warnings": [
+        "World Genesis is an artistic landscape evolution model. Its removed-rock and uplift volumes describe the reference grids, not sediment export or a calibrated geological age. Drainage and incision diagnostics precede optional World transport.",
+        "Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion.",
+        "Preflight counts live data buffers and archive retention. JavaScript runtime, garbage collection, renderer and GPU memory are additional; the budget is not a process memory cap.",
+        "Material elevation distribution and diagnostic normalization use the selected export region. A different crop can change climate-dependent coverage. The material appearance is model 4; shader-only close detail is not baked into these terrain maps."
+      ]
+    },
+    "explicitVerificationWallSeconds": 1.5701985970001715,
+    "mapFilesByChannel": {
+      "height": 64,
+      "hardness": 64,
+      "lithology": 64,
+      "uplift": 64,
+      "incision": 64,
+      "drainageArea": 64,
+      "channel": 64,
+      "basecolor": 64,
+      "roughness": 64,
+      "ao": 64,
+      "orm": 64,
+      "splat": 64,
+      "curvature": 64,
+      "materialNormalGL": 64,
+      "materialNormalDX": 64,
+      "detailNormalGL": 64,
+      "relief": 64
+    },
+    "dimensions": {
+      "samples": [
+        1024,
+        1024
+      ],
+      "intervals": [
+        1023,
+        1023
+      ],
+      "widthMeters": 8000,
+      "depthMeters": 8000,
+      "sampleSpacingMeters": [
+        7.820136852394917,
+        7.820136852394917
+      ],
+      "originMeters": [
+        -4000,
+        -4000
+      ]
+    },
+    "memoryEstimate": {
+      "archiveBytes": 76685017,
+      "peakBytes": 123116262,
+      "retainedArchiveBytes": 0,
+      "tileCount": 64,
+      "tileIntervals": 128,
+      "sampleCountIncludingBorders": 1062961,
+      "budgetBytes": 536870912
+    }
+  },
+  "formation": {
+    "algorithm": "world-genesis-1",
+    "referenceSamples": [
+      256,
+      256
+    ],
+    "referenceSpacingMeters": [
+      31.372549019607842,
+      31.372549019607842
+    ],
+    "levels": [
+      {
+        "width": 65,
+        "height": 65,
+        "spacingX": 125,
+        "spacingZ": 125,
+        "iterations": 12,
+        "durationYears": 60000
+      },
+      {
+        "width": 129,
+        "height": 129,
+        "spacingX": 62.5,
+        "spacingZ": 62.5,
+        "iterations": 12,
+        "durationYears": 36000
+      },
+      {
+        "width": 256,
+        "height": 256,
+        "spacingX": 31.372549019607842,
+        "spacingZ": 31.372549019607842,
+        "iterations": 12,
+        "durationYears": 24000
+      }
+    ],
+    "report": {
+      "algorithmVersion": "world-genesis-1",
+      "mode": "multiscale-stream-power",
+      "width": 256,
+      "height": 256,
+      "spacingX": 31.372549019607842,
+      "spacingZ": 31.372549019607842,
+      "levels": [
+        {
+          "width": 65,
+          "height": 65,
+          "spacingX": 125,
+          "spacingZ": 125,
+          "iterations": 12,
+          "durationYears": 60000
+        },
+        {
+          "width": 129,
+          "height": 129,
+          "spacingX": 62.5,
+          "spacingZ": 62.5,
+          "iterations": 12,
+          "durationYears": 36000
+        },
+        {
+          "width": 256,
+          "height": 256,
+          "spacingX": 31.372549019607842,
+          "spacingZ": 31.372549019607842,
+          "iterations": 12,
+          "durationYears": 24000
+        }
+      ],
+      "durationYears": 120000,
+      "upliftVolumeM3": 6053001995.05668,
+      "incisedVolumeM3": 2244221400.667401,
+      "hillslopeRedistributedVolumeM3": 1839165476.1789217,
+      "hillslopeResidualM3": -8.206895252271806e-08,
+      "reconstructionVolumeM3": -88614.91082906723,
+      "finalVolumeChangeM3": 3808691979.4788346,
+      "outletCount": 1020,
+      "maxDrainageAreaM2": 12059200.98263748,
+      "drainageAreaResidualM2": 6.92903995513916e-07,
+      "durationMs": 1673.711593,
+      "limitations": [
+        "Artist-controlled stream-power evolution with stylized rock competence; parameters are not geologically calibrated.",
+        "Whole-domain reference grids are refined together. Export pixels below the final reference spacing do not receive an independent erosion solve.",
+        "Incision removes rock without transporting or depositing its sediment. Incised volume is not outlet sediment export.",
+        "Coarse-to-fine displacement reconstruction is not mass conservative; its integrated volume change is reported separately.",
+        "Priority-flood spill elevations connect drainage without filling terrain. Implicit incision follows a primary D8 receiver; weighted contributing area splits across downhill neighbors and may cross primary basin divides.",
+        "Open edges have fixed base levels. Hillslope diffusion uses monotone pairwise splitting; it is not an exact large-time-step PDE solution.",
+        "Diagnostics describe the Genesis stage before any optional World water and sediment transport."
+      ]
+    }
+  },
+  "actualAssetBlender": {
+    "command": [
+      "blender",
+      "--background",
+      "--factory-startup",
+      "--python-exit-code",
+      "1",
+      "--python",
+      "test-results/genesis-final-alpine-overview.py",
+      "--",
+      "--archive",
+      "test-results/genesis-final-alpine-1k.zip",
+      "--directory",
+      "test-results/genesis-final-alpine-blender",
+      "--repo",
+      "."
+    ],
+    "blenderVersion": "4.3.2",
+    "numpyVersion": "2.2.4",
+    "wallSeconds": 33.131310987000234,
+    "peakProcessRSSBytes": 1573076992,
+    "importSeconds": 15.618816773000162,
+    "renderSeconds": 9.247752582999965,
+    "completion": {
+      "archiveImported": true,
+      "geometryAndUVChecksPassed": true,
+      "packedTextureChecksPassed": true,
+      "rendered": true,
+      "blendSaved": true
+    },
+    "tiles": 64,
+    "verticesIncludingSharedBorders": 1062961,
+    "uniqueSamples": 1048576,
+    "quadFaces": 1046529,
+    "renderTriangles": 2093058,
+    "sharedSampleComparisons": 14385,
+    "packedImages": 192,
+    "packedPBRChannels": [
+      "basecolor",
+      "orm",
+      "detailNormalGL"
+    ],
+    "boundsMeters": [
+      [
+        -4000.0,
+        -3999.9999389648438,
+        161.88633728027344
+      ],
+      [
+        3999.9999389648438,
+        4000.0,
+        1148.9178314208984
+      ]
+    ],
+    "maximumErrors": {
+      "geometryMeters": 0.00012010143655061256,
+      "normalAngleDegrees": 0.1753135051633424,
+      "uv": 2.9571296633612576e-08,
+      "decodedTexture": 5.960464477539063e-08,
+      "sharedPositionMeters": 0.0001220703125,
+      "sharedNormalComponent": 0.0029370784759521484
+    },
+    "normalPrecision": {
+      "input": "Canonical whole-region physical-height gradient, normalized and converted to float32 before normals_split_custom_set_from_vertices.",
+      "decodedLoopCount": 4186116,
+      "angleDegrees": {
+        "0": 0.0,
+        "50": 0.0008109146147035062,
+        "95": 0.0025841989554464817,
+        "99": 0.0065741166472435,
+        "100": 0.17531350255012512
+      },
+      "sharedBorderAngleDegrees": {
+        "0": 7.778248095798993e-06,
+        "50": 0.001635934573844791,
+        "95": 0.004764813270076863,
+        "99": 0.006339722253404475,
+        "100": 0.17595011398655558
+      },
+      "sourceFloat32MaxErrorDegrees": 2.9575586669421963e-06,
+      "worstLoop": {
+        "tile": [
+          1,
+          4
+        ],
+        "loop": 65534,
+        "vertex": 16640,
+        "sample": [
+          256,
+          640
+        ],
+        "worldMeters": [
+          -1998.044921875,
+          -1004.8876075744629,
+          249.20217895507812
+        ],
+        "sourceFloat64Normal": [
+          -0.2775771630796342,
+          0.43624493618533783,
+          0.8559446677147493
+        ],
+        "sourceFloat32Normal": [
+          -0.27757716178894043,
+          0.436244934797287,
+          0.8559446930885315
+        ],
+        "decodedBlenderNormal": [
+          -0.27464747428894043,
+          0.4363895058631897,
+          0.8568155169487
+        ],
+        "decodedBlenderUnitNormal": [
+          -0.27464749268415983,
+          0.4363895350914967,
+          0.856815574336118
+        ],
+        "angleDegrees": 0.1753135051633424
+      },
+      "originalSmallFixtureAngleThresholdDegrees": 0.06,
+      "originalSmallFixtureAngleThresholdMet": false,
+      "originalSmallFixtureSharedComponentThreshold": 0.0002,
+      "originalSmallFixtureSharedComponentThresholdMet": false,
+      "status": "Measured independently; initial small-fixture thresholds are retained as observations and not silently reclassified as passed."
+    },
+    "normalInterpretation": {
+      "observation": "The source float32 conversion maximum error is 0.0000029576 degrees; the Blender-decoded maximum is 0.1753135052 degrees. All tile inputs use the same canonical gradient at shared samples.",
+      "inference": "The measured discrepancy arises after the canonical normal is sent through Blender custom-normal storage/decoding, rather than in float32 source conversion or the source height gradient. This is consistent with a decoded custom-normal precision limitation.",
+      "qualification": "The original small-fixture angle and shared-component thresholds are false for this larger asset. Import/render completion and geometry/UV/texture validation are reported separately.",
+      "diffuseBound": "The measured maximum shared-border angular difference of 0.175950114 degrees bounds the difference in unit normal vectors, and hence diffuse N dot L for a unit light direction, to approximately 0.003071 (0.3071 percent of full-scale Lambertian response). This mathematical bound does not certify all material or viewing conditions."
+    },
+    "strictSmallFixtureNormalThresholdsPassed": false,
+    "geometrySHA256": "fe160e2b9d13cfb14c7566a2c1c39c1d0fbd95ab3236ed6936db38fec8ffb5e6",
+    "renderSettings": {
+      "engine": "Cycles",
+      "device": "CPU",
+      "samples": 48,
+      "seed": 1729,
+      "resolution": [
+        1280,
+        960
+      ],
+      "denoising": false,
+      "viewTransform": "AgX",
+      "look": "None",
+      "exposure": 0.0,
+      "gamma": 1.0,
+      "cameraType": "ORTHO",
+      "cameraLocationMeters": [
+        10500.0,
+        -13000.0,
+        13455.40234375
+      ],
+      "cameraTargetMeters": [
+        -3.0517578125e-05,
+        3.0517578125e-05,
+        655.402099609375
+      ],
+      "orthoScaleMeters": 13200.0,
+      "sunEnergy": 2.799999952316284,
+      "sunAngleRadians": 0.11999999731779099,
+      "sunEulerRadians": [
+        0.6000000238418579,
+        -0.75,
+        -0.4000000059604645
+      ],
+      "worldColor": [
+        0.16,
+        0.19,
+        0.24
+      ],
+      "worldStrength": 0.65,
+      "renderedMaterialMaps": [
+        "basecolor",
+        "orm",
+        "detailNormalGL"
+      ],
+      "geometryChanges": "None; all imported physical heights preserved, no displacement modifiers or vertical exaggeration."
+    },
+    "actualRunScriptSHA256": "eb57bae639b10fdf43b3f7db0b7bf1535969f9631e697882d7e5b2f967b01183",
+    "reusableRenderer": {
+      "path": "integrations/blender/render-genesis-example.py",
+      "bytes": 14739,
+      "sha256": "ee680d41a03d965c7de081bdb1fc1feb1ec68dc853468abe39f0de6e4c21feed"
+    },
+    "render": {
+      "path": "docs/images/world-genesis-alpine-blender.png",
+      "bytes": 1430142,
+      "sha256": "d8cdb969cafe201583bd45c96b886b14dc0ac23a5b6e938fadc720e270b8651e"
+    },
+    "blend": {
+      "path": "test-results/genesis-final-alpine-blender/alpine-delivered.blend",
+      "bytes": 134068124,
+      "sha256": "6efe60c14e805270834b4fcb1959239d2de7759cccf3931ebce09b0ec1332fc4"
+    },
+    "actualRunScript": {
+      "filename": "genesis-final-alpine-overview.py",
+      "language": "python",
+      "sha256": "eb57bae639b10fdf43b3f7db0b7bf1535969f9631e697882d7e5b2f967b01183",
+      "source": "\"\"\"Render the exact exported Alpine asset; no sculpting, displacement, or vertical exaggeration.\"\"\"\nimport argparse\nimport hashlib\nimport json\nfrom pathlib import Path\nimport sys\nimport time\n\nimport bpy\nfrom mathutils import Vector\nimport numpy as np\n\nparser = argparse.ArgumentParser()\nparser.add_argument(\"--archive\", required=True)\nparser.add_argument(\"--directory\", required=True)\nparser.add_argument(\"--repo\", required=True)\nargs = parser.parse_args(sys.argv[sys.argv.index(\"--\") + 1:])\narchive_path = Path(args.archive).resolve()\ndirectory = Path(args.directory).resolve()\ndirectory.mkdir(parents=True, exist_ok=True)\nsys.path.insert(0, str(Path(args.repo).resolve() / \"integrations/blender\"))\nimport normal_height_world as bridge\nfrom normal_height_world.archive import decode_png\nfrom qualify import object_vertices\n\nfor obj in list(bpy.data.objects):\n    bpy.data.objects.remove(obj, do_unlink=True)\nstarted = time.perf_counter()\nresult = bridge.import_world(archive_path)\nimport_seconds = time.perf_counter() - started\narchive = result.archive\nmanifest = archive.manifest\ndimensions = manifest[\"dimensions\"]\ndx, dz = dimensions[\"sampleSpacingMeters\"]\nox, oz = dimensions[\"originMeters\"]\nsouth, east = np.gradient(archive.heights, dz, dx)\nexpected_normals = np.stack((-east, south, np.ones_like(east)), axis=-1)\nexpected_normals /= np.linalg.norm(expected_normals, axis=-1, keepdims=True)\nmaximum = dict(geometryMeters=0.0, normalAngleDegrees=0.0, uv=0.0, decodedTexture=0.0,\n               sharedPositionMeters=0.0, sharedNormalComponent=0.0)\nshared = {}\nshared_count = 0\nface_count = 0\npacked_images = 0\nlower = np.full(3, np.inf)\nupper = np.full(3, -np.inf)\ngeometry_digest = hashlib.sha256()\nnormal_angles = []\nshared_angles = []\nworst_normal = None\nsource_float32_max_error = 0.0\nfor obj, tile in zip(result.objects, archive.tiles):\n    width, height = tile.samples\n    x0, z0 = tile.offset\n    world = object_vertices(obj) * result.meters_per_unit\n    offset = result.coordinate_offset_meters\n    world += np.array((offset[0], -offset[1], offset[2]))\n    xs, zs = np.meshgrid(np.arange(width), np.arange(height))\n    expected = np.column_stack(((ox + (xs + x0) * dx).ravel(),\n                                -(oz + (zs + z0) * dz).ravel(),\n                                archive.heights[z0:z0 + height, x0:x0 + width].ravel()))\n    maximum[\"geometryMeters\"] = max(maximum[\"geometryMeters\"], float(np.max(np.abs(world - expected))))\n    lower = np.minimum(lower, world.min(axis=0))\n    upper = np.maximum(upper, world.max(axis=0))\n    geometry_digest.update(world.astype(\"<f8\").tobytes())\n    loops = np.empty(len(obj.data.loops), dtype=np.int32)\n    obj.data.loops.foreach_get(\"vertex_index\", loops)\n    normals = np.empty(len(loops) * 3, dtype=np.float32)\n    obj.data.corner_normals.foreach_get(\"vector\", normals)\n    normals = normals.reshape(-1, 3)\n    target = expected_normals[z0:z0 + height, x0:x0 + width].reshape(-1, 3)\n    unit = normals.astype(np.float64) / np.linalg.norm(normals.astype(np.float64), axis=1, keepdims=True)\n    angle = np.degrees(np.arccos(np.clip(np.sum(unit * target[loops], axis=1), -1, 1)))\n    normal_angles.append(angle.astype(np.float32))\n    source_float32 = target[loops].astype(np.float32).astype(np.float64)\n    source_float32 /= np.linalg.norm(source_float32, axis=1, keepdims=True)\n    source_error = np.degrees(np.arccos(np.clip(np.sum(source_float32 * target[loops], axis=1), -1, 1)))\n    source_float32_max_error = max(source_float32_max_error, float(np.max(source_error)))\n    index = int(np.argmax(angle))\n    if float(angle[index]) > maximum[\"normalAngleDegrees\"]:\n        vertex = int(loops[index])\n        vz, vx = divmod(vertex, width)\n        worst_normal = {\"tile\": list(tile.address), \"loop\": index, \"vertex\": vertex,\n                        \"sample\": [x0 + vx, z0 + vz], \"worldMeters\": world[vertex].tolist(),\n                        \"sourceFloat64Normal\": target[vertex].tolist(),\n                        \"sourceFloat32Normal\": target[vertex].astype(np.float32).tolist(),\n                        \"decodedBlenderNormal\": normals[index].tolist(),\n                        \"decodedBlenderUnitNormal\": unit[index].tolist(),\n                        \"angleDegrees\": float(angle[index])}\n    maximum[\"normalAngleDegrees\"] = max(maximum[\"normalAngleDegrees\"], float(np.max(angle)))\n    uv = np.empty(len(loops) * 2, dtype=np.float32)\n    obj.data.uv_layers[\"NH_TileUV\"].data.foreach_get(\"uv\", uv)\n    target_uv = np.column_stack((((xs + 0.5) / width).ravel(), (1 - (zs + 0.5) / height).ravel()))\n    maximum[\"uv\"] = max(maximum[\"uv\"], float(np.max(np.abs(uv.reshape(-1, 2) - target_uv[loops]))))\n    unique, first = np.unique(loops, return_index=True)\n    vertex_normals = np.empty((width * height, 3), dtype=np.float32)\n    vertex_normals[unique] = normals[first]\n    boundary = np.flatnonzero(((xs == 0) | (xs == width - 1) | (zs == 0) | (zs == height - 1)).ravel())\n    for index in boundary:\n        z, x = divmod(int(index), width)\n        key = (x0 + x, z0 + z)\n        if key in shared:\n            shared_count += 1\n            a = vertex_normals[index].astype(np.float64)\n            b = shared[key][1].astype(np.float64)\n            a /= np.linalg.norm(a)\n            b /= np.linalg.norm(b)\n            shared_angles.append(float(np.degrees(np.arccos(np.clip(np.dot(a, b), -1, 1)))))\n            maximum[\"sharedPositionMeters\"] = max(maximum[\"sharedPositionMeters\"], float(np.max(np.abs(world[index] - shared[key][0]))))\n            maximum[\"sharedNormalComponent\"] = max(maximum[\"sharedNormalComponent\"], float(np.max(np.abs(vertex_normals[index] - shared[key][1]))))\n        else:\n            shared[key] = (world[index].copy(), vertex_normals[index].copy())\n    face_count += len(obj.data.polygons)\n    for channel in (\"basecolor\", \"orm\", \"detailNormalGL\"):\n        image = obj.data.materials[0].node_tree.nodes[f\"NH_{channel}\"].image\n        assert image.packed_file is not None\n        expected_space = \"sRGB\" if channel == \"basecolor\" else \"Non-Color\"\n        assert image.colorspace_settings.name == expected_space\n        pixels = np.empty(width * height * 4, dtype=np.float32)\n        image.pixels.foreach_get(pixels)\n        decoded = decode_png(archive.images[tile.files[channel][\"path\"]], width, height, 8, 6)\n        target_pixels = np.flip(decoded, axis=0).astype(np.float32).ravel() / 255\n        maximum[\"decodedTexture\"] = max(maximum[\"decodedTexture\"], float(np.max(np.abs(pixels - target_pixels))))\n        packed_images += 1\n\nassert len(result.objects) == 64\nassert dimensions[\"samples\"] == [1024, 1024]\nassert archive.total_vertices == 1062961\nassert shared_count == archive.total_vertices - 1024 ** 2\nassert face_count == 1023 ** 2\nassert maximum[\"geometryMeters\"] < 0.001\nassert maximum[\"uv\"] < 1e-7\nassert maximum[\"decodedTexture\"] < 2e-7\nassert maximum[\"sharedPositionMeters\"] < 0.001\n\nangles = np.concatenate(normal_angles)\nnormal_report = {\n    \"input\": \"Canonical whole-region physical-height gradient, normalized and converted to float32 before normals_split_custom_set_from_vertices.\",\n    \"decodedLoopCount\": len(angles),\n    \"angleDegrees\": {str(q): float(np.percentile(angles, q)) for q in (0, 50, 95, 99, 100)},\n    \"sharedBorderAngleDegrees\": {str(q): float(np.percentile(shared_angles, q)) for q in (0, 50, 95, 99, 100)},\n    \"sourceFloat32MaxErrorDegrees\": source_float32_max_error,\n    \"worstLoop\": worst_normal,\n    \"originalSmallFixtureAngleThresholdDegrees\": 0.06,\n    \"originalSmallFixtureAngleThresholdMet\": maximum[\"normalAngleDegrees\"] < 0.06,\n    \"originalSmallFixtureSharedComponentThreshold\": 2e-4,\n    \"originalSmallFixtureSharedComponentThresholdMet\": maximum[\"sharedNormalComponent\"] < 2e-4,\n    \"status\": \"Measured independently; initial small-fixture thresholds are retained as observations and not silently reclassified as passed.\",\n}\npreflight = {\"maximumErrors\": maximum, \"normalPrecision\": normal_report, \"importSeconds\": import_seconds}\n(directory / \"measurement-before-render.json\").write_text(json.dumps(preflight, indent=2) + \"\\n\")\nprint(\"NORMAL_HEIGHT_ALPINE_MEASUREMENTS \" + json.dumps(preflight), flush=True)\nassert np.all(np.isfinite(angles))\n\nscene = bpy.context.scene\nworld = bpy.data.worlds.new(\"Alpine neutral studio\")\nscene.world = world\nworld.use_nodes = True\nworld.node_tree.nodes[\"Background\"].inputs[\"Color\"].default_value = (0.16, 0.19, 0.24, 1)\nworld.node_tree.nodes[\"Background\"].inputs[\"Strength\"].default_value = 0.65\nlight = bpy.data.lights.new(\"Alpine sun\", \"SUN\")\nlight.energy = 2.8\nlight.angle = 0.12\nsun = bpy.data.objects.new(\"Alpine sun\", light)\nscene.collection.objects.link(sun)\nsun.rotation_euler = (0.60, -0.75, -0.4)\ncamera_data = bpy.data.cameras.new(\"Alpine overview\")\ncamera = bpy.data.objects.new(\"Alpine overview\", camera_data)\nscene.collection.objects.link(camera)\ntarget = Vector(((lower[0] + upper[0]) / 2, (lower[1] + upper[1]) / 2, (lower[2] + upper[2]) / 2))\ncamera.location = target + Vector((10500, -13000, 12800))\ncamera.rotation_euler = (target - camera.location).to_track_quat(\"-Z\", \"Y\").to_euler()\ncamera_data.type = \"ORTHO\"\ncamera_data.ortho_scale = 13200\ncamera_data.clip_start = 1\ncamera_data.clip_end = 100000\nscene.camera = camera\nscene.render.engine = \"CYCLES\"\nscene.cycles.device = \"CPU\"\nscene.cycles.samples = 48\nscene.cycles.use_denoising = False\nscene.cycles.seed = 1729\nscene.render.resolution_x = 1280\nscene.render.resolution_y = 960\nscene.render.resolution_percentage = 100\nscene.render.image_settings.file_format = \"PNG\"\nscene.render.image_settings.color_mode = \"RGB\"\nscene.view_settings.view_transform = \"AgX\"\nscene.view_settings.exposure = 0\nscene.view_settings.gamma = 1\nscene.render.filepath = str(directory / \"alpine-pbr-overview.png\")\nrender_started = time.perf_counter()\nbpy.ops.render.render(write_still=True)\nrender_seconds = time.perf_counter() - render_started\nbpy.ops.wm.save_as_mainfile(filepath=str(directory / \"alpine-delivered.blend\"))\nreport = {\n    \"schemaVersion\": 1, \"ok\": True,\n    \"archive\": str(archive_path), \"archiveSHA256\": hashlib.sha256(archive_path.read_bytes()).hexdigest(),\n    \"build\": manifest.get(\"build\"),\n    \"scriptSHA256\": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),\n    \"blenderVersion\": bpy.app.version_string, \"numpyVersion\": np.__version__,\n    \"importSeconds\": import_seconds, \"renderSeconds\": render_seconds,\n    \"samples\": dimensions[\"samples\"], \"tiles\": len(result.objects),\n    \"verticesIncludingSharedBorders\": archive.total_vertices, \"uniqueSamples\": 1024 ** 2,\n    \"quadFaces\": face_count, \"trianglesAtRender\": face_count * 2,\n    \"sharedSampleComparisons\": shared_count, \"packedImages\": packed_images,\n    \"boundsMeters\": [lower.tolist(), upper.tolist()],\n    \"maximumErrors\": maximum, \"normalPrecision\": normal_report, \"geometrySHA256\": geometry_digest.hexdigest(),\n    \"physicalVerticalScale\": 1,\n    \"render\": {\n        \"engine\": \"Cycles\", \"device\": \"CPU\", \"samples\": 48, \"seed\": 1729,\n        \"resolution\": [1280, 960], \"denoising\": False,\n        \"viewTransform\": scene.view_settings.view_transform, \"look\": scene.view_settings.look,\n        \"exposure\": scene.view_settings.exposure, \"gamma\": scene.view_settings.gamma,\n        \"cameraType\": \"ORTHO\", \"cameraLocationMeters\": list(camera.location),\n        \"cameraTargetMeters\": list(target), \"orthoScaleMeters\": camera_data.ortho_scale,\n        \"sunEnergy\": light.energy, \"sunAngleRadians\": light.angle, \"sunEulerRadians\": list(sun.rotation_euler),\n        \"worldColor\": [0.16, 0.19, 0.24], \"worldStrength\": 0.65,\n        \"renderedMaterialMaps\": [\"basecolor\", \"orm\", \"detailNormalGL\"],\n        \"geometryChanges\": \"None; all imported physical heights preserved, no displacement modifiers or vertical exaggeration.\",\n    },\n    \"files\": {\"image\": str(directory / \"alpine-pbr-overview.png\"), \"blend\": str(directory / \"alpine-delivered.blend\")},\n}\n(directory / \"qualification.json\").write_text(json.dumps(report, indent=2) + \"\\n\")\nprint(\"NORMAL_HEIGHT_ALPINE_DELIVERY \" + json.dumps(report), flush=True)\n"
+    }
+  },
+  "initialAttempt": {
+    "exitCode": 1,
+    "wallSeconds": 24.19437832000017,
+    "reason": "The temporary overview script initially reused the analytical fixture maximum custom-normal error threshold of 0.06 degrees, which this larger terrain exceeded. That failed threshold was preserved and is not presented as passed. A second run measured the full source-versus-decoded distribution and rendered the unchanged imported asset for review.",
+    "log": "test-results/genesis-final-alpine-blender-attempt1.log",
+    "stderr": "test-results/genesis-final-alpine-blender-attempt1.stderr"
+  },
+  "evidenceFiles": [
+    "test-results/genesis-final-alpine-1k-build.json",
+    "test-results/genesis-final-alpine-1k-verify.json",
+    "test-results/genesis-final-alpine-1k-time.json",
+    "test-results/genesis-final-alpine-1k-verify-time.json",
+    "test-results/genesis-final-alpine-blender/qualification.json",
+    "test-results/genesis-final-alpine-blender-time.json",
+    "test-results/genesis-final-alpine-blender.log"
+  ],
+  "interpretation": [
+    "The delivered 1024-square lattice reconstructs the 256-square Genesis reference. Increased output sampling is not a finer erosion solve.",
+    "The package includes all six Genesis fields and ten PBR outputs. The Blender bridge packs and connects basecolor, ORM, and detailNormalGL; the other exported maps remain available in the archive.",
+    "Measured process RSS includes runtime and source loading. The lower live-buffer preflight estimate is not a process memory cap.",
+    "The build captured a clean a02881f source. Documentation images were restored before the separate verifier invocation, whose own git dirty flag is true; the archive being verified embeds dirty=false.",
+    "The image is a real CPU Cycles render of the delivered geometry and packed PBR maps at 1x physical vertical scale; it is not an AI image, sculpted proxy, or AAA quality certification.",
+    "The reusable renderer was generalized from the executed temporary script after this run; its Python syntax was checked. The record retains the exact executed script SHA256 separately.",
+    "The small-format importer, corruption/rollback, and offline reopen qualification ran in exact-head CI; root maintains that independent result. No redundant local fixture rerun was performed.",
+    "The exact executed temporary renderer is embedded verbatim with its matching SHA256. The generalized renderer now resolves its own repository location, derives mesh counts and camera framing from the manifest, handles a one-tile archive with no shared-border percentiles, and documents its three required PBR maps. These adaptations were syntax checked without another terrain run."
+  ]
+}

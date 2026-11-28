@@ -1,5 +1,23 @@
 # Normal Height
 
+## World Genesis: geological formation
+
+The World workspace now includes an opt-in, versioned geological stage: multiscale
+uplift, folded and faulted rock layers, connected drainage, implicit stream-power
+incision and hillslope redistribution. Inspect the physical geology layers and
+export hardness, categorical lithology, uplift, incision, drainage area and channel
+weights alongside terrain/PBR assets. Existing projects retain their previous
+behavior until Genesis is enabled.
+
+Start with [the World Genesis guide](docs/WORLD_GENESIS.md),
+[Alpine uplift](examples/genesis-alpine.nhterrain.json) or
+[Layered badlands](examples/genesis-badlands.nhterrain.json).
+See the [qualification evidence](docs/WORLD_GENESIS_QUALIFICATION.md) for measured
+formation performance, actual field comparisons, browser acceptance and Blender delivery.
+The guide states the actual simulation spacing, field units and numerical limits;
+this milestone does not claim native 8K erosion or completion of the wider AAA
+asset-production roadmap.
+
 ## Production workflow expansion
 
 The production implementation adds **Projects & revisions**, shared graph validation,

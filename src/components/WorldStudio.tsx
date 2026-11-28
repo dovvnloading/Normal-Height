@@ -50,7 +50,12 @@ import type {
 } from '../model/worldViewSettings';
 import { WorldViewport } from './world/WorldViewport';
 import type { WorldLayer, WorldProbe, WorldRegion, WorldSnapshot } from './world/worldViewMath';
-import { WORLD_LAYERS, canCompareWorldSnapshots, worldGridBounds } from './world/worldViewMath';
+import {
+  WORLD_LAYERS,
+  canCompareWorldSnapshots,
+  isGenesisLayer,
+  worldGridBounds,
+} from './world/worldViewMath';
 import { snapshotContainsRegion } from './world/worldAnalysis';
 import { WorldAnalysisPanel, WorldComparisonControls } from './world/WorldAnalysisPanel';
 import { WorldSetupPanel } from './world/WorldSetupPanel';
@@ -251,6 +256,11 @@ export function WorldStudio({
     setProbe(null);
   }, [domainKey]);
   useEffect(() => {
+    // Keep a probe when the pointer leaves the map to inspect the sidebar, but
+    // never show measurements from an older field as part of a completed build.
+    setProbe(null);
+  }, [engine.result]);
+  useEffect(() => {
     if (snapshot && isWorldOverview(snapshot.world, snapshot.grid))
       setOverview({ ...snapshot, revision: engine.completedSignature });
   }, [snapshot, engine.completedSignature]);
@@ -394,6 +404,7 @@ export function WorldStudio({
                 backend: snapshot.result.backend,
                 stages: snapshot.result.stages,
                 transportBudget: snapshot.result.transportBudget,
+                genesis: snapshot.result.genesis?.report,
                 warnings: engine.warnings,
                 compute: engine.compute,
                 samplingDurationMs: snapshot.result.duration,
@@ -660,8 +671,13 @@ export function WorldStudio({
                     key={layer.id}
                     aria-label={layer.label}
                     aria-pressed={view.layer === layer.id}
+                    disabled={isGenesisLayer(layer.id) && !snapshot?.result.genesis}
                     onClick={() => setLayer(layer.id)}
-                    title={layer.description}
+                    title={
+                      isGenesisLayer(layer.id) && !snapshot?.result.genesis
+                        ? 'Enable World Genesis in Simulate and build to inspect this layer.'
+                        : layer.description
+                    }
                   >
                     <i className={`we-layer-swatch layer-${layer.id}`} />
                     <span>
@@ -854,6 +870,7 @@ export function WorldStudio({
               onPin={pinCurrent}
               canPin={canPin}
               busy={engine.busy || clearing}
+              stale={engine.stale}
               error={engine.validationError}
             />
             <WorldComparisonControls

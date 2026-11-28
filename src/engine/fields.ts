@@ -26,8 +26,27 @@ export interface FieldGrid {
 }
 
 export interface FieldDescriptor {
-  semantic: 'elevation' | 'flow-weight' | 'erosion-diagnostic' | 'coverage' | 'normal' | 'color';
-  units: 'authored-height' | 'meters' | 'unitless' | 'linear-rgb' | 'srgb';
+  semantic:
+    | 'elevation'
+    | 'flow-weight'
+    | 'erosion-diagnostic'
+    | 'coverage'
+    | 'normal'
+    | 'color'
+    | 'hardness'
+    | 'lithology'
+    | 'uplift'
+    | 'incision'
+    | 'contributing-area'
+    | 'channel';
+  units:
+    | 'authored-height'
+    | 'meters'
+    | 'unitless'
+    | 'linear-rgb'
+    | 'srgb'
+    | 'square-meters'
+    | 'category-id';
   components: 1 | 3 | 4;
   algorithm: string;
 }

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ArrowUpRight, Download, Pin, PinOff, ScanLine } from 'lucide-react';
+import { GENESIS_LITHOLOGIES } from '../../model/genesis';
 import type { WorldProbe, WorldRegion, WorldSnapshot } from './worldViewMath';
 import { canCompareWorldSnapshots, worldGridBounds } from './worldViewMath';
 import { analyzeWorld, worldElevationProfile } from './worldAnalysis';
@@ -172,6 +173,51 @@ export function WorldAnalysisPanel({
           </div>
         )}
       </WorldSection>
+      {snapshot?.result.genesis && (
+        <WorldSection title="Geology & catchment probe">
+          {probe?.genesis ? (
+            <div className="we-metrics">
+              <WorldMetric
+                label="Rock class"
+                value={
+                  GENESIS_LITHOLOGIES.find((rock) => rock.id === probe.genesis?.lithology)?.label ??
+                  'Unknown'
+                }
+              />
+              <WorldMetric
+                label="Hardness"
+                value={worldNumber(probe.genesis.hardness, 3)}
+                detail="0 soft · 1 hard"
+              />
+              <WorldMetric label="Uplift" value={`${worldNumber(probe.genesis.uplift, 2)} m`} />
+              <WorldMetric label="Incision" value={`${worldNumber(probe.genesis.incision, 2)} m`} />
+              <WorldMetric
+                label="Contributing area"
+                value={
+                  probe.genesis.drainageArea >= 1e6
+                    ? `${worldNumber(probe.genesis.drainageArea / 1e6, 3)} km²`
+                    : `${worldNumber(probe.genesis.drainageArea, 0)} m²`
+                }
+              />
+              <WorldMetric
+                label="Channel strength"
+                value={worldNumber(probe.genesis.channel, 3)}
+                detail="0–1 drainage signal"
+              />
+            </div>
+          ) : (
+            <p className="we-hint">
+              Move across the map to inspect exposed rock, accumulated uplift and the contributing
+              catchment.
+            </p>
+          )}
+          <p className="we-hint">
+            Genesis diagnostics precede optional World transport. River and incision fields retain
+            the formation grid spacing: {worldNumber(snapshot.result.genesis.report.spacingX, 2)} ×{' '}
+            {worldNumber(snapshot.result.genesis.report.spacingZ, 2)} m.
+          </p>
+        </WorldSection>
+      )}
       <WorldSection title={region ? 'Selected region' : 'Visible field'}>
         {analysis && bounds ? (
           <>
@@ -312,14 +358,14 @@ export function WorldAnalysisPanel({
                   className="we-stage"
                   key={stage.nodeId}
                   onClick={() => onFocusNode(stage.nodeId)}
-                  disabled={stage.nodeId === 'world-transport'}
+                  disabled={stage.nodeId === 'world-transport' || stage.nodeId === 'world-genesis'}
                 >
                   <span>
                     <strong>{stage.label}</strong>
                     <small>
                       {stage.mode === 'native'
                         ? 'Native world coordinates'
-                        : `${stage.simulationResolution ?? stage.samplesX}² global reference`}
+                        : `${stage.samplesX} × ${stage.samplesZ} global reference`}
                     </small>
                     <small>
                       {worldNumber(stage.spacingX, 2)} × {worldNumber(stage.spacingZ, 2)} m ·{' '}

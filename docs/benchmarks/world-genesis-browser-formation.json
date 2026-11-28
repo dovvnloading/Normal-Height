@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "application": "Normal Height World Engine",
+  "build": {
+    "revision": "a02881f4595ef66182b62087d41a1b4e19f4be20",
+    "dirty": false,
+    "source": "git"
+  },
+  "projectName": "Genesis formation acceptance",
+  "world": {
+    "version": 1,
+    "domain": {
+      "originX": -2000,
+      "originZ": -2000,
+      "width": 4000,
+      "depth": 2000,
+      "cellsX": 1024,
+      "cellsZ": 1024,
+      "heightScale": 2400,
+      "datum": 0,
+      "boundary": "open"
+    },
+    "tileCells": 256,
+    "globalResolution": 128,
+    "backend": "cpu-reference",
+    "genesis": {
+      "version": 1,
+      "enabled": true,
+      "durationYears": 80000,
+      "upliftMeters": 90,
+      "upliftAngleDegrees": 32,
+      "upliftWidthMeters": 3000,
+      "erosionRate": 3.2e-05,
+      "rainfall": 1,
+      "rockHardness": 0.32,
+      "hardnessContrast": 0.85,
+      "strataThicknessMeters": 24,
+      "strataDipDegrees": 4,
+      "strataStrikeDegrees": 32,
+      "foldAmplitudeMeters": 12,
+      "foldWavelengthMeters": 2200,
+      "faultThrowMeters": 0,
+      "faultAngleDegrees": 64,
+      "hillslopeRate": 0.012,
+      "iterations": 3
+    }
+  },
+  "grid": {
+    "startX": 0,
+    "startZ": 0,
+    "cellsX": 1024,
+    "cellsZ": 1024,
+    "samplesX": 385,
+    "samplesZ": 193
+  },
+  "backend": "cpu-reference",
+  "stages": [
+    {
+      "nodeId": "studio-source",
+      "label": "Wind dunes",
+      "kind": "noise",
+      "scope": "pointwise",
+      "mode": "native",
+      "backend": "cpu-reference",
+      "algorithmVersion": "world-1/noise/v3",
+      "samplesX": 385,
+      "samplesZ": 193,
+      "spacingX": 10.416666666666666,
+      "spacingZ": 10.416666666666666,
+      "simulationResolution": null,
+      "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+    },
+    {
+      "nodeId": "studio-output",
+      "label": "Terrain output",
+      "kind": "output",
+      "scope": "pointwise",
+      "mode": "native",
+      "backend": "cpu-reference",
+      "algorithmVersion": "world-1/output/reference",
+      "samplesX": 385,
+      "samplesZ": 193,
+      "spacingX": 10.416666666666666,
+      "spacingZ": 10.416666666666666,
+      "simulationResolution": null,
+      "reason": "Evaluated at canonical world coordinates on the requested sample grid."
+    },
+    {
+      "nodeId": "world-genesis",
+      "label": "World Genesis",
+      "kind": "world-genesis",
+      "scope": "iterative",
+      "mode": "reconstructed",
+      "backend": "cpu-reference",
+      "algorithmVersion": "world-genesis-1",
+      "samplesX": 128,
+      "samplesZ": 65,
+      "spacingX": 31.496062992125985,
+      "spacingZ": 31.25,
+      "simulationResolution": 128,
+      "reason": "One whole-domain coarse-to-fine geological solve: uplift, exposed rock competence, implicit stream-power incision and hillslope diffusion. Its displacement is reconstructed over native input; geology is sampled at physical coordinates."
+    }
+  ],
+  "genesis": {
+    "algorithmVersion": "world-genesis-1",
+    "mode": "multiscale-stream-power",
+    "width": 128,
+    "height": 65,
+    "spacingX": 31.496062992125985,
+    "spacingZ": 31.25,
+    "levels": [
+      {
+        "width": 65,
+        "height": 33,
+        "spacingX": 62.5,
+        "spacingZ": 62.5,
+        "iterations": 3,
+        "durationYears": 48000
+      },
+      {
+        "width": 128,
+        "height": 65,
+        "spacingX": 31.496062992125985,
+        "spacingZ": 31.25,
+        "iterations": 3,
+        "durationYears": 32000
+      }
+    ],
+    "durationYears": 80000,
+    "upliftVolumeM3": 494999280.915602,
+    "incisedVolumeM3": 793944764.1686734,
+    "hillslopeRedistributedVolumeM3": 175359011.35155547,
+    "hillslopeResidualM3": -2.0270903178243316e-08,
+    "reconstructionVolumeM3": 15526.217936307192,
+    "finalVolumeChangeM3": -298929957.03513384,
+    "outletCount": 382,
+    "maxDrainageAreaM2": 4211575.152458827,
+    "drainageAreaResidualM2": 2.7008354663848877e-08,
+    "durationMs": 202.60000000003492,
+    "limitations": [
+      "Artist-controlled stream-power evolution with stylized rock competence; parameters are not geologically calibrated.",
+      "Whole-domain reference grids are refined together. Export pixels below the final reference spacing do not receive an independent erosion solve.",
+      "Incision removes rock without transporting or depositing its sediment. Incised volume is not outlet sediment export.",
+      "Coarse-to-fine displacement reconstruction is not mass conservative; its integrated volume change is reported separately.",
+      "Priority-flood spill elevations connect drainage without filling terrain. Implicit incision follows a primary D8 receiver; weighted contributing area splits across downhill neighbors and may cross primary basin divides.",
+      "Open edges have fixed base levels. Hillslope diffusion uses monotone pairwise splitting; it is not an exact large-time-step PDE solution.",
+      "Diagnostics describe the Genesis stage before any optional World water and sediment transport."
+    ]
+  },
+  "warnings": [
+    "World Genesis is an artistic landscape evolution model. Its removed-rock and uplift volumes describe the reference grids, not sediment export or a calibrated geological age. Drainage and incision diagnostics precede optional World transport.",
+    "Global stages retain their bounded reference/simulation spacing. More output samples do not imply finer erosion."
+  ],
+  "compute": {
+    "requested": "cpu-reference",
+    "available": false,
+    "qualified": false,
+    "backend": "cpu-reference",
+    "reason": "CPU reference selected."
+  },
+  "samplingDurationMs": 364.1000000000349,
+  "totalPreviewDurationMs": 575,
+  "cacheSource": null,
+  "estimatedPeakBytes": 8084330,
+  "stale": false
+}

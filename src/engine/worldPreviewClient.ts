@@ -5,6 +5,7 @@ import type {
   WorldWorkerResponse,
 } from '../hooks/worldProtocol';
 import { worldEvaluationSignature, worldPreviewRequestKey } from './worldPreviewPlan';
+import { regionArrays } from './worldStore/codec';
 
 export interface WorldPreviewWorkerPort {
   onmessage: ((event: MessageEvent<WorldWorkerResponse>) => void) | null;
@@ -167,10 +168,10 @@ export class WorldPreviewClient {
   }
 
   private remember(key: string, response: WorldPreviewResult, persistentRequested: boolean): void {
-    const { heights, flow, wear, deposition } = response.result;
-    const bytes = [
-      ...new Set([heights.buffer, flow.buffer, wear.buffer, deposition.buffer]),
-    ].reduce((total, buffer) => total + buffer.byteLength, 0);
+    const bytes = [...new Set(regionArrays(response.result).map((array) => array.buffer))].reduce(
+      (total, buffer) => total + buffer.byteLength,
+      0,
+    );
     if (!Number.isFinite(bytes) || bytes > this.memoryBudgetBytes || this.maxEntries < 1) return;
     const previous = this.regions.get(key);
     if (previous) this.cachedBytes -= previous.bytes;

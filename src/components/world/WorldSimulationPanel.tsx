@@ -4,6 +4,7 @@ import { DEFAULT_WORLD_TRANSPORT } from '../../model/world';
 import type { WorldRegionResult } from '../../engine/world';
 import type { ComputeCapability } from '../../engine/gpu/pointwise';
 import type { WorldRegionStoreStats } from '../../engine/worldStore';
+import { WorldGenesisPanel } from './WorldGenesisPanel';
 import {
   WorldDisclosure,
   WorldMetric,
@@ -80,6 +81,7 @@ export function WorldSimulationPanel({
   onPin,
   canPin,
   busy,
+  stale = false,
   error,
 }: {
   world: WorldDefinition;
@@ -95,6 +97,7 @@ export function WorldSimulationPanel({
   onPin(): void;
   canPin: boolean;
   busy: boolean;
+  stale?: boolean;
   error?: string | null;
 }) {
   const transport = { ...DEFAULT_WORLD_TRANSPORT, ...world.transport };
@@ -106,6 +109,14 @@ export function WorldSimulationPanel({
       <WorldPanelHeading eyebrow="SIMULATE" title="Shape the landscape.">
         Run one connected world, then inspect the change at any scale.
       </WorldPanelHeading>
+      <WorldGenesisPanel
+        world={world}
+        onChange={onChange}
+        result={result}
+        stale={stale}
+        onPin={onPin}
+        canPin={canPin}
+      />
       <WorldSection title="Build quality">
         <div className="we-quality-presets" role="group" aria-label="Simulation quality">
           {[
